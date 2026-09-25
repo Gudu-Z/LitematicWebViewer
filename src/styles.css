@@ -1,0 +1,240 @@
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: -apple-system, "Segoe UI", "Microsoft YaHei", "PingFang SC", sans-serif;
+}
+
+#app {
+  position: relative;
+}
+
+#viewer {
+  position: absolute;
+  inset: 0;
+}
+
+#viewer canvas {
+  display: block;
+}
+
+#sidebar {
+  position: absolute;
+  top: 16px;
+  left: 16px;
+  width: 280px;
+  max-height: calc(100% - 32px);
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.panel {
+  background: rgba(20, 24, 30, 0.82);
+  color: #e8eaed;
+  border-radius: 10px;
+  padding: 14px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(6px);
+  pointer-events: auto;
+}
+
+.panel h1 {
+  font-size: 16px;
+  margin-bottom: 10px;
+}
+
+.panel h2 {
+  font-size: 13px;
+  color: #aab;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+button {
+  padding: 9px 12px;
+  border: 1px solid #3a4150;
+  border-radius: 7px;
+  background: #2a303c;
+  color: #e8eaed;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+
+button:hover {
+  background: #343b49;
+}
+
+button.primary {
+  background: #3b6fd4;
+  border-color: #3b6fd4;
+}
+
+button.primary:hover {
+  background: #4b7ee0;
+}
+
+.metadata {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+
+.metadata .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.metadata dt {
+  color: #9aa4b2;
+  flex-shrink: 0;
+}
+
+.metadata dd {
+  text-align: right;
+  word-break: break-all;
+}
+
+.metadata .row.empty {
+  color: #8a94a4;
+}
+
+#progressBar {
+  height: 6px;
+  background: #2a303c;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 8px;
+}
+
+#progressFill {
+  height: 100%;
+  width: 0%;
+  background: #3b6fd4;
+  transition: width 0.15s ease;
+}
+
+#status {
+  font-size: 12px;
+  color: #b9c1cf;
+  line-height: 1.5;
+  word-break: break-all;
+}
+
+.hint {
+  pointer-events: auto;
+  font-size: 11px;
+  color: #9aa4b2;
+  background: rgba(20, 24, 30, 0.55);
+  border-radius: 8px;
+  padding: 8px 12px;
+}
+
+.packlist {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.packlist li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  background: #232834;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.packlist .pack-name {
+  flex: 1;
+  word-break: break-all;
+  line-height: 1.4;
+}
+
+.packlist button {
+  padding: 4px 8px;
+  font-size: 11px;
+  border-radius: 5px;
+  flex-shrink: 0;
+}
+
+.packlist li.active {
+  outline: 2px solid #3b6fd4;
+  background: #2a3444;
+}
+
+.packlist .pack-empty {
+  color: #8a94a4;
+  font-size: 12px;
+  padding: 4px 2px;
+}
+
+#dropOverlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(30, 60, 120, 0.45);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+#dropOverlay.visible {
+  display: flex;
+}
+
+#dropOverlay div {
+  background: rgba(15, 20, 30, 0.9);
+  color: #fff;
+  padding: 24px 40px;
+  border-radius: 12px;
+  font-size: 18px;
+  border: 2px dashed #6a8fce;
+}
+
+#errorBanner {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  max-width: 70%;
+  background: #b33;
+  color: #fff;
+  padding: 12px 18px;
+  border-radius: 8px;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 20;
+  word-break: break-all;
+}
+
+#errorBanner.hidden {
+  display: none;
+}

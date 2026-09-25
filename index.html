@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>LitematicWebViewer</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewer"></div>
+
+      <aside id="sidebar">
+        <div class="panel">
+          <h1>LitematicWebViewer</h1>
+          <div class="buttons">
+            <button id="openBtn" class="primary">打开 .litematica 文件</button>
+            <button id="packBtn">加载资源包 (.zip)</button>
+            <button id="clearBtn">清除</button>
+          </div>
+          <input type="file" id="fileInput" accept=".litematic,.litematica,.nbt" hidden />
+          <input type="file" id="packInput" accept=".zip" hidden />
+        </div>
+
+        <div class="panel">
+          <h2>资源包</h2>
+          <ul id="packList" class="packlist"></ul>
+          <div class="buttons" style="margin-top: 8px">
+            <button id="resetPackBtn">恢复默认材质</button>
+          </div>
+        </div>
+
+        <div class="panel">
+          <h2>信息</h2>
+          <dl id="metadata" class="metadata">
+            <div class="row empty">尚未加载文件</div>
+          </dl>
+        </div>
+
+        <div class="panel">
+          <div id="progressBar"><div id="progressFill"></div></div>
+          <div id="status">拖入 .litematica 文件开始预览</div>
+        </div>
+
+        <div class="hint">
+          <p>左键拖拽旋转 · 滚轮缩放 · 右键平移</p>
+        </div>
+      </aside>
+
+      <div id="dropOverlay"><div>松开以打开文件</div></div>
+
+      <div id="errorBanner" class="hidden"></div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
