@@ -36,6 +36,8 @@ npm run dev
 2. 稍等片刻，建筑就会以 3D 形式显示出来。
 3. 左侧 **「资源包」** 列表会显示 `resourcepacks/` 目录里的资源包，点击「加载」即可换贴图；点「恢复默认材质」卸载。
 
+> 项目默认加载 [XK redstone display](https://modrinth.com/resourcepack/xk-redstone-display) 资源包，让红石粉显示 0–15 强度数字。
+
 **操作方式**：
 - 左键拖拽旋转 · 滚轮缩放 · 右键平移
 - **W/A/S/D** 移动（无惯性）· **空格** 上升 · **Shift** 下降
@@ -68,3 +70,21 @@ scripts/
   gen-test.mjs      生成测试样例 + 解码回环验证
 public/assets/minecraft/  默认官方资源（贴图/模型/blockstates）
 ```
+
+## 七、参考与致谢
+
+本项目参考了以下项目与资料（在此致谢）：
+
+- [Litematica 模组](https://github.com/maruohon/litematica) —— `.litematica` 文件格式的来源（Minecraft 建筑蓝图模组）
+- [prismarine-viewer](https://github.com/PrismarineJS/prismarine-viewer) —— 方块模型烘焙的主要参考（面角点表 FACE_CORNERS、UV 旋转、变体旋转等公式）
+- [litematic-viewer](https://github.com/endingcredits/litematic-viewer) —— 同类 `.litematica` 预览器项目
+
+**默认资源包**：[XK redstone display](https://modrinth.com/resourcepack/xk-redstone-display) —— 让红石粉显示 0–15 强度数字。
+
+**依赖库**：
+
+- [Three.js](https://threejs.org/) —— 3D 渲染
+- [JSZip](https://stuk.github.io/jszip/) —— 资源包（.zip）解压
+- [Vite](https://vite.dev/) —— 构建工具
+
+**游戏资源**：默认贴图/模型取自 Minecraft 官方 `client.jar`，由 `npm run setup` 下载（默认 1.20.4）。
