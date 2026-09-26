@@ -5,6 +5,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildFaceGroups } from './geometry.js'
+import { buildEntityMesh } from './entities.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
 
@@ -15,6 +16,15 @@ function redstoneTint(power) {
   const g = Math.min(1, Math.max(0, f * f * 0.7 - 0.5))
   const b = Math.min(1, Math.max(0, f * f * 0.6 - 0.7))
   return [r, g, b]
+}
+
+// 一条坐标轴线：从 origin 沿 (dx,dy,dz) 延伸
+function makeAxisLine(origin, dx, dy, dz, color) {
+  const geo = new THREE.BufferGeometry().setFromPoints([
+    origin,
+    new THREE.Vector3(origin.x + dx, origin.y + dy, origin.z + dz),
+  ])
+  return new THREE.Line(geo, new THREE.LineBasicMaterial({ color }))
 }
 
 export class Renderer {
@@ -45,6 +55,9 @@ export class Renderer {
 
     this.signsGroup = new THREE.Group() // 告示牌（方块实体）
     this.scene.add(this.signsGroup)
+
+    this.entitiesGroup = new THREE.Group() // 实体（矿车、物品展示框等）
+    this.scene.add(this.entitiesGroup)
 
     this.overlay = new THREE.Group() // 坐标轴 + 尺寸标注
     this.scene.add(this.overlay)
@@ -132,6 +145,7 @@ export class Renderer {
       mats.forEach((m) => m?.dispose())
     }
     this.clearSigns()
+    this.clearEntities()
   }
 
   clearSigns() {
@@ -144,6 +158,35 @@ export class Renderer {
         m.dispose()
       })
     }
+  }
+
+  clearEntities() {
+    while (this.entitiesGroup.children.length) {
+      const child = this.entitiesGroup.children.pop()
+      child.traverse((o) => {
+        if (o.geometry) o.geometry.dispose()
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        mats.forEach((m) => {
+          if (m) {
+            m.map?.dispose()
+            m.dispose()
+          }
+        })
+      })
+    }
+  }
+
+  // 渲染实体（矿车、物品展示框等）
+  async renderEntities(entities, assets) {
+    this.clearEntities()
+    if (!entities || !entities.length) return
+    const meshes = await Promise.all(entities.map((e) => buildEntityMesh(e, assets).catch(() => null)))
+    for (const m of meshes) if (m) this.entitiesGroup.add(m)
+  }
+
+  // 动态设置背景色
+  setBackgroundColor(color) {
+    this.scene.background = new THREE.Color(color)
   }
 
   // 渲染告示牌（方块实体）：木柱 + 面板 + 面板正面文字
@@ -197,7 +240,7 @@ export class Renderer {
     ctx.lineWidth = 4
     ctx.strokeRect(2, 2, 508, 124) // 边框
     ctx.fillStyle = '#ffffff'
-    ctx.font = 'bold 24px "Microsoft YaHei", sans-serif'
+    ctx.font = '24px "PixelFont", "Microsoft YaHei", sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     for (let i = 0; i < 4; i++) {
@@ -321,7 +364,7 @@ export class Renderer {
     this.controls.update()
   }
 
-  // 坐标轴 + 长宽高标注
+  // 坐标轴 + 长宽高标注：三条轴长度分别等于投影长/宽/高，标签贴在轴端点旁
   _updateOverlay(bounds) {
     while (this.overlay.children.length) {
       const c = this.overlay.children.pop()
@@ -334,18 +377,17 @@ export class Renderer {
     }
 
     const { minX, minY, minZ, width, height, depth } = bounds
-    const maxDim = Math.max(width, height, depth, 1)
     const o = new THREE.Vector3(minX, minY, minZ)
 
-    const axes = new THREE.AxesHelper(maxDim + 1)
-    axes.position.copy(o)
-    this.overlay.add(axes)
+    this.overlay.add(makeAxisLine(o, width, 0, 0, 0xff5555))
+    this.overlay.add(makeAxisLine(o, 0, height, 0, 0x55ff55))
+    this.overlay.add(makeAxisLine(o, 0, 0, depth, 0x5599ff))
 
-    const labelScale = maxDim * 0.15
-    const off = maxDim * 0.1 + 0.5
-    this.overlay.add(this._textSprite(`X ${width}`, 0xff5555, o.x + width / 2, o.y - off, o.z - off, labelScale))
-    this.overlay.add(this._textSprite(`Y ${height}`, 0x55ff55, o.x - off, o.y + height / 2, o.z - off, labelScale))
-    this.overlay.add(this._textSprite(`Z ${depth}`, 0x5599ff, o.x - off, o.y - off, o.z + depth / 2, labelScale))
+    const scale = Math.max(width, height, depth, 1) * 0.15
+    const pad = scale * 0.5
+    this.overlay.add(this._textSprite(`X ${width}`, 0xff5555, o.x + width + pad, o.y, o.z, scale))
+    this.overlay.add(this._textSprite(`Y ${height}`, 0x55ff55, o.x, o.y + height + pad, o.z, scale))
+    this.overlay.add(this._textSprite(`Z ${depth}`, 0x5599ff, o.x, o.y, o.z + depth + pad, scale))
   }
 
   _textSprite(text, color, x, y, z, scale) {
@@ -353,14 +395,14 @@ export class Renderer {
     canvas.width = 256
     canvas.height = 64
     const ctx = canvas.getContext('2d')
-    ctx.font = 'bold 44px sans-serif'
+    ctx.font = '40px "PixelFont", "Microsoft YaHei", sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     ctx.fillStyle = '#' + color.toString(16).padStart(6, '0')
     ctx.fillText(text, 128, 32)
     const tex = new THREE.CanvasTexture(canvas)
     tex.colorSpace = THREE.SRGBColorSpace
-    const mat = new THREE.SpriteMaterial({ map: tex, depthTest: false })
+    const mat = new THREE.SpriteMaterial({ map: tex, depthTest: true }) // 取消悬浮
     const sprite = new THREE.Sprite(mat)
     sprite.position.set(x, y, z)
     const aspect = 4 // 宽 4 高 1

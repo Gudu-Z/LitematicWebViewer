@@ -79,6 +79,7 @@ export function parseLitematicaRaw(rawBytes) {
 
   const blocks = new Map()
   const tileEntities = [] // 方块实体（如告示牌）
+  const entities = [] // 实体（如矿车、物品展示框）
   let minX = Infinity, minY = Infinity, minZ = Infinity
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
 
@@ -104,6 +105,20 @@ export function parseLitematicaRaw(rawBytes) {
     if (Array.isArray(region.TileEntities)) {
       for (const te of region.TileEntities) {
         tileEntities.push({ id: te.id, x: te.x, y: te.y, z: te.z, nbt: te })
+      }
+    }
+
+    // 实体：Pos 是 double 列表、Rotation 是 [yaw, pitch]，与方块实体不同
+    if (Array.isArray(region.Entities)) {
+      for (const e of region.Entities) {
+        const pos = Array.isArray(e.Pos) ? e.Pos : [0, 0, 0]
+        const rot = Array.isArray(e.Rotation) ? e.Rotation : [0, 0]
+        entities.push({
+          id: e.id,
+          pos: [Number(pos[0]) || 0, Number(pos[1]) || 0, Number(pos[2]) || 0],
+          rotation: [Number(rot[0]) || 0, Number(rot[1]) || 0],
+          nbt: e,
+        })
       }
     }
 
@@ -138,7 +153,7 @@ export function parseLitematicaRaw(rawBytes) {
     depth: maxZ - minZ + 1,
   }
 
-  return { metadata, palette, blocks, bounds, tileEntities }
+  return { metadata, palette, blocks, bounds, tileEntities, entities }
 }
 
 export async function parseLitematica(buffer) {

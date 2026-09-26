@@ -7,7 +7,8 @@ export class UI {
     this.progressFill = root.querySelector('#progressFill')
     this.dropOverlay = root.querySelector('#dropOverlay')
     this.errorBanner = root.querySelector('#errorBanner')
-    this.packListEl = root.querySelector('#packList')
+    this.loadedPackListEl = root.querySelector('#loadedPackList')
+    this.availablePackListEl = root.querySelector('#availablePackList')
   }
 
   showError(msg) {
@@ -51,36 +52,68 @@ export class UI {
     this.dropOverlay.classList.toggle('visible', on)
   }
 
-  // packs: [{name, file}]；onSelect(pack) 在点击「加载」时触发
-  renderPackList(packs, onSelect) {
-    if (!this.packListEl) return
-    if (!packs || !packs.length) {
-      this.packListEl.innerHTML = '<li class="pack-empty">没有可用的资源包（把 .zip 放进 resourcepacks/ 目录后运行 npm run packs）</li>'
+  // 渲染资源包两栏：loaded=已加载（按优先级顺序，名字数组），available=可加载 [{name, file}]
+  // callbacks: { onLoad(pack), onUnload(name), onMove(name, delta) }
+  renderPackPanels(loaded, available, callbacks) {
+    this._renderLoadedPacks(loaded, callbacks)
+    this._renderAvailablePacks(loaded, available, callbacks)
+  }
+
+  _renderLoadedPacks(loaded, callbacks) {
+    const el = this.loadedPackListEl
+    if (!el) return
+    if (!loaded || !loaded.length) {
+      el.innerHTML = '<li class="pack-empty">未加载任何资源包</li>'
       return
     }
-    this.packListEl.innerHTML = packs
+    el.innerHTML = loaded
       .map(
-        (p) => `
-        <li data-name="${escapeHtml(p.name)}">
-          <span class="pack-name">${escapeHtml(p.name)}</span>
-          <button data-action="load">加载</button>
+        (name, i) => `
+        <li data-name="${escapeHtml(name)}">
+          <span class="pack-name">${escapeHtml(name)}</span>
+          <span class="pack-actions">
+            <button data-action="up" title="提高优先级" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button data-action="down" title="降低优先级" ${i === loaded.length - 1 ? 'disabled' : ''}>↓</button>
+            <button data-action="unload" class="unload-btn" title="卸载">卸载</button>
+          </span>
         </li>`
       )
       .join('')
-    this.packListEl.querySelectorAll('button[data-action="load"]').forEach((btn) => {
+    el.querySelectorAll('button').forEach((btn) => {
       btn.addEventListener('click', () => {
-        const li = btn.closest('li')
-        const name = li.getAttribute('data-name')
-        const pack = packs.find((p) => p.name === name)
-        if (pack) onSelect(pack)
+        const name = btn.closest('li').getAttribute('data-name')
+        const action = btn.getAttribute('data-action')
+        if (action === 'up') callbacks.onMove(name, -1)
+        else if (action === 'down') callbacks.onMove(name, 1)
+        else if (action === 'unload') callbacks.onUnload(name)
       })
     })
   }
 
-  setActivePack(name) {
-    if (!this.packListEl) return
-    this.packListEl.querySelectorAll('li').forEach((li) => {
-      li.classList.toggle('active', name != null && li.getAttribute('data-name') === name)
+  _renderAvailablePacks(loaded, available, callbacks) {
+    const el = this.availablePackListEl
+    if (!el) return
+    const loadedSet = new Set(loaded || [])
+    const avail = (available || []).filter((p) => !loadedSet.has(p.name))
+    if (!avail.length) {
+      el.innerHTML = '<li class="pack-empty">没有可加载的资源包</li>'
+      return
+    }
+    el.innerHTML = avail
+      .map(
+        (p) => `
+        <li data-name="${escapeHtml(p.name)}">
+          <span class="pack-name">${escapeHtml(p.name)}</span>
+          <button data-action="load" class="unload-btn">加载</button>
+        </li>`
+      )
+      .join('')
+    el.querySelectorAll('button[data-action="load"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const name = btn.closest('li').getAttribute('data-name')
+        const pack = available.find((p) => p.name === name)
+        if (pack) callbacks.onLoad(pack)
+      })
     })
   }
 }

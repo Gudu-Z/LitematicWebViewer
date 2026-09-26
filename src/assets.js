@@ -6,17 +6,48 @@ import * as THREE from 'three'
 
 export class AssetProvider {
   constructor() {
-    this.pack = null // JSZip 实例
+    this.packs = [] // 有序数组 [{name, zip}]，index 0 优先级最高
     // 用相对路径：无论通过 dev 服务器还是直接双击 index.html 打开都能正确解析
     this.baseUrl = 'assets/minecraft/'
     this.textureCache = new Map() // 纹理 key -> Promise<THREE.Texture|null>
     this.jsonCache = new Map() // 路径 -> Promise<object|null>
   }
 
-  async setResourcePack(zip) {
-    this.pack = zip
+  // 多个资源包叠加：越靠前（index 越小）优先级越高，未命中再回落默认资源
+  addPack(zip, name) {
+    const i = this.packs.findIndex((p) => p.name === name)
+    if (i >= 0) this.packs[i] = { name, zip }
+    else this.packs.push({ name, zip })
     this.textureCache.clear()
     this.jsonCache.clear()
+  }
+
+  removePack(name) {
+    this.packs = this.packs.filter((p) => p.name !== name)
+    this.textureCache.clear()
+    this.jsonCache.clear()
+  }
+
+  // delta = -1 上移（提高优先级），+1 下移
+  movePack(name, delta) {
+    const i = this.packs.findIndex((p) => p.name === name)
+    if (i < 0) return
+    const j = i + delta
+    if (j < 0 || j >= this.packs.length) return
+    const [p] = this.packs.splice(i, 1)
+    this.packs.splice(j, 0, p)
+    this.textureCache.clear()
+    this.jsonCache.clear()
+  }
+
+  clearPacks() {
+    this.packs = []
+    this.textureCache.clear()
+    this.jsonCache.clear()
+  }
+
+  getPackNames() {
+    return this.packs.map((p) => p.name)
   }
 
   // 加载 JSON 资源，path 形如 "blockstates/stone.json" 或 "models/block/stone.json"
@@ -28,13 +59,13 @@ export class AssetProvider {
   }
 
   async _getJSON(path) {
-    if (this.pack) {
-      const entry = this.pack.file('assets/minecraft/' + path)
+    for (const p of this.packs) {
+      const entry = p.zip.file('assets/minecraft/' + path)
       if (entry) {
         try {
           return JSON.parse(await entry.async('string'))
         } catch {
-          /* 忽略损坏条目，回落到默认资源 */
+          /* 忽略损坏条目，继续下一个资源包 */
         }
       }
     }
@@ -54,13 +85,14 @@ export class AssetProvider {
   async _getTexture(texKey) {
     const rel = 'textures/' + texKey + '.png'
     let blob = null
-    if (this.pack) {
-      const entry = this.pack.file('assets/minecraft/' + rel)
+    for (const p of this.packs) {
+      const entry = p.zip.file('assets/minecraft/' + rel)
       if (entry) {
         try {
           blob = await entry.async('blob')
+          break
         } catch {
-          /* 回落默认 */
+          /* 继续下一个资源包 */
         }
       }
     }

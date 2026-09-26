@@ -14,26 +14,10 @@
           <h1>LitematicWebViewer</h1>
           <div class="buttons">
             <button id="openBtn" class="primary">打开 .litematica 文件</button>
-            <button id="packBtn">加载资源包 (.zip)</button>
             <button id="clearBtn">清除</button>
           </div>
           <input type="file" id="fileInput" accept=".litematic,.litematica,.nbt" hidden />
           <input type="file" id="packInput" accept=".zip" hidden />
-        </div>
-
-        <div class="panel">
-          <h2>资源包</h2>
-          <ul id="packList" class="packlist"></ul>
-          <div class="buttons" style="margin-top: 8px">
-            <button id="resetPackBtn">恢复默认材质</button>
-          </div>
-        </div>
-
-        <div class="panel">
-          <h2>信息</h2>
-          <dl id="metadata" class="metadata">
-            <div class="row empty">尚未加载文件</div>
-          </dl>
         </div>
 
         <div class="panel">
@@ -46,8 +30,67 @@
         </div>
       </aside>
 
-      <div id="dropOverlay"><div>松开以打开文件</div></div>
+      <div id="topbar">
+        <button id="settingsBtn" class="icon-btn" title="设置" aria-label="设置">
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
+            <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.13.23.38.32.59.22l2.39-.96c.49.37 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.21.1.46 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" />
+          </svg>
+        </button>
+        <a
+          id="githubBtn"
+          class="icon-btn"
+          href="https://github.com/Gudu-Z/LitematicWebViewer"
+          target="_blank"
+          rel="noopener"
+          title="GitHub"
+          aria-label="GitHub 仓库"
+        >
+          <svg viewBox="0 0 16 16" width="22" height="22" fill="currentColor">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z" />
+          </svg>
+        </a>
+      </div>
 
+      <aside id="right-panel">
+        <div class="panel">
+          <h2>信息</h2>
+          <dl id="metadata" class="metadata">
+            <div class="row empty">尚未加载文件</div>
+          </dl>
+        </div>
+      </aside>
+
+      <div id="settingsPanel" class="hidden">
+        <div class="panel settings">
+          <div class="settings-head">
+            <h2>设置</h2>
+            <button id="settingsCloseBtn" class="icon-btn" title="关闭">×</button>
+          </div>
+
+          <div class="setting-row">
+            <label for="bgColor">背景颜色</label>
+            <input type="color" id="bgColor" value="#000000" />
+          </div>
+
+          <div class="settings-section-title">资源包</div>
+          <div class="pack-cols">
+            <div class="pack-col">
+              <div class="pack-col-title">已加载（越靠上优先级越高）</div>
+              <ul id="loadedPackList" class="packlist"></ul>
+            </div>
+            <div class="pack-col">
+              <div class="pack-col-title">可加载</div>
+              <ul id="availablePackList" class="packlist"></ul>
+            </div>
+          </div>
+
+          <div class="buttons" style="margin-top: 12px">
+            <button id="packBtn">从文件加载资源包 (.zip)</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="dropOverlay"><div>松开以打开文件</div></div>
       <div id="errorBanner" class="hidden"></div>
     </div>
 

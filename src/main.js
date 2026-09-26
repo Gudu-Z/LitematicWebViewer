@@ -1,4 +1,4 @@
-// 入口：串联文件读取、解析、模型解析、渲染，以及资源包加载。
+// 入口：串联文件读取、解析、模型解析、渲染、实体，以及资源包加载。
 
 import './styles.css'
 import JSZip from 'jszip'
@@ -24,6 +24,7 @@ try {
 
 let currentData = null
 let busy = false
+let packs = [] // 资源包清单 [{name, file}]
 
 // 全局错误捕获，让任何错误都显示在页面上
 window.addEventListener('error', (e) => {
@@ -51,6 +52,7 @@ function checkCapabilities() {
   if (problems.length) ui.showError(problems.join('；'))
 }
 checkCapabilities()
+loadPixelFont()
 loadPackList()
 
 const fileInput = document.getElementById('fileInput')
@@ -58,7 +60,6 @@ const packInput = document.getElementById('packInput')
 
 document.getElementById('openBtn').addEventListener('click', () => fileInput.click())
 document.getElementById('packBtn').addEventListener('click', () => packInput.click())
-document.getElementById('resetPackBtn').addEventListener('click', resetPack)
 document.getElementById('clearBtn').addEventListener('click', () => {
   renderer?.clear()
   currentData = null
@@ -68,12 +69,23 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   ui.setProgress(0)
 })
 
+// 设置面板开关 + 背景色
+document.getElementById('settingsBtn').addEventListener('click', () => {
+  document.getElementById('settingsPanel').classList.toggle('hidden')
+})
+document.getElementById('settingsCloseBtn').addEventListener('click', () => {
+  document.getElementById('settingsPanel').classList.add('hidden')
+})
+document.getElementById('bgColor').addEventListener('input', (e) => {
+  renderer?.setBackgroundColor(e.target.value)
+})
+
 fileInput.addEventListener('change', (e) => {
   if (e.target.files[0]) openFile(e.target.files[0])
   e.target.value = ''
 })
 packInput.addEventListener('change', (e) => {
-  if (e.target.files[0]) loadResourcePack(e.target.files[0])
+  if (e.target.files[0]) loadPackFromFile(e.target.files[0])
   e.target.value = ''
 })
 
@@ -100,7 +112,7 @@ window.addEventListener('drop', (e) => {
   const files = e.dataTransfer?.files
   if (!files || !files.length) return
   const f = files[0]
-  if (f.name.toLowerCase().endsWith('.zip')) loadResourcePack(f)
+  if (f.name.toLowerCase().endsWith('.zip')) loadPackFromFile(f)
   else openFile(f)
 })
 
@@ -131,8 +143,10 @@ async function openFile(file) {
     currentData = data
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
     await renderCurrentSigns()
+    await renderCurrentEntities()
     ui.showMetadata(data.metadata)
-    ui.setStatus(`完成：${stats.faces.toLocaleString()} 个面，${stats.textures} 种贴图`)
+    const entityNote = data.entities?.length ? `，${data.entities.length} 个实体` : ''
+    ui.setStatus(`完成：${stats.faces.toLocaleString()} 个面，${stats.textures} 种贴图${entityNote}`)
     ui.setProgress(1)
   } catch (e) {
     console.error(e)
@@ -151,10 +165,6 @@ async function autoLoadDemo() {
     if (!resp.ok) return
     const blob = await resp.blob()
     await openFile(new File([blob], name))
-    if (renderer) {
-      const s = renderer.debugPixels()
-      ui.statusEl.textContent += ` | 调试：画面共 ${s.distinctColors} 种颜色`
-    }
   } catch (e) {
     console.error(e)
   }
@@ -171,12 +181,19 @@ async function reRenderCurrent() {
   })
   await renderer.render(currentData, assets, (p) => ui.setProgress(p))
   await renderCurrentSigns()
+  await renderCurrentEntities()
 }
 
 // 渲染当前结构里的告示牌
 async function renderCurrentSigns() {
   if (!currentData || !renderer) return
   await renderer.renderSigns(extractSigns(currentData), assets)
+}
+
+// 渲染当前结构里的实体
+async function renderCurrentEntities() {
+  if (!currentData || !renderer) return
+  await renderer.renderEntities(currentData.entities || [], assets)
 }
 
 // 从方块实体中提取告示牌：{x, y, z, rotation, lines}
@@ -212,85 +229,116 @@ function textComponentToString(c) {
   return ''
 }
 
-async function loadResourcePack(file) {
-  if (busy) return
-  busy = true
-  ui.clearError()
-  try {
-    ui.setStatus('正在加载资源包 …')
-    ui.setProgress(0.05)
-    const zip = await JSZip.loadAsync(file)
-    await assets.setResourcePack(zip)
-    ui.setActivePack(null)
-    await reRenderCurrent()
-    ui.setStatus(currentData ? '资源包已加载并重新渲染' : '资源包已加载（打开文件后生效）')
-    ui.setProgress(1)
-  } catch (e) {
-    console.error(e)
-    ui.showError('资源包加载失败：' + (e.message || e))
-    ui.setProgress(0)
-  } finally {
-    busy = false
-  }
+// —— 资源包管理 ——
+
+function updatePackPanels() {
+  const loaded = assets.getPackNames()
+  ui.renderPackPanels(loaded, packs, {
+    onLoad: (pack) => loadPack(pack),
+    onUnload: (name) => unloadPack(name),
+    onMove: (name, delta) => movePack(name, delta),
+  })
 }
 
-// 从列表加载已安装的资源包
-async function loadPackFromUrl(pack) {
+// 从清单里的 URL 加载资源包
+async function loadPack(pack) {
   if (busy) return
   busy = true
   ui.clearError()
   try {
     ui.setStatus('正在加载资源包 ' + pack.name + ' …')
-    ui.setProgress(0.05)
     const resp = await fetch('resourcepacks/' + encodeURIComponent(pack.file))
     if (!resp.ok) throw new Error('资源包下载失败（HTTP ' + resp.status + '）')
     const zip = await JSZip.loadAsync(await resp.blob())
-    await assets.setResourcePack(zip)
-    ui.setActivePack(pack.name)
+    assets.addPack(zip, pack.name)
     await reRenderCurrent()
+    updatePackPanels()
     ui.setStatus('资源包已加载：' + pack.name)
-    ui.setProgress(1)
   } catch (e) {
     console.error(e)
     ui.showError('资源包加载失败：' + (e.message || e))
-    ui.setProgress(0)
   } finally {
     busy = false
   }
 }
 
-// 恢复默认材质（卸载资源包）
-async function resetPack() {
+// 卸载资源包
+async function unloadPack(name) {
   if (busy) return
   busy = true
   ui.clearError()
   try {
-    ui.setStatus('正在恢复默认材质 …')
-    await assets.setResourcePack(null)
-    ui.setActivePack(null)
+    assets.removePack(name)
     await reRenderCurrent()
-    ui.setStatus('已恢复默认材质')
-    ui.setProgress(1)
+    updatePackPanels()
+    ui.setStatus('已卸载资源包：' + name)
   } catch (e) {
     console.error(e)
-    ui.showError('恢复默认失败：' + (e.message || e))
+    ui.showError('卸载失败：' + (e.message || e))
   } finally {
     busy = false
   }
 }
 
-// 加载资源包清单并渲染列表
+// 调整资源包优先级（delta = -1 上移 / +1 下移）
+async function movePack(name, delta) {
+  if (busy) return
+  busy = true
+  try {
+    assets.movePack(name, delta)
+    await reRenderCurrent()
+    updatePackPanels()
+  } catch (e) {
+    console.error(e)
+    ui.showError('调整优先级失败：' + (e.message || e))
+  } finally {
+    busy = false
+  }
+}
+
+// 从用户选择的文件加载资源包
+async function loadPackFromFile(file) {
+  if (busy) return
+  busy = true
+  ui.clearError()
+  try {
+    ui.setStatus('正在加载资源包 …')
+    const zip = await JSZip.loadAsync(file)
+    assets.addPack(zip, file.name.replace(/\.zip$/i, ''))
+    await reRenderCurrent()
+    updatePackPanels()
+    ui.setStatus('资源包已加载（打开文件后生效）')
+  } catch (e) {
+    console.error(e)
+    ui.showError('资源包加载失败：' + (e.message || e))
+  } finally {
+    busy = false
+  }
+}
+
+// 加载资源包清单并渲染两栏列表
 async function loadPackList() {
   try {
     const resp = await fetch('resourcepacks/manifest.json')
     if (!resp.ok) return
-    const packs = await resp.json()
-    ui.renderPackList(packs, (pack) => loadPackFromUrl(pack))
+    packs = await resp.json()
+    updatePackPanels()
     // 默认资源包：XK 红石显示（若存在则自动加载）
     const def = packs.find((p) => /XK/i.test(p.name))
-    if (def) await loadPackFromUrl(def)
+    if (def) await loadPack(def)
   } catch {
     /* 没有清单时静默忽略 */
+  }
+}
+
+// 加载像素字体（供轴标签/告示牌文字使用）
+async function loadPixelFont() {
+  try {
+    const face = new FontFace('PixelFont', 'url(fonts/PressStart2P-Regular.ttf)')
+    await face.load()
+    document.fonts.add(face)
+  } catch (e) {
+    console.warn('像素字体加载失败，使用默认字体', e)
   }
 }
 

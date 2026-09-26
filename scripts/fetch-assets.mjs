@@ -25,6 +25,8 @@ const PREFIXES = [
   'assets/minecraft/textures/block/',
   'assets/minecraft/blockstates/',
   'assets/minecraft/models/block/',
+  'assets/minecraft/textures/entity/', // 实体贴图（矿车等）
+  'assets/minecraft/textures/item/', // 物品贴图（物品展示框内容）
 ]
 
 async function main() {
