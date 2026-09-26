@@ -12,8 +12,10 @@ import { bakeModel } from './modelBaker.js'
 const face = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#all' })
 
 // 箱子：复刻原版 ChestRenderer —— 底座 + 箱盖 + 锁扣。
-// 原版箱子贴图布局（已按实际贴图逐面核实）：顶面在第二列(x=u+dz+dx)、底面在第一列(x=u+dz)，
-// 与直觉相反。texBox 用这个修正后的 auto-UV 生成 6 面（像素坐标，配 texSize=64）。
+// 原版 ModelPart.Cuboid 的 auto-UV 布局（已按原版源码逐面核实）：
+//   顶面 up 在第二列 (x=u+dz+dx)、底面 down 在第一列 (x=u+dz)；
+//   侧面按 u 从左到右依次为 west(0)、north(1)、east(2)、south(3)。
+// texBox 用这个布局生成 6 面（像素坐标，配 texSize=64）。
 function texBox(from, to, texU, texV) {
   const dx = to[0] - from[0]
   const dy = to[1] - from[1]
@@ -24,27 +26,30 @@ function texBox(from, to, texU, texV) {
     faces: {
       up: face(texU + dz + dx, texV, texU + dz + 2 * dx, texV + dz),
       down: face(texU + dz, texV, texU + dz + dx, texV + dz),
-      east: face(texU, texV + dz, texU + dz, texV + dz + dy),
-      south: face(texU + dz, texV + dz, texU + dz + dx, texV + dz + dy),
-      west: face(texU + dz + dx, texV + dz, texU + dz + dx + dz, texV + dz + dy),
-      north: face(texU + dz + dx + dz, texV + dz, texU + dz + dx + dz + dx, texV + dz + dy),
+      west: face(texU, texV + dz, texU + dz, texV + dz + dy),
+      north: face(texU + dz, texV + dz, texU + dz + dx, texV + dz + dy),
+      east: face(texU + dz + dx, texV + dz, texU + dz + dx + dz, texV + dz + dy),
+      south: face(texU + dz + dx + dz, texV + dz, texU + dz + dx + dz + dx, texV + dz + dy),
     },
   }
 }
 
-// type: single/left/right。大箱子左右两半各延伸 1px 到中间消除接缝；
-// 锁扣在 +z（南）面：单人箱居中，大箱子左右两半的锁扣都贴向中间（左箱在右缘、右箱在左缘），
-// 两半拼起来后锁扣恰好落在整只大箱子的正中间。朝向由 facing 属性旋转。
+// type: single/left/right。几何与原版 ChestRenderer 的三种模型一致：
+//   single 底座 x=1..15，锁扣 2px 居中；
+//   left   底座 x=0..15（贴左缘），锁扣 1px 在最左；
+//   right  底座 x=1..16（贴右缘），锁扣 1px 在最右。
+// 拼成大箱子时两半在中间相接、锁扣恰好落在整只大箱子正中间。朝向由 facing 属性旋转。
 function chestModel(texKey, type) {
-  const x0 = type === 'right' ? 0 : 1
-  const x1 = type === 'left' ? 16 : 15
-  const lockX = type === 'left' ? 15 : type === 'right' ? -1 : 7
+  const x0 = type === 'right' ? 1 : type === 'left' ? 0 : 1
+  const x1 = type === 'left' ? 15 : type === 'right' ? 16 : 15
+  const lockX = type === 'left' ? 0 : type === 'right' ? 15 : 7
+  const lockW = type === 'single' ? 2 : 1
   return {
     textures: { all: texKey },
     elements: [
       texBox([x0, 0, 1], [x1, 10, 15], 0, 19), // 底座
       texBox([x0, 9, 1], [x1, 14, 15], 0, 0), // 箱盖
-      texBox([lockX, 8, 15], [lockX + 2, 12, 16], 0, 0), // 锁扣
+      texBox([lockX, 8, 15], [lockX + lockW, 12, 16], 0, 0), // 锁扣
     ],
   }
 }
