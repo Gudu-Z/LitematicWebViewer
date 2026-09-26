@@ -114,6 +114,9 @@ function resolveTexture(ref, textures) {
   while (guard++ < 16) {
     if (typeof v === 'string' && v.startsWith('#')) {
       v = textures[v.slice(1)]
+    } else if (typeof v === 'string' && textures && Object.prototype.hasOwnProperty.call(textures, v)) {
+      // 26.x 新格式：面纹理直接写 textures 的键名（无 # 前缀），如 "texture": "all"
+      v = textures[v]
     } else if (v && typeof v === 'object' && typeof v.sprite === 'string') {
       // 26.x 起纹理引用可以是对象 { sprite, force_translucent, ambientocclusion }
       v = v.sprite

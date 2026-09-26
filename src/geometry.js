@@ -30,6 +30,115 @@ function isRedstoneDustTex(texKey) {
   return /(redstone_dust_dot|redstone_dust_line0|redstone_dust_line1)$/.test(texKey)
 }
 
+// 流体（水/岩浆）高度（0-1）：level 0=满，1-7 逐级下降，8+ 下落近似薄层
+function fluidHeight(level) {
+  const l = Number(level) || 0
+  return l <= 0 ? 1 : l < 8 ? 1 - l / 8 : 0.125
+}
+
+function isFluidName(name) {
+  const n = shortName(name)
+  return n === 'water' || n === 'lava'
+}
+
+// 推入一个自定义 quad（世界坐标顶点 + 归一化 UV + 法线）
+function pushFluidQuad(groups, texKey, pos, uvs, normal) {
+  let g = groups.get(texKey)
+  if (!g) {
+    g = { positions: [], normals: [], uvs: [], indices: [] }
+    groups.set(texKey, g)
+  }
+  const base = g.positions.length / 3
+  for (let i = 0; i < 4; i++) {
+    g.positions.push(pos[i][0], pos[i][1], pos[i][2])
+    g.normals.push(normal[0], normal[1], normal[2])
+    g.uvs.push(uvs[i][0], uvs[i][1])
+  }
+  g.indices.push(base, base + 1, base + 2, base + 2, base + 1, base + 3)
+}
+
+// 渲染一个流体方块：顶面按四角高度平均（平滑），侧面/底面与相邻流体之间剔除
+// 返回生成的面数
+function emitFluid(groups, palette, blocks, x, y, z, gi) {
+  const name = shortName(palette[gi].name)
+  const isLava = name === 'lava'
+  const level = Number(palette[gi].properties?.level) || 0
+  const self = fluidHeight(level)
+  const stillTex = isLava ? 'block/lava_still' : 'block/water_still'
+  const flowTex = isLava ? 'block/lava_flow' : 'block/water_flow'
+
+  // 相邻流体高度（非流体邻居用自身高度，避免水面边缘塌陷）
+  const nbh = (dx, dz) => {
+    const ngi = blocks.get((x + dx) + ',' + y + ',' + (z + dz))
+    if (ngi === undefined || !isFluidName(palette[ngi].name)) return self
+    return fluidHeight(Number(palette[ngi].properties?.level) || 0)
+  }
+  // 角高度 = (自身 + 相邻两方向) / 3，邻居更低时用自身（水被托住不下坠）
+  const corner = (dx, dz) => {
+    const a = Math.max(self, nbh(dx, 0))
+    const b = Math.max(self, nbh(0, dz))
+    return (self + a + b) / 3
+  }
+  const h00 = corner(-1, -1) // 西北 x=0,z=0
+  const h10 = corner(1, -1) // 东北 x=16,z=0
+  const h01 = corner(-1, 1) // 西南 x=0,z=16
+  const h11 = corner(1, 1) // 东南 x=16,z=16
+
+  const fluidAt = (dx, dz) => {
+    const ngi = blocks.get((x + dx) + ',' + y + ',' + (z + dz))
+    return ngi !== undefined && isFluidName(palette[ngi].name)
+  }
+  // 上方/下方被流体或不透明方块遮挡
+  const occluded = (dy) => {
+    const ngi = blocks.get(x + ',' + (y + dy) + ',' + z)
+    if (ngi === undefined) return false
+    if (isFluidName(palette[ngi].name)) return true
+    return !!(palette[ngi].baked && palette[ngi].baked.fullCube && !isTransparent(palette[ngi].name))
+  }
+
+  let count = 0
+  // 顶面（平滑，四角不同高度）
+  if (!occluded(1)) {
+    pushFluidQuad(groups, stillTex,
+      [[x, y + h01, z + 1], [x + 1, y + h11, z + 1], [x, y + h00, z], [x + 1, y + h10, z]],
+      [[0, 1], [1, 1], [0, 0], [1, 0]], [0, 1, 0])
+    count++
+  }
+  // 底面
+  if (!occluded(-1)) {
+    pushFluidQuad(groups, stillTex,
+      [[x + 1, y, z + 1], [x, y, z + 1], [x + 1, y, z], [x, y, z]],
+      [[0, 1], [1, 1], [0, 0], [1, 0]], [0, -1, 0])
+    count++
+  }
+  // 侧面（邻居是流体时剔除，避免内部面）
+  if (!fluidAt(0, -1)) {
+    pushFluidQuad(groups, flowTex,
+      [[x + 1, y, z], [x, y, z], [x + 1, y + h10, z], [x, y + h00, z]],
+      [[0, 1], [1, 1], [0, 0], [1, 0]], [0, 0, -1])
+    count++
+  }
+  if (!fluidAt(0, 1)) {
+    pushFluidQuad(groups, flowTex,
+      [[x, y, z + 1], [x + 1, y, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]],
+      [[0, 1], [1, 1], [0, 0], [1, 0]], [0, 0, 1])
+    count++
+  }
+  if (!fluidAt(-1, 0)) {
+    pushFluidQuad(groups, flowTex,
+      [[x, y + h00, z], [x, y, z], [x, y + h01, z + 1], [x, y, z + 1]],
+      [[0, 0], [0, 1], [1, 0], [1, 1]], [-1, 0, 0])
+    count++
+  }
+  if (!fluidAt(1, 0)) {
+    pushFluidQuad(groups, flowTex,
+      [[x + 1, y + h11, z + 1], [x + 1, y, z + 1], [x + 1, y + h10, z], [x + 1, y, z]],
+      [[0, 0], [0, 1], [1, 0], [1, 1]], [1, 0, 0])
+    count++
+  }
+  return count
+}
+
 // palette: [{name, baked}]，baked 为 {quads, fullCube} 或 null
 // blocks: Map<"x,y,z" -> paletteIndex>
 // 返回 { groups: Map<texKey, {positions,normals,uvs,indices}>, emitted: 面数 }
@@ -57,6 +166,11 @@ export function buildFaceGroups(palette, blocks) {
     const x = +parts[0]
     const y = +parts[1]
     const z = +parts[2]
+    // 流体单独处理（平滑顶面 + 面剔除）
+    if (isFluidName(palette[gi].name)) {
+      emitted += emitFluid(groups, palette, blocks, x, y, z, gi)
+      continue
+    }
     for (const q of quadsByPalette[gi]) {
       // 只在模型声明了 cullface 时裁剪；邻居为不透明完整方块则裁剪该面
       if (q.cullface) {

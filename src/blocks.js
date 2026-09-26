@@ -81,15 +81,15 @@ function shulkerModel(texKey) {
           north: face(48, 16, 64, 28),
         },
       },
-      { // 底座 16×4×16（底部 4px，侧面取底座侧条底部）
+      { // 底座 16×4×16（底部 4px，侧面取底座侧条底部 4px，避免整条拉伸）
         from: [0, 0, 0], to: [16, 4, 16],
         faces: {
           up: face(16, 28, 32, 44),
           down: face(32, 28, 48, 44),
-          east: face(0, 44, 16, 60),
-          south: face(16, 44, 32, 60),
-          west: face(32, 44, 48, 60),
-          north: face(48, 44, 64, 60),
+          east: face(0, 56, 16, 60),
+          south: face(16, 56, 32, 60),
+          west: face(32, 56, 48, 60),
+          north: face(48, 56, 64, 60),
         },
       },
     ],
