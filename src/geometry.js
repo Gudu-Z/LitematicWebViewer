@@ -26,6 +26,11 @@ export function isTransparent(name) {
   return n.endsWith('_leaves') || n.includes('glass') || n === 'ice' || n === 'water' || n === 'lava'
 }
 
+// 红石粉的线/点贴图需要按信号强度分别染色
+function isRedstoneDustTex(texKey) {
+  return /(redstone_dust_dot|redstone_dust_line0|redstone_dust_line1)$/.test(texKey)
+}
+
 // palette: [{name, baked}]，baked 为 {quads, fullCube} 或 null
 // blocks: Map<"x,y,z" -> paletteIndex>
 // 返回 { groups: Map<texKey, {positions,normals,uvs,indices}>, emitted: 面数 }
@@ -60,10 +65,15 @@ export function buildFaceGroups(palette, blocks) {
         // 邻居为不透明完整方块，或为同类方块（如玻璃-玻璃、树叶-树叶）时裁剪该面
         if (ngi !== undefined && (occludes[ngi] || ngi === gi)) continue
       }
-      let g = groups.get(q.texKey)
+      // 红石粉按「贴图 + 信号强度」分组，便于渲染时按强度上色
+      let gKey = q.texKey
+      if (isRedstoneDustTex(q.texKey)) {
+        gKey = q.texKey + '|p' + (Number(palette[gi].properties?.power) || 0)
+      }
+      let g = groups.get(gKey)
       if (!g) {
         g = { positions: [], normals: [], uvs: [], indices: [] }
-        groups.set(q.texKey, g)
+        groups.set(gKey, g)
       }
       emitQuad(g, q, x, y, z)
       emitted++

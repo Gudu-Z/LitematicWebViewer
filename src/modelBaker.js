@@ -134,7 +134,8 @@ function autoUV(dir, from, to) {
   }
 }
 
-// Minecraft 顺时针旋转（= 右手系绕正轴的负角），绕指定原点
+// 绕指定轴旋转（标准右手系正角）。Minecraft 的“变体旋转”是顺时针，
+// 故在 applyVariantRotation / rotateDir 里取负角还原；元素旋转则直接使用模型给的角。
 function rotateAround([x, y, z], axis, angleDeg, origin) {
   const a = (angleDeg * Math.PI) / 180
   const c = Math.cos(a)
@@ -145,15 +146,15 @@ function rotateAround([x, y, z], axis, angleDeg, origin) {
   let rx, ry, rz
   if (axis === 'x') {
     rx = px
-    ry = py * c + pz * s
-    rz = -py * s + pz * c
+    ry = py * c - pz * s
+    rz = py * s + pz * c
   } else if (axis === 'y') {
-    rx = px * c - pz * s
+    rx = px * c + pz * s
     ry = py
-    rz = px * s + pz * c
+    rz = -px * s + pz * c
   } else {
-    rx = px * c + py * s
-    ry = -px * s + py * c
+    rx = px * c - py * s
+    ry = px * s + py * c
     rz = pz
   }
   return [rx + origin[0], ry + origin[1], rz + origin[2]]
@@ -162,8 +163,8 @@ function rotateAround([x, y, z], axis, angleDeg, origin) {
 // 旋转一个方向向量（无平移，绕原点），用于 cullface
 function rotateDir(dir, x, y) {
   let d = dir
-  if (x) d = rotateAround(d, 'x', x, [0, 0, 0])
-  if (y) d = rotateAround(d, 'y', y, [0, 0, 0])
+  if (x) d = rotateAround(d, 'x', -x, [0, 0, 0])
+  if (y) d = rotateAround(d, 'y', -y, [0, 0, 0])
   return d.map((v) => Math.round(v))
 }
 
@@ -171,8 +172,8 @@ function applyVariantRotation(verts, x, y) {
   const center = [8, 8, 8]
   return verts.map((v) => {
     let p = v
-    if (x) p = rotateAround(p, 'x', x, center)
-    if (y) p = rotateAround(p, 'y', y, center)
+    if (x) p = rotateAround(p, 'x', -x, center)
+    if (y) p = rotateAround(p, 'y', -y, center)
     return p
   })
 }

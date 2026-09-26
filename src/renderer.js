@@ -8,6 +8,15 @@ import { buildFaceGroups } from './geometry.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
 
+// 红石粉按信号强度染色（复刻原版 RedstoneWireBlock 的渐变：越高越亮，越低越深）
+function redstoneTint(power) {
+  const f = Math.min(15, Math.max(0, power)) / 15
+  const r = f * 0.6 + (f > 0 ? 0.4 : 0.3)
+  const g = Math.min(1, Math.max(0, f * f * 0.7 - 0.5))
+  const b = Math.min(1, Math.max(0, f * f * 0.6 - 0.7))
+  return [r, g, b]
+}
+
 export class Renderer {
   constructor(container) {
     this.container = container
@@ -217,15 +226,20 @@ export class Renderer {
     const materials = new Map()
     let loaded = 0
     await Promise.all(
-      texKeys.map(async (texKey) => {
+      texKeys.map(async (gKey) => {
+        // 组键可能带强度后缀（如 redstone_dust_dot|p15）
+        const sep = gKey.indexOf('|p')
+        const texKey = sep >= 0 ? gKey.slice(0, sep) : gKey
+        const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
         const texture = await assets.getTexture(texKey)
         if (texture) {
           const mat = new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5 })
-          // 红石粉线/点是灰度贴图，乘红色使其显示为红色（强度数字层 pXX 不染色）
-          if (/(redstone_dust_dot|redstone_dust_line0|redstone_dust_line1)$/.test(texKey)) {
-            mat.color.setRGB(0.95, 0.1, 0.1)
+          // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
+          if (power !== null) {
+            const c = redstoneTint(power)
+            mat.color.setRGB(c[0], c[1], c[2])
           }
-          materials.set(texKey, mat)
+          materials.set(gKey, mat)
         }
         loaded++
         onProgress?.(0.45 + 0.5 * (loaded / Math.max(1, texKeys.length)))
