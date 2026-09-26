@@ -12,10 +12,11 @@ import { bakeModel } from './modelBaker.js'
 const face = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#all' })
 
 // 箱子：复刻原版 ChestRenderer —— 底座 + 箱盖 + 锁扣。
-// 原版 ModelPart.Cuboid 的 auto-UV 布局（已按原版源码逐面核实）：
-//   顶面 up 在第二列 (x=u+dz+dx)、底面 down 在第一列 (x=u+dz)；
-//   侧面按 u 从左到右依次为 west(0)、north(1)、east(2)、south(3)。
-// texBox 用这个布局生成 6 面（像素坐标，配 texSize=64）。
+// 原版 ModelPart.Cuboid 的 auto-UV（已按原版 ModelPart.Quad 源码逐面核实）：
+//   顶面 up 在第二列 (u=u+dz+dx)、底面 down 在第一列 (u=u+dz)；
+//   侧面按 u 范围依次为 west(0)、north(1)、east(2)、south(3)。
+//   注意：原版 Quad 会对侧面做 180° 旋转、顶面做 v 反转，下面 uv 的 u0/u1、v0/v1 顺序已照抄，
+//   因此部分面的 u0>u1 或 v0>v1（bakeModel 直接按区间插值，能正确处理反向区间）。
 function texBox(from, to, texU, texV) {
   const dx = to[0] - from[0]
   const dy = to[1] - from[1]
@@ -24,12 +25,12 @@ function texBox(from, to, texU, texV) {
     from,
     to,
     faces: {
-      up: face(texU + dz + dx, texV, texU + dz + 2 * dx, texV + dz),
-      down: face(texU + dz, texV, texU + dz + dx, texV + dz),
-      west: face(texU, texV + dz, texU + dz, texV + dz + dy),
-      north: face(texU + dz, texV + dz, texU + dz + dx, texV + dz + dy),
-      east: face(texU + dz + dx, texV + dz, texU + dz + dx + dz, texV + dz + dy),
-      south: face(texU + dz + dx + dz, texV + dz, texU + dz + dx + dz + dx, texV + dz + dy),
+      up: face(texU + dz + dx, texV + dz, texU + dz + 2 * dx, texV),
+      down: face(texU + dz + dx, texV, texU + dz, texV + dz),
+      west: face(texU + dz, texV + dz + dy, texU, texV + dz),
+      north: face(texU + dz + dx, texV + dz + dy, texU + dz, texV + dz),
+      east: face(texU + dz + dx + dz, texV + dz + dy, texU + dz + dx, texV + dz),
+      south: face(texU + dz + dx + dz + dx, texV + dz + dy, texU + dz + dx + dz, texV + dz),
     },
   }
 }
