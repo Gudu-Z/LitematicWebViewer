@@ -110,7 +110,16 @@ function textureFromBlob(blob) {
     const url = URL.createObjectURL(blob)
     const img = new Image()
     img.onload = () => {
-      const tex = new THREE.Texture(img)
+      let source = img
+      // 动画贴图是「16 宽、竖向多帧」的竖直长条；裁取第一帧，避免整条被压到面上
+      if (img.width === 16 && img.height > 16) {
+        const c = document.createElement('canvas')
+        c.width = 16
+        c.height = 16
+        c.getContext('2d').drawImage(img, 0, 0, 16, 16, 0, 0, 16, 16)
+        source = c
+      }
+      const tex = new THREE.Texture(source)
       tex.magFilter = THREE.NearestFilter
       tex.minFilter = THREE.NearestFilter
       tex.generateMipmaps = false

@@ -108,14 +108,15 @@ export function parseLitematicaRaw(rawBytes) {
       }
     }
 
-    // 实体：Pos 是 double 列表、Rotation 是 [yaw, pitch]，与方块实体不同
+    // 实体：Pos 是 double 列表、Rotation 是 [yaw, pitch]，与方块实体不同。
+    // 注意：实体坐标是相对区域原点的，需要加上区域 Position 偏移。
     if (Array.isArray(region.Entities)) {
       for (const e of region.Entities) {
-        const pos = Array.isArray(e.Pos) ? e.Pos : [0, 0, 0]
+        const epos = Array.isArray(e.Pos) ? e.Pos : [0, 0, 0]
         const rot = Array.isArray(e.Rotation) ? e.Rotation : [0, 0]
         entities.push({
           id: e.id,
-          pos: [Number(pos[0]) || 0, Number(pos[1]) || 0, Number(pos[2]) || 0],
+          pos: [Number(epos[0]) + pos.x, Number(epos[1]) + pos.y, Number(epos[2]) + pos.z],
           rotation: [Number(rot[0]) || 0, Number(rot[1]) || 0],
           nbt: e,
         })

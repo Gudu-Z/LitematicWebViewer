@@ -31,7 +31,7 @@ export class Renderer {
   constructor(container) {
     this.container = container
     this.scene = new THREE.Scene()
-    this.scene.background = new THREE.Color(0x000000)
+    this.scene.background = new THREE.Color(0x2a2a2a) // 默认深灰背景
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000)
     this.camera.position.set(20, 16, 20)
@@ -276,7 +276,12 @@ export class Renderer {
         const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
         const texture = await assets.getTexture(texKey)
         if (texture) {
-          const mat = new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5 })
+          // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
+          const isWater = texKey === 'block/water_still'
+          const isLava = texKey === 'block/lava_still'
+          const mat = isWater || isLava
+            ? new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: isWater ? 0.6 : 0.9 })
+            : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5 })
           // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
           if (power !== null) {
             const c = redstoneTint(power)

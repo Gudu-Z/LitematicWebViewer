@@ -77,8 +77,8 @@ async function buildMinecart(entity, id, assets) {
   const [x, y, z] = entity.pos
   const yaw = Number(entity.rotation?.[0]) || 0
 
-  const bodyTex = await assets.getTexture('entity/minecart') // 所有矿车共用同一车身贴图
-  const bodyMat = new THREE.MeshLambertMaterial({ map: bodyTex || null })
+  // 车身用纯色（矿车贴图是 2:1 图集，直接贴到盒体会拉伸，这里简化为铁灰色）
+  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x7a7a7a })
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.7, 0.98), bodyMat)
   body.position.set(x, y, z)
   group.add(body)

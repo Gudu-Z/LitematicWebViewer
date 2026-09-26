@@ -8,7 +8,6 @@
 
 const SKIP_BLOCKS = new Set([
   'air', 'cave_air', 'void_air',
-  'water', 'lava',
   'structure_void', 'barrier', 'light',
 ])
 

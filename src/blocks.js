@@ -4,6 +4,35 @@
 
 import { bakeModel } from './modelBaker.js'
 
+// 一些方块没有常规 JSON 块模型（箱子靠方块实体渲染、水/岩浆是流体），给一个近似盒体
+function boxModel(sizePx, texKey, withCullface) {
+  const a = (16 - sizePx) / 2
+  const b = 16 - a
+  const faces = {
+    up: { uv: [0, 0, 16, 16], texture: '#all' },
+    down: { uv: [0, 0, 16, 16], texture: '#all' },
+    north: { uv: [0, 0, 16, 16], texture: '#all' },
+    south: { uv: [0, 0, 16, 16], texture: '#all' },
+    east: { uv: [0, 0, 16, 16], texture: '#all' },
+    west: { uv: [0, 0, 16, 16], texture: '#all' },
+  }
+  if (withCullface) {
+    for (const k of ['north', 'south', 'east', 'west']) faces[k].cullface = k
+  }
+  return {
+    textures: { all: texKey },
+    elements: [{ from: [a, 0, a], to: [b, sizePx, b], faces }],
+  }
+}
+
+const SPECIAL_MODELS = {
+  chest: () => boxModel(14, 'entity/chest/normal'),
+  trapped_chest: () => boxModel(14, 'entity/chest/trapped'),
+  ender_chest: () => boxModel(14, 'entity/chest/ender'),
+  water: () => boxModel(16, 'block/water_still', true),
+  lava: () => boxModel(16, 'block/lava_still', true),
+}
+
 export class BlockModelResolver {
   constructor(assets) {
     this.assets = assets
@@ -28,6 +57,10 @@ export class BlockModelResolver {
   }
 
   async _resolve(shortName, properties) {
+    // 特殊方块：箱子/水/岩浆等没有常规块模型
+    const special = SPECIAL_MODELS[shortName]
+    if (special) return bakeModel(special(), {})
+
     const bs = await this.assets.getJSON('blockstates/' + shortName + '.json')
     if (!bs) return null
 
