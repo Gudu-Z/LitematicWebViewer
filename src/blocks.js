@@ -4,44 +4,109 @@
 
 import { bakeModel } from './modelBaker.js'
 
-// ===== 无常规 JSON 模型的方块 =====
-// 箱子靠方块实体渲染器绘制、水/岩浆是流体，这里手工构造模型。
+// ===== 无常规 JSON 模型的方块（靠方块实体渲染器或流体系统绘制）=====
+// 这些方块的模型是空的，这里按原版渲染器手工构造几何与 UV。
+// UV 一律用「贴图像素坐标」，配合 bakeModel 的 texSize 参数归一化到 [0,1]。
 
-// 按 Minecraft 的 ModelPart.addBox 自动 UV 算法生成一个盒体的 6 面，
-// 用于 64×64 贴图的方块实体（箱子等）：texU/texV 为纹理偏移（像素），
-// from/to 为盒体局部坐标（像素）。UV 换算成 modelBaker 的 16 制（像素/4），
-// 这样 bakeModel 里 /16 后正好得到「像素/64」。
-function texBox(from, to, texU, texV) {
-  const [fx, fy, fz] = from
-  const [tx, ty, tz] = to
-  const dx = tx - fx
-  const dy = ty - fy
-  const dz = tz - fz
-  const uv = (u0, v0, u1, v1) => [u0 / 4, v0 / 4, u1 / 4, v1 / 4]
-  return {
-    from,
-    to,
-    faces: {
-      up: { uv: uv(texU + dz, texV, texU + dz + dx, texV + dz), texture: '#all' }, // 顶 +y
-      down: { uv: uv(texU + dz + dx, texV, texU + dz + 2 * dx, texV + dz), texture: '#all' }, // 底 -y
-      east: { uv: uv(texU, texV + dz, texU + dz, texV + dz + dy), texture: '#all' }, // 东 +x
-      south: { uv: uv(texU + dz, texV + dz, texU + dz + dx, texV + dz + dy), texture: '#all' }, // 南 +z（正面）
-      west: { uv: uv(texU + dz + dx, texV + dz, texU + dz + dx + dz, texV + dz + dy), texture: '#all' }, // 西 -x
-      north: { uv: uv(texU + dz + dx + dz, texV + dz, texU + dz + dx + dz + dx, texV + dz + dy), texture: '#all' }, // 北 -z（背面）
-    },
-  }
-}
+// 构造一个面：uv 为贴图像素 [u0,v0,u1,v1]
+const face = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#all' })
 
-// 复刻原版 ChestRenderer 的箱子：底座 14×10×14 + 箱盖 14×5×14 + 锁扣 2×4×1。
-// 锁扣在 +z（南）面，朝向由 facing 属性在 _resolve 里旋转。
-function chestModel(texKey) {
+// 箱子：复刻原版 ChestRenderer —— 底座 14×10×14 + 箱盖 14×5×14 + 锁扣 2×4×1。
+// type: single/left/right。大箱子左右两半各延伸 1px 到中间，消除接缝；
+// 锁扣在 +z（南）面，朝向由 facing 属性旋转。
+function chestModel(texKey, type) {
+  const x0 = type === 'right' ? 0 : 1
+  const x1 = type === 'left' ? 16 : 15
   return {
     textures: { all: texKey },
     elements: [
-      texBox([1, 0, 1], [15, 10, 15], 0, 19), // 底座，纹理偏移 (0,19)
-      texBox([1, 9, 1], [15, 14, 15], 0, 0), // 箱盖，纹理偏移 (0,0)
-      texBox([7, 8, 15], [9, 12, 16], 0, 0), // 锁扣，纹理偏移 (0,0)
+      { // 底座（顶=浅色木纹，底=深色）
+        from: [x0, 0, 1], to: [x1, 10, 15],
+        faces: {
+          up: face(14, 19, 28, 33),
+          down: face(28, 19, 42, 33),
+          east: face(0, 33, 14, 43),
+          south: face(14, 33, 28, 43),
+          west: face(28, 33, 42, 43),
+          north: face(42, 33, 56, 43),
+        },
+      },
+      { // 箱盖（顶=浅色，底=深色，注意与底座顶/底的 x 位置相反）
+        from: [x0, 9, 1], to: [x1, 14, 15],
+        faces: {
+          up: face(28, 0, 42, 14),
+          down: face(14, 0, 28, 14),
+          east: face(0, 14, 14, 19),
+          south: face(14, 14, 28, 19),
+          west: face(28, 14, 42, 19),
+          north: face(42, 14, 56, 19),
+        },
+      },
+      { // 锁扣（在 +z 正面）
+        from: [7, 8, 15], to: [9, 12, 16],
+        faces: {
+          up: face(1, 0, 3, 1),
+          down: face(3, 0, 5, 1),
+          east: face(0, 1, 1, 5),
+          south: face(1, 1, 3, 5),
+          west: face(3, 1, 4, 5),
+          north: face(4, 1, 6, 5),
+        },
+      },
     ],
+  }
+}
+
+// 箱子贴图名：normal/trapped/ender/copper[+氧化]，左右型加 _left/_right
+const CHEST_BASES = { chest: 'normal', trapped_chest: 'trapped', ender_chest: 'ender', copper_chest: 'copper' }
+
+function chestTex(blockName, type, p) {
+  let t = CHEST_BASES[blockName]
+  if (blockName === 'copper_chest') {
+    const s = String(p.oxidized || p.tier || p.oxidation || '')
+    if (s.includes('exposed')) t = 'copper_exposed'
+    else if (s.includes('weathered')) t = 'copper_weathered'
+    else if (s.includes('oxidized')) t = 'copper_oxidized'
+  }
+  const suffix = type === 'left' ? '_left' : type === 'right' ? '_right' : ''
+  return 'entity/chest/' + t + suffix
+}
+
+// 潜影盒：16×16×16 盒体，贴图 entity/shulker/*（64×64，顶=浅紫、底=深紫、四周=中紫）
+function shulkerModel(texKey) {
+  return {
+    textures: { all: texKey },
+    elements: [{
+      from: [0, 0, 0], to: [16, 16, 16],
+      faces: {
+        up: face(16, 0, 32, 16),
+        down: face(16, 32, 32, 48),
+        east: face(0, 16, 16, 32),
+        south: face(16, 16, 32, 32),
+        west: face(32, 16, 48, 32),
+        north: face(48, 16, 64, 32),
+      },
+    }],
+  }
+}
+
+// 头颅：8×8×8 立方（居中），贴图是生物皮肤，头部区域在皮肤纹理顶部（标准 64×64 布局）。
+// scale 用于 256×256 的龙首（皮肤整体放大 4 倍）。
+function headModel(texKey, scale) {
+  const s = scale || 1
+  return {
+    textures: { all: texKey },
+    elements: [{
+      from: [4, 4, 4], to: [12, 12, 12],
+      faces: {
+        up: face(8 * s, 0, 16 * s, 8 * s),
+        down: face(16 * s, 0, 24 * s, 8 * s),
+        east: face(0, 8 * s, 8 * s, 16 * s),
+        south: face(8 * s, 8 * s, 16 * s, 16 * s),
+        west: face(16 * s, 8 * s, 24 * s, 16 * s),
+        north: face(24 * s, 8 * s, 32 * s, 16 * s),
+      },
+    }],
   }
 }
 
@@ -69,30 +134,69 @@ function fluidModel(texKey, level) {
   }
 }
 
-// 箱子朝向 -> variant y 旋转（锁扣默认在 +z/南面）
-const CHEST_FACING_Y = { north: 180, south: 0, east: -90, west: 90 }
+// 箱子/头颅等「正面朝 +z」的朝向 -> variant y 旋转
+const FACING_Y = { north: 180, south: 0, east: -90, west: 90 }
 
 function chestVariant(p) {
-  const facing = String(p.facing || 'north')
-  return { y: CHEST_FACING_Y[facing] || 0 }
+  return { y: FACING_Y[String(p.facing || 'north')] || 0 }
 }
 
-// 铜箱子的氧化程度（属性名不确定时回退默认铜色）
-function copperChestTex(p) {
-  const s = String(p.oxidized || p.tier || p.oxidation || '')
-  if (s.includes('exposed')) return 'entity/chest/copper_exposed'
-  if (s.includes('weathered')) return 'entity/chest/copper_weathered'
-  if (s.includes('oxidized')) return 'entity/chest/copper_oxidized'
-  return 'entity/chest/copper'
+// 潜影盒朝向（箱盖默认在 +y 顶面）
+const SHULKER_FACING = {
+  up: {},
+  down: { x: 180 },
+  north: { x: 90 },
+  south: { x: -90 },
+  east: { x: -90, y: -90 },
+  west: { x: -90, y: 90 },
+}
+
+function shulkerVariant(p) {
+  return SHULKER_FACING[String(p.facing || 'up')] || {}
+}
+
+// 站立头颅用 rotation(0-15) 旋转，墙上头颅用 facing 旋转
+function headVariant(p, isWall) {
+  if (isWall) return { y: FACING_Y[String(p.facing || 'north')] || 0 }
+  return { y: (Number(p.rotation) || 0) * 22.5 }
+}
+
+// 潜影盒颜色 -> 贴图名
+const SHULKER_COLORS = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black']
+
+// 头颅类型 -> {贴图, texSize, scale, wall 方块名}。骷髅用 _skull 命名，其余用 _head。
+const HEAD_TYPES = {
+  player_head: { tex: 'entity/player/wide/steve', texSize: [64, 64], scale: 1, wall: 'player_wall_head' },
+  zombie_head: { tex: 'entity/zombie/zombie', texSize: [64, 64], scale: 1, wall: 'zombie_wall_head' },
+  creeper_head: { tex: 'entity/creeper/creeper', texSize: [64, 32], scale: 1, wall: 'creeper_wall_head' },
+  skeleton_skull: { tex: 'entity/skeleton/skeleton', texSize: [64, 32], scale: 1, wall: 'skeleton_wall_skull' },
+  wither_skeleton_skull: { tex: 'entity/skeleton/wither_skeleton', texSize: [64, 32], scale: 1, wall: 'wither_skeleton_wall_skull' },
+  piglin_head: { tex: 'entity/piglin/piglin', texSize: [64, 64], scale: 1, wall: 'piglin_wall_head' },
+  dragon_head: { tex: 'entity/enderdragon/dragon', texSize: [256, 256], scale: 4, wall: 'dragon_wall_head' },
 }
 
 const SPECIAL_MODELS = {
-  chest: (p) => ({ model: chestModel('entity/chest/normal'), variant: chestVariant(p) }),
-  trapped_chest: (p) => ({ model: chestModel('entity/chest/trapped'), variant: chestVariant(p) }),
-  ender_chest: (p) => ({ model: chestModel('entity/chest/ender'), variant: chestVariant(p) }),
-  copper_chest: (p) => ({ model: chestModel(copperChestTex(p)), variant: chestVariant(p) }),
+  // 箱子
+  chest: (p) => ({ model: chestModel(chestTex('chest', p.type, p), p.type), variant: chestVariant(p), texSize: 64 }),
+  trapped_chest: (p) => ({ model: chestModel(chestTex('trapped_chest', p.type, p), p.type), variant: chestVariant(p), texSize: 64 }),
+  ender_chest: (p) => ({ model: chestModel('entity/chest/ender', 'single'), variant: chestVariant(p), texSize: 64 }),
+  copper_chest: (p) => ({ model: chestModel(chestTex('copper_chest', p.type, p), p.type), variant: chestVariant(p), texSize: 64 }),
+  // 流体
   water: (p) => ({ model: fluidModel('block/water_still', p.level), variant: {} }),
   lava: (p) => ({ model: fluidModel('block/lava_still', p.level), variant: {} }),
+  bubble_column: () => ({ model: fluidModel('block/water_still', 0), variant: {} }),
+}
+
+// 潜影盒（16 种颜色 + 默认）
+SPECIAL_MODELS.shulker_box = (p) => ({ model: shulkerModel('entity/shulker/shulker'), variant: shulkerVariant(p), texSize: 64 })
+for (const c of SHULKER_COLORS) {
+  SPECIAL_MODELS[c + '_shulker_box'] = (p) => ({ model: shulkerModel('entity/shulker/shulker_' + c), variant: shulkerVariant(p), texSize: 64 })
+}
+
+// 头颅（站立 + 墙上两种）
+for (const [name, info] of Object.entries(HEAD_TYPES)) {
+  SPECIAL_MODELS[name] = (p) => ({ model: headModel(info.tex, info.scale), variant: headVariant(p, false), texSize: info.texSize })
+  SPECIAL_MODELS[info.wall] = (p) => ({ model: headModel(info.tex, info.scale), variant: headVariant(p, true), texSize: info.texSize })
 }
 
 export class BlockModelResolver {
@@ -119,11 +223,11 @@ export class BlockModelResolver {
   }
 
   async _resolve(shortName, properties) {
-    // 特殊方块：箱子/水/岩浆等没有常规块模型
+    // 特殊方块：箱子/潜影盒/头颅/水/岩浆等没有常规块模型
     const special = SPECIAL_MODELS[shortName]
     if (special) {
-      const { model, variant } = special(properties || {})
-      return bakeModel(model, variant)
+      const { model, variant, texSize } = special(properties || {})
+      return bakeModel(model, variant, texSize)
     }
 
     const bs = await this.assets.getJSON('blockstates/' + shortName + '.json')

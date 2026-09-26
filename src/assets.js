@@ -111,12 +111,13 @@ function textureFromBlob(blob) {
     const img = new Image()
     img.onload = () => {
       let source = img
-      // 动画贴图是「16 宽、竖向多帧」的竖直长条；裁取第一帧，避免整条被压到面上
-      if (img.width === 16 && img.height > 16) {
+      // 动画贴图是「宽×宽 N 帧」的竖向长条（如 16×512、32×1024）；裁取第一帧，避免整条被压到面上
+      if (img.height > img.width && img.height % img.width === 0) {
+        const w = img.width
         const c = document.createElement('canvas')
-        c.width = 16
-        c.height = 16
-        c.getContext('2d').drawImage(img, 0, 0, 16, 16, 0, 0, 16, 16)
+        c.width = w
+        c.height = w
+        c.getContext('2d').drawImage(img, 0, 0, w, w, 0, 0, w, w)
         source = c
       }
       const tex = new THREE.Texture(source)

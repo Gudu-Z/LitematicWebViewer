@@ -21,12 +21,15 @@ const FACE_DIRS = {
 }
 
 // 烘焙模型。variant 为 blockstate 里的 {x, y} 旋转角。
+// texSize 为贴图尺寸（数字或 [u,v]），用于把 UV 像素坐标归一化；默认 16（常规方块贴图）。
 // 返回 { quads, fullCube }
-export function bakeModel(model, variant) {
+export function bakeModel(model, variant, texSize = 16) {
   const elements = model.elements
   const textures = model.textures || {}
   const variantX = variant?.x || 0
   const variantY = variant?.y || 0
+  const texU = Array.isArray(texSize) ? texSize[0] : texSize
+  const texV = Array.isArray(texSize) ? texSize[1] : texSize
   const quads = []
 
   // 判断是否整方块（用于遮挡剔除）
@@ -67,7 +70,7 @@ export function bakeModel(model, variant) {
         let basev = -(bu - 0.5) * sin + (bv - 0.5) * cos + 0.5
         // 底面贴图相对顶面需垂直翻转（Minecraft 底面“从下方观察”的镜像约定）
         if (dir === 'down') basev = 1 - basev
-        uvs.push([(uv[0] + baseu * (uv[2] - uv[0])) / 16, (uv[1] + basev * (uv[3] - uv[1])) / 16])
+        uvs.push([(uv[0] + baseu * (uv[2] - uv[0])) / texU, (uv[1] + basev * (uv[3] - uv[1])) / texV])
       }
 
       let finalVerts = verts

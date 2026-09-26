@@ -280,7 +280,7 @@ export class Renderer {
           const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow'
           const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
           const mat = isWater || isLava
-            ? new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: isWater ? 0.6 : 0.9 })
+            ? new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: isWater ? 0.75 : 0.9 })
             : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5 })
           // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
           if (power !== null) {
