@@ -4,33 +4,95 @@
 
 import { bakeModel } from './modelBaker.js'
 
-// 一些方块没有常规 JSON 块模型（箱子靠方块实体渲染、水/岩浆是流体），给一个近似盒体
-function boxModel(sizePx, texKey, withCullface) {
-  const a = (16 - sizePx) / 2
-  const b = 16 - a
-  const faces = {
-    up: { uv: [0, 0, 16, 16], texture: '#all' },
-    down: { uv: [0, 0, 16, 16], texture: '#all' },
-    north: { uv: [0, 0, 16, 16], texture: '#all' },
-    south: { uv: [0, 0, 16, 16], texture: '#all' },
-    east: { uv: [0, 0, 16, 16], texture: '#all' },
-    west: { uv: [0, 0, 16, 16], texture: '#all' },
-  }
-  if (withCullface) {
-    for (const k of ['north', 'south', 'east', 'west']) faces[k].cullface = k
-  }
+// ===== 无常规 JSON 模型的方块 =====
+// 箱子靠方块实体渲染器绘制、水/岩浆是流体，这里手工构造模型。
+
+// 按 Minecraft 的 ModelPart.addBox 自动 UV 算法生成一个盒体的 6 面，
+// 用于 64×64 贴图的方块实体（箱子等）：texU/texV 为纹理偏移（像素），
+// from/to 为盒体局部坐标（像素）。UV 换算成 modelBaker 的 16 制（像素/4），
+// 这样 bakeModel 里 /16 后正好得到「像素/64」。
+function texBox(from, to, texU, texV) {
+  const [fx, fy, fz] = from
+  const [tx, ty, tz] = to
+  const dx = tx - fx
+  const dy = ty - fy
+  const dz = tz - fz
+  const uv = (u0, v0, u1, v1) => [u0 / 4, v0 / 4, u1 / 4, v1 / 4]
   return {
-    textures: { all: texKey },
-    elements: [{ from: [a, 0, a], to: [b, sizePx, b], faces }],
+    from,
+    to,
+    faces: {
+      up: { uv: uv(texU + dz, texV, texU + dz + dx, texV + dz), texture: '#all' }, // 顶 +y
+      down: { uv: uv(texU + dz + dx, texV, texU + dz + 2 * dx, texV + dz), texture: '#all' }, // 底 -y
+      east: { uv: uv(texU, texV + dz, texU + dz, texV + dz + dy), texture: '#all' }, // 东 +x
+      south: { uv: uv(texU + dz, texV + dz, texU + dz + dx, texV + dz + dy), texture: '#all' }, // 南 +z（正面）
+      west: { uv: uv(texU + dz + dx, texV + dz, texU + dz + dx + dz, texV + dz + dy), texture: '#all' }, // 西 -x
+      north: { uv: uv(texU + dz + dx + dz, texV + dz, texU + dz + dx + dz + dx, texV + dz + dy), texture: '#all' }, // 北 -z（背面）
+    },
   }
 }
 
+// 复刻原版 ChestRenderer 的箱子：底座 14×10×14 + 箱盖 14×5×14 + 锁扣 2×4×1。
+// 锁扣在 +z（南）面，朝向由 facing 属性在 _resolve 里旋转。
+function chestModel(texKey) {
+  return {
+    textures: { all: texKey },
+    elements: [
+      texBox([1, 0, 1], [15, 10, 15], 0, 19), // 底座，纹理偏移 (0,19)
+      texBox([1, 9, 1], [15, 14, 15], 0, 0), // 箱盖，纹理偏移 (0,0)
+      texBox([7, 8, 15], [9, 12, 16], 0, 0), // 锁扣，纹理偏移 (0,0)
+    ],
+  }
+}
+
+// 流体（水/岩浆）：level 决定水面高度。0=满格；1-7 每级下降 2px；8+（下落）近似薄层。
+function fluidModel(texKey, level) {
+  const lvl = Number(level) || 0
+  const h = lvl <= 0 ? 16 : lvl < 8 ? 16 - 2 * lvl : 2
+  const flow = texKey.replace('_still', '_flow')
+  return {
+    textures: { still: texKey, flow },
+    elements: [
+      {
+        from: [0, 0, 0],
+        to: [16, h, 16],
+        faces: {
+          up: { uv: [0, 0, 16, 16], texture: '#still', cullface: 'up' },
+          down: { uv: [0, 0, 16, 16], texture: '#still', cullface: 'down' },
+          north: { uv: [0, 0, 16, h], texture: '#flow', cullface: 'north' },
+          south: { uv: [0, 0, 16, h], texture: '#flow', cullface: 'south' },
+          east: { uv: [0, 0, 16, h], texture: '#flow', cullface: 'east' },
+          west: { uv: [0, 0, 16, h], texture: '#flow', cullface: 'west' },
+        },
+      },
+    ],
+  }
+}
+
+// 箱子朝向 -> variant y 旋转（锁扣默认在 +z/南面）
+const CHEST_FACING_Y = { north: 180, south: 0, east: -90, west: 90 }
+
+function chestVariant(p) {
+  const facing = String(p.facing || 'north')
+  return { y: CHEST_FACING_Y[facing] || 0 }
+}
+
+// 铜箱子的氧化程度（属性名不确定时回退默认铜色）
+function copperChestTex(p) {
+  const s = String(p.oxidized || p.tier || p.oxidation || '')
+  if (s.includes('exposed')) return 'entity/chest/copper_exposed'
+  if (s.includes('weathered')) return 'entity/chest/copper_weathered'
+  if (s.includes('oxidized')) return 'entity/chest/copper_oxidized'
+  return 'entity/chest/copper'
+}
+
 const SPECIAL_MODELS = {
-  chest: () => boxModel(14, 'entity/chest/normal'),
-  trapped_chest: () => boxModel(14, 'entity/chest/trapped'),
-  ender_chest: () => boxModel(14, 'entity/chest/ender'),
-  water: () => boxModel(16, 'block/water_still', true),
-  lava: () => boxModel(16, 'block/lava_still', true),
+  chest: (p) => ({ model: chestModel('entity/chest/normal'), variant: chestVariant(p) }),
+  trapped_chest: (p) => ({ model: chestModel('entity/chest/trapped'), variant: chestVariant(p) }),
+  ender_chest: (p) => ({ model: chestModel('entity/chest/ender'), variant: chestVariant(p) }),
+  copper_chest: (p) => ({ model: chestModel(copperChestTex(p)), variant: chestVariant(p) }),
+  water: (p) => ({ model: fluidModel('block/water_still', p.level), variant: {} }),
+  lava: (p) => ({ model: fluidModel('block/lava_still', p.level), variant: {} }),
 }
 
 export class BlockModelResolver {
@@ -59,7 +121,10 @@ export class BlockModelResolver {
   async _resolve(shortName, properties) {
     // 特殊方块：箱子/水/岩浆等没有常规块模型
     const special = SPECIAL_MODELS[shortName]
-    if (special) return bakeModel(special(), {})
+    if (special) {
+      const { model, variant } = special(properties || {})
+      return bakeModel(model, variant)
+    }
 
     const bs = await this.assets.getJSON('blockstates/' + shortName + '.json')
     if (!bs) return null

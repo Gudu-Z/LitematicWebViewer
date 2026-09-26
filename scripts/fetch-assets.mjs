@@ -5,7 +5,7 @@
 // 这些资源打包在 client.jar 内，脚本会下载 client.jar 并用 JSZip 解压所需文件。
 //
 // 用法：
-//   npm run setup                 # 下载默认版本（1.20.4）
+//   npm run setup                 # 下载默认版本（26.3，最新正式版）
 //   node scripts/fetch-assets.mjs 1.21.1   # 指定其他版本
 //
 // 首次运行需要联网，下载完成后可离线使用。
@@ -17,7 +17,7 @@ import JSZip from 'jszip'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const root = join(__dirname, '..')
-const version = process.argv[2] || '1.20.4'
+const version = process.argv[2] || '26.3'
 const outDir = join(root, 'public', 'assets', 'minecraft')
 
 const VERSION_MANIFEST = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'

@@ -108,8 +108,15 @@ function isFullCube(elements) {
 function resolveTexture(ref, textures) {
   let v = ref
   let guard = 0
-  while (typeof v === 'string' && v.startsWith('#') && guard++ < 8) {
-    v = textures[v.slice(1)]
+  while (guard++ < 16) {
+    if (typeof v === 'string' && v.startsWith('#')) {
+      v = textures[v.slice(1)]
+    } else if (v && typeof v === 'object' && typeof v.sprite === 'string') {
+      // 26.x 起纹理引用可以是对象 { sprite, force_translucent, ambientocclusion }
+      v = v.sprite
+    } else {
+      break
+    }
   }
   if (typeof v !== 'string' || v.startsWith('#')) return null
   let s = v

@@ -277,8 +277,8 @@ export class Renderer {
         const texture = await assets.getTexture(texKey)
         if (texture) {
           // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
-          const isWater = texKey === 'block/water_still'
-          const isLava = texKey === 'block/lava_still'
+          const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow'
+          const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
           const mat = isWater || isLava
             ? new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: isWater ? 0.6 : 0.9 })
             : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5 })
