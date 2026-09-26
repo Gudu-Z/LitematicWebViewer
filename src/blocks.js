@@ -11,48 +11,40 @@ import { bakeModel } from './modelBaker.js'
 // 构造一个面：uv 为贴图像素 [u0,v0,u1,v1]
 const face = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#all' })
 
-// 箱子：复刻原版 ChestRenderer —— 底座 14×10×14 + 箱盖 14×5×14 + 锁扣 2×4×1。
-// type: single/left/right。大箱子左右两半各延伸 1px 到中间，消除接缝；
-// 锁扣在 +z（南）面，朝向由 facing 属性旋转。
+// 箱子：复刻原版 ChestRenderer —— 底座 + 箱盖 + 锁扣。
+// 原版箱子贴图布局（已按实际贴图逐面核实）：顶面在第二列(x=u+dz+dx)、底面在第一列(x=u+dz)，
+// 与直觉相反。texBox 用这个修正后的 auto-UV 生成 6 面（像素坐标，配 texSize=64）。
+function texBox(from, to, texU, texV) {
+  const dx = to[0] - from[0]
+  const dy = to[1] - from[1]
+  const dz = to[2] - from[2]
+  return {
+    from,
+    to,
+    faces: {
+      up: face(texU + dz + dx, texV, texU + dz + 2 * dx, texV + dz),
+      down: face(texU + dz, texV, texU + dz + dx, texV + dz),
+      east: face(texU, texV + dz, texU + dz, texV + dz + dy),
+      south: face(texU + dz, texV + dz, texU + dz + dx, texV + dz + dy),
+      west: face(texU + dz + dx, texV + dz, texU + dz + dx + dz, texV + dz + dy),
+      north: face(texU + dz + dx + dz, texV + dz, texU + dz + dx + dz + dx, texV + dz + dy),
+    },
+  }
+}
+
+// type: single/left/right。大箱子左右两半各延伸 1px 到中间消除接缝；
+// 锁扣在 +z（南）面：单人箱居中，大箱子左右两半的锁扣都贴向中间（左箱在右缘、右箱在左缘），
+// 两半拼起来后锁扣恰好落在整只大箱子的正中间。朝向由 facing 属性旋转。
 function chestModel(texKey, type) {
   const x0 = type === 'right' ? 0 : 1
   const x1 = type === 'left' ? 16 : 15
+  const lockX = type === 'left' ? 15 : type === 'right' ? -1 : 7
   return {
     textures: { all: texKey },
     elements: [
-      { // 底座（顶=浅色木纹，底=深色）
-        from: [x0, 0, 1], to: [x1, 10, 15],
-        faces: {
-          up: face(14, 19, 28, 33),
-          down: face(28, 19, 42, 33),
-          east: face(0, 33, 14, 43),
-          south: face(14, 33, 28, 43),
-          west: face(28, 33, 42, 43),
-          north: face(42, 33, 56, 43),
-        },
-      },
-      { // 箱盖（顶=浅色，底=深色，注意与底座顶/底的 x 位置相反）
-        from: [x0, 9, 1], to: [x1, 14, 15],
-        faces: {
-          up: face(28, 0, 42, 14),
-          down: face(14, 0, 28, 14),
-          east: face(0, 14, 14, 19),
-          south: face(14, 14, 28, 19),
-          west: face(28, 14, 42, 19),
-          north: face(42, 14, 56, 19),
-        },
-      },
-      { // 锁扣（在 +z 正面）
-        from: [7, 8, 15], to: [9, 12, 16],
-        faces: {
-          up: face(1, 0, 3, 1),
-          down: face(3, 0, 5, 1),
-          east: face(0, 1, 1, 5),
-          south: face(1, 1, 3, 5),
-          west: face(3, 1, 4, 5),
-          north: face(4, 1, 6, 5),
-        },
-      },
+      texBox([x0, 0, 1], [x1, 10, 15], 0, 19), // 底座
+      texBox([x0, 9, 1], [x1, 14, 15], 0, 0), // 箱盖
+      texBox([lockX, 8, 15], [lockX + 2, 12, 16], 0, 0), // 锁扣
     ],
   }
 }
@@ -72,21 +64,35 @@ function chestTex(blockName, type, p) {
   return 'entity/chest/' + t + suffix
 }
 
-// 潜影盒：16×16×16 盒体，贴图 entity/shulker/*（64×64，顶=浅紫、底=深紫、四周=中紫）
+// 潜影盒：箱盖(顶部 12px) + 底座(底部 4px) 两段式，贴图 entity/shulker/*（64×64）。
+// 顶部=浅紫盖顶、四周=中紫盖侧、底部=深紫底座。朝向由 facing 属性旋转。
 function shulkerModel(texKey) {
   return {
     textures: { all: texKey },
-    elements: [{
-      from: [0, 0, 0], to: [16, 16, 16],
-      faces: {
-        up: face(16, 0, 32, 16),
-        down: face(16, 32, 32, 48),
-        east: face(0, 16, 16, 32),
-        south: face(16, 16, 32, 32),
-        west: face(32, 16, 48, 32),
-        north: face(48, 16, 64, 32),
+    elements: [
+      { // 箱盖 16×12×16（顶部 12px）
+        from: [0, 4, 0], to: [16, 16, 16],
+        faces: {
+          up: face(16, 0, 32, 16),
+          down: face(32, 0, 48, 16),
+          east: face(0, 16, 16, 28),
+          south: face(16, 16, 32, 28),
+          west: face(32, 16, 48, 28),
+          north: face(48, 16, 64, 28),
+        },
       },
-    }],
+      { // 底座 16×4×16（底部 4px，侧面取底座侧条底部）
+        from: [0, 0, 0], to: [16, 4, 16],
+        faces: {
+          up: face(16, 28, 32, 44),
+          down: face(32, 28, 48, 44),
+          east: face(0, 44, 16, 60),
+          south: face(16, 44, 32, 60),
+          west: face(32, 44, 48, 60),
+          north: face(48, 44, 64, 60),
+        },
+      },
+    ],
   }
 }
 

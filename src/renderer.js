@@ -277,10 +277,15 @@ export class Renderer {
         const texture = await assets.getTexture(texKey)
         if (texture) {
           // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
+          // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
           const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow'
           const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
           const mat = isWater || isLava
-            ? new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: isWater ? 0.75 : 0.9 })
+            ? new THREE.MeshLambertMaterial(
+                isWater
+                  ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75 }
+                  : { map: texture, transparent: true, opacity: 0.9 },
+              )
             : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5 })
           // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
           if (power !== null) {
