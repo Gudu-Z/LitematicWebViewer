@@ -41,6 +41,21 @@ export async function buildEntityMesh(entity, assets) {
   return null
 }
 
+// 一个放在 XY 平面、法线 +z 的四边形，UV 用 MC 约定（v=0 在上，配合贴图 flipY=false）。
+// three.js 自带的 PlaneGeometry 顶边是 v=1，会把 MC 贴图上下颠倒，故这里手写。
+function quadGeometry(w, h) {
+  const geo = new THREE.BufferGeometry()
+  const hw = w / 2
+  const hh = h / 2
+  geo.setAttribute(
+    'position',
+    new THREE.BufferAttribute(new Float32Array([-hw, hh, 0, hw, hh, 0, -hw, -hh, 0, hw, -hh, 0]), 3),
+  )
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), 2))
+  geo.setIndex([0, 2, 1, 1, 2, 3]) // 法线 +z
+  return geo
+}
+
 // 把一组烘焙好的 quads（verts/uvs/texKey，局部坐标 0..1）转成 Three.js 网格。
 // offset 统一加到顶点上（展示框传 -0.5，使模型居中于方块）；materialFor 按 texKey 取材质。
 function quadsToMesh(quads, offset, materialFor) {
@@ -145,7 +160,7 @@ async function buildItemFrame(entity, id, assets) {
       const rot = Number(entity.nbt?.ItemRotation) || 0
       const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rot * 45 * DEG)
       const itemMat = new THREE.MeshLambertMaterial({ map: itemTex, alphaTest: 0.5, side: THREE.DoubleSide })
-      const plane = new THREE.Mesh(new THREE.PlaneGeometry(0.5, 0.5), itemMat)
+      const plane = new THREE.Mesh(quadGeometry(0.5, 0.5), itemMat)
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q)
       plane.position.copy(anchor).addScaledVector(forward, 0.4375)
       plane.quaternion.copy(q).multiply(qz)
