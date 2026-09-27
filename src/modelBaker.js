@@ -61,7 +61,10 @@ export function bakeModel(model, variant, texSize = 16) {
       const uvs = []
       for (const c of corners) {
         let v = [c[0] ? to[0] : from[0], c[1] ? to[1] : from[1], c[2] ? to[2] : from[2]]
-        if (elRotation) v = rotateAround(v, elRotation.axis, elRotation.angle, elRotation.origin)
+        if (elRotation) {
+          if (elRotation.rescale) v = rescaleAround(v, elRotation.axis, elRotation.angle, elRotation.origin)
+          v = rotateAround(v, elRotation.axis, elRotation.angle, elRotation.origin)
+        }
         verts.push(v)
 
         const bu = c[3]
@@ -145,6 +148,31 @@ function autoUV(dir, from, to) {
     default:
       return [0, 0, 16, 16]
   }
+}
+
+// 元素旋转的 rescale：把元素在「垂直于旋转轴」的两个方向上按 1/(|cos|+|sin|) 缩放
+// （缩放中心为旋转 origin），使旋转后仍能放进原来的包围盒。
+// 对应原版 FaceBakery.computeRescale / RESCALE_22_5、RESCALE_45 常量（铁轨斜坡、十字植物等）。
+function rescaleAround([x, y, z], axis, angleDeg, origin) {
+  const a = (angleDeg * Math.PI) / 180
+  const scale = 1 / (Math.abs(Math.cos(a)) + Math.abs(Math.sin(a)))
+  const px = x - origin[0]
+  const py = y - origin[1]
+  const pz = z - origin[2]
+  let rx = px
+  let ry = py
+  let rz = pz
+  if (axis === 'x') {
+    ry = py * scale
+    rz = pz * scale
+  } else if (axis === 'y') {
+    rx = px * scale
+    rz = pz * scale
+  } else {
+    rx = px * scale
+    ry = py * scale
+  }
+  return [rx + origin[0], ry + origin[1], rz + origin[2]]
 }
 
 // 绕指定轴旋转（标准右手系正角）。Minecraft 的“变体旋转”是顺时针，
