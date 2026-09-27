@@ -165,14 +165,37 @@ async function buildItemFrame(entity, id, assets) {
   return group
 }
 
-// 框内物品网格（已缩放到 0.5 = 8px）：
-// 方块物品用 3D 方块模型渲染（游戏内图标即方块模型，axis 方块默认正立 y）；
-// 非方块（箭等）回退到 16px 贴图平面。
+// 方块物品解析用的默认属性。
+// 普通（variants）方块传 axis:y（轴类方块正立）；multipart 方块（墙/栅栏/玻璃板/铁栏杆等）
+// 需还原其「默认状态」——即核心立柱可见、四周无连接，否则没有任何部件匹配（得到空模型）。
+async function defaultItemProps(name, assets) {
+  const bs = await assets.getJSON('blockstates/' + name + '.json')
+  if (!bs || !bs.multipart) return { axis: 'y' }
+  const props = {}
+  for (const part of bs.multipart) {
+    const when = part.when
+    if (!when || typeof when !== 'object') continue
+    for (const k of Object.keys(when)) {
+      if (k === 'OR' || props[k] !== undefined) continue
+      const v = when[k]
+      const first = Array.isArray(v) ? String(v[0]) : String(v).split('|')[0]
+      if (k === 'up') props[k] = 'true' // 墙的中心立柱
+      else if (first === 'low' || first === 'tall' || first === 'none') props[k] = 'none' // 墙的侧面
+      else if (first === 'true' || first === 'false') props[k] = 'false' // 布尔连接（孤立状态默认无连接）
+      else if (k === 'facing') props[k] = 'north'
+      else props[k] = 'none'
+    }
+  }
+  return props
+}
+
+// 框内物品网格：方块物品用 3D 方块模型渲染（游戏内图标即方块模型），非方块（箭等）回退到贴图平面。
 async function buildFrameItem(item, resolver, assets) {
   const name = shortName(item.id)
   const holder = new THREE.Group()
 
-  const baked = await resolver.resolve('minecraft:' + name, { axis: 'y' })
+  const props = await defaultItemProps(name, assets)
+  const baked = await resolver.resolve('minecraft:' + name, props)
   if (baked && baked.quads && baked.quads.length) {
     const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
     const mats = new Map()
