@@ -158,9 +158,10 @@ function writeFace(g, verts, uvs, ox, oy, oz) {
   const ix = g.indices
   const f = g.f
   for (let k = 0; k < 4; k++) {
-    p[v + k * 3] = ox + verts[k][0]
-    p[v + k * 3 + 1] = oy + verts[k][1]
-    p[v + k * 3 + 2] = oz + verts[k][2]
+    // 顶点 k 的分量起点是 (v+k)*3，不是 v+k*3（v 是顶点游标，每面 +4）
+    p[(v + k) * 3] = ox + verts[k][0]
+    p[(v + k) * 3 + 1] = oy + verts[k][1]
+    p[(v + k) * 3 + 2] = oz + verts[k][2]
     u[(v + k) * 2] = uvs[k][0]
     u[(v + k) * 2 + 1] = uvs[k][1]
   }
