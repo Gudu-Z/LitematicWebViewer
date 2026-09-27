@@ -25,6 +25,7 @@ const PREFIXES = [
   'assets/minecraft/textures/block/',
   'assets/minecraft/blockstates/',
   'assets/minecraft/models/block/',
+  'assets/minecraft/models/item/', // 物品模型（区分 2D 物品贴图与 3D 方块图标）
   'assets/minecraft/textures/entity/', // 实体贴图（矿车等）
   'assets/minecraft/textures/item/', // 物品贴图（物品展示框内容）
 ]

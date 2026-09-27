@@ -189,11 +189,58 @@ async function defaultItemProps(name, assets) {
   return props
 }
 
-// 框内物品网格：方块物品用 3D 方块模型渲染（游戏内图标即方块模型），非方块（箭等）回退到贴图平面。
+// 读取方块模型链里继承的 "fixed" 显示缩放：block/block.json 为 0.5（立方体方块），
+// 独立模型（墙柱/火把/十字植物等）没有此字段 → 1。
+async function blockFixedScale(name, assets) {
+  const bs = await assets.getJSON('blockstates/' + name + '.json')
+  let modelPath = null
+  if (bs?.variants) {
+    const keys = Object.keys(bs.variants)
+    let entry = bs.variants['']
+    if (!entry) entry = bs.variants[keys.find((k) => k)]
+    const v = Array.isArray(entry) ? entry[0] : entry
+    if (typeof v === 'string') modelPath = v
+    else if (v?.model) modelPath = v.model
+  } else if (bs?.multipart) {
+    const part = bs.multipart.find((p) => p.apply?.model)
+    modelPath = part?.apply?.model
+  }
+  if (!modelPath) return 1
+  const seen = new Set()
+  let cur = String(modelPath).replace(/^minecraft:/, '')
+  for (let d = 0; d < 8 && cur && !seen.has(cur); d++) {
+    seen.add(cur)
+    const m = await assets.getJSON('models/' + cur + '.json')
+    if (!m) break
+    const s = m.display?.fixed?.scale
+    if (Array.isArray(s) && s.length) return s[0]
+    if (typeof s === 'number') return s
+    cur = (m.parent || '').replace(/^minecraft:/, '')
+  }
+  return 1
+}
+
+// 框内物品网格：先按物品模型判定——含 layer0 的 2D 物品（小麦/铁轨/箭/剑等）渲染成平面贴图；
+// 否则按方块模型渲染（游戏内方块图标即方块模型）。
 async function buildFrameItem(item, resolver, assets) {
   const name = shortName(item.id)
   const holder = new THREE.Group()
 
+  // 2D 物品：models/item/NAME.json 含 layer0（fixed 缩放 1，叠加框体 0.5 后总 0.5 = 8px）
+  const itemModel = await assets.getJSON('models/item/' + name + '.json')
+  const layer0 = itemModel?.textures?.layer0
+  if (layer0) {
+    const texKey = String(layer0).replace(/^minecraft:/, '')
+    const tex = await assets.getTexture(texKey)
+    if (tex) {
+      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+      holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
+      holder.scale.setScalar(0.5)
+      return holder
+    }
+  }
+
+  // 方块物品：3D 方块模型，缩放 = 框体 0.5 × 模型链的 fixed 缩放（立方体 0.25，墙柱/植物 0.5）
   const props = await defaultItemProps(name, assets)
   const baked = await resolver.resolve('minecraft:' + name, props)
   if (baked && baked.quads && baked.quads.length) {
@@ -207,11 +254,12 @@ async function buildFrameItem(item, resolver, assets) {
       }),
     )
     holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
-    // 方块模型继承 block/block.json 的 "fixed" 显示缩放 0.5，叠加框体的 0.5 后总缩放 0.25（4px）
-    holder.scale.setScalar(0.25)
+    const fixedScale = await blockFixedScale(name, assets)
+    holder.scale.setScalar(0.5 * fixedScale)
     return holder
   }
 
+  // 兜底：贴图平面
   const tex =
     (await assets.getTexture('item/' + name)) ||
     (await assets.getTexture('block/' + name)) ||
