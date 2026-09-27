@@ -73,77 +73,128 @@ function faceKey(palette, gi, q) {
 
 // 收集一个流体方块应生成的面，逐个交给 record(texKey, pos, uvs)。
 // lx/lz/ly 是局部坐标（用于邻居查找与越界判断），x/y/z 是世界坐标（用于顶点）。
+//
+// 表面高度算法按原版 FluidRenderer（1.21.11 反编译源码）移植：
+//   - getFluidHeight：同种流体取 (8-level)/8（上方有同种流体视为满格 1）；
+//     非同种方块：实心（原版 isSolid，树叶除外）为 -1，其余（空气等）为 0。
+//   - calculateFluidHeight：角点 = 自身 + 两相邻 + 对角 的加权平均；
+//     高度 ≥ 0.8 权重 ×10（让表面贴近高水位），< 0 的实心贡献不参与；
+//     任一相邻高度 ≥ 1 时角点直接取 1。
+//     相邻方块计算同一世界坐标角点时的数值集合相同，因此表面连续，不会出现台阶。
 function emitFluidFaces(palette, blocks, lx, lz, ly, x, y, z, gi, grid, record) {
   const name = shortName(palette[gi].name)
   const isLava = name === 'lava'
-  const level = Number(palette[gi].properties?.level) || 0
-  const self = fluidHeight(level)
   const stillTex = isLava ? 'block/lava_still' : 'block/water_still'
   const flowTex = isLava ? 'block/lava_flow' : 'block/water_flow'
 
-  // 相邻流体高度（非流体邻居用自身高度，避免水面边缘塌陷）
-  const nbh = (dx, dz) => {
+  // 越界安全的邻居读取
+  const get = (dx, dy, dz) => {
     const nx = lx + dx
-    const nz = lz + dz
-    if (nx < 0 || nx >= grid.W || nz < 0 || nz >= grid.D) return self
-    const ngi = blocks.get(nx + nz * grid.W + ly * grid.strideY)
-    if (ngi === undefined || !isFluidName(palette[ngi].name)) return self
-    return fluidHeight(Number(palette[ngi].properties?.level) || 0)
-  }
-  // 角高度 = (自身 + 相邻两方向) / 3，邻居更低时用自身（水被托住不下坠）
-  const corner = (dx, dz) => {
-    const a = Math.max(self, nbh(dx, 0))
-    const b = Math.max(self, nbh(0, dz))
-    return (self + a + b) / 3
-  }
-  const h00 = corner(-1, -1) // 西北 x=0,z=0
-  const h10 = corner(1, -1) // 东北 x=16,z=0
-  const h01 = corner(-1, 1) // 西南 x=0,z=16
-  const h11 = corner(1, 1) // 东南 x=16,z=16
-
-  const fluidAt = (dx, dz) => {
-    const nx = lx + dx
-    const nz = lz + dz
-    if (nx < 0 || nx >= grid.W || nz < 0 || nz >= grid.D) return false
-    const ngi = blocks.get(nx + nz * grid.W + ly * grid.strideY)
-    return ngi !== undefined && isFluidName(palette[ngi].name)
-  }
-  // 上方/下方被流体或不透明方块遮挡
-  const occluded = (dy) => {
     const ny = ly + dy
-    if (ny < 0 || ny >= grid.H) return false
-    const ngi = blocks.get(lx + lz * grid.W + ny * grid.strideY)
-    if (ngi === undefined) return false
-    if (isFluidName(palette[ngi].name)) return true
-    return !!(palette[ngi].baked && palette[ngi].baked.fullCube && !isTransparent(palette[ngi].name))
+    const nz = lz + dz
+    if (nx < 0 || nx >= grid.W || ny < 0 || ny >= grid.H || nz < 0 || nz >= grid.D) return undefined
+    return blocks.get(nx + nz * grid.W + ny * grid.strideY)
   }
+  const giName = (gi2) => (gi2 === undefined ? '' : shortName(palette[gi2].name))
+  const isFluid = (gi2) => giName(gi2) === name
+  // 原版 isSolid 的近似：完整方块且不是树叶（玻璃等透明完整方块在原版也算 solid，
+  // 同样会遮挡相邻的流体面；树叶的 culling shape 为空，不遮挡）
+  const isSolid = (gi2) =>
+    gi2 !== undefined && !!palette[gi2].baked && palette[gi2].baked.fullCube && !giName(gi2).endsWith('_leaves')
+
+  // 原版 getFluidHeight
+  const fluidH = (dx, dy, dz) => {
+    const ngi = get(dx, dy, dz)
+    if (ngi === undefined) return 0
+    if (giName(ngi) === name) {
+      // 上方有同种流体 → 视为满格
+      if (isFluid(get(dx, dy + 1, dz))) return 1
+      return fluidHeight(palette[ngi].properties?.level)
+    }
+    return isSolid(ngi) ? -1 : 0
+  }
+
+  // 当前方块自身高度（原版的 n）
+  const self = fluidH(0, 0, 0)
+
+  // 原版 calculateFluidHeight
+  const corner = (dx, dz) => {
+    const a = fluidH(dx, 0, 0)
+    const b = fluidH(0, 0, dz)
+    if (a >= 1 || b >= 1) return 1
+    let sum = 0
+    let cnt = 0
+    const add = (h) => {
+      if (h >= 0.8) {
+        sum += h * 10
+        cnt += 10
+      } else if (h >= 0) {
+        sum += h
+        cnt += 1
+      }
+      // h < 0（实心方块）不参与平均，避免把表面拖低
+    }
+    if (a > 0 || b > 0) {
+      const f = fluidH(dx, 0, dz)
+      if (f >= 1) return 1
+      add(f)
+    }
+    add(self)
+    add(a)
+    add(b)
+    return sum / cnt
+  }
+
+  let h00, h10, h01, h11
+  if (self >= 1) {
+    // 自身满格时表面平齐（原版 n >= 1 的特判）
+    h00 = h10 = h01 = h11 = 1
+  } else {
+    h00 = corner(-1, -1) // 西北 x=0,z=0
+    h10 = corner(1, -1) // 东北 x=16,z=0
+    h01 = corner(-1, 1) // 西南 x=0,z=16
+    h11 = corner(1, 1) // 东南 x=16,z=16
+  }
+
+  const above = get(0, 1, 0)
+  const below = get(0, -1, 0)
+  const aboveFluid = isFluid(above)
+  const belowFluid = isFluid(below)
+  // 底面：下方不是同种流体且不被完整方块遮挡（原版 isSideCovered：非顶面一律视为被遮挡）
+  const bottomShown = !belowFluid && !isSolid(below)
+  const w = bottomShown ? 0.001 : 0 // 原版：底面存在时侧面底边抬高 0.001 防闪烁
+  // 顶面：上方不是同种流体；上方为完整方块时只有表面满格才遮挡（原版 isSideCovered 逻辑）
+  const minCorner = Math.min(h00, h10, h01, h11)
+  const topShown = !aboveFluid && !(isSolid(above) && minCorner >= 1)
 
   let count = 0
-  // 顶面（平滑，四角不同高度）
-  if (!occluded(1)) {
-    record(stillTex, [[x, y + h01, z + 1], [x + 1, y + h11, z + 1], [x, y + h00, z], [x + 1, y + h10, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+  if (topShown) {
+    // 顶面（四角各降 0.001 防闪烁，同原版）
+    record(stillTex,
+      [[x, y + h01 - 0.001, z + 1], [x + 1, y + h11 - 0.001, z + 1], [x, y + h00 - 0.001, z], [x + 1, y + h10 - 0.001, z]],
+      [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  // 底面
-  if (!occluded(-1)) {
-    record(stillTex, [[x + 1, y, z + 1], [x, y, z + 1], [x + 1, y, z], [x, y, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+  if (bottomShown) {
+    record(stillTex, [[x + 1, y + w, z + 1], [x, y + w, z + 1], [x + 1, y + w, z], [x, y + w, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  // 侧面（邻居是流体时剔除，避免内部面）
-  if (!fluidAt(0, -1)) {
-    record(flowTex, [[x + 1, y, z], [x, y, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+  // 侧面（邻居为同种流体或完整方块时剔除）
+  const side = (dx, dz) => get(dx, 0, dz)
+  if (!isFluid(side(0, -1)) && !isSolid(side(0, -1))) {
+    record(flowTex, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  if (!fluidAt(0, 1)) {
-    record(flowTex, [[x, y, z + 1], [x + 1, y, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+  if (!isFluid(side(0, 1)) && !isSolid(side(0, 1))) {
+    record(flowTex, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  if (!fluidAt(-1, 0)) {
-    record(flowTex, [[x, y + h00, z], [x, y, z], [x, y + h01, z + 1], [x, y, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
+  if (!isFluid(side(-1, 0)) && !isSolid(side(-1, 0))) {
+    record(flowTex, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
     count++
   }
-  if (!fluidAt(1, 0)) {
-    record(flowTex, [[x + 1, y + h11, z + 1], [x + 1, y, z + 1], [x + 1, y + h10, z], [x + 1, y, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
+  if (!isFluid(side(1, 0)) && !isSolid(side(1, 0))) {
+    record(flowTex, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
     count++
   }
   return count

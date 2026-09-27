@@ -42,31 +42,53 @@ function buildReference(palette, strBlocks) {
     const parts = key.split(',')
     const x = +parts[0], y = +parts[1], z = +parts[2]
     if (isFluidName(palette[gi].name)) {
-      // 流体参考：字符串查找版（复刻 emitFluidFaces 的旧实现）
-      const isLava = shortName(palette[gi].name) === 'lava'
-      const self = fluidHeight(palette[gi].properties?.level)
+      // 流体参考：字符串查找版（复刻新 emitFluidFaces 的原版 FluidRenderer 算法）
+      const name = shortName(palette[gi].name)
+      const isLava = name === 'lava'
       const still = isLava ? 'block/lava_still' : 'block/water_still'
       const flow = isLava ? 'block/lava_flow' : 'block/water_flow'
-      const nbh = (dx, dz) => {
-        const ngi = strBlocks.get((x + dx) + ',' + y + ',' + (z + dz))
-        if (ngi === undefined || !isFluidName(palette[ngi].name)) return self
-        return fluidHeight(palette[ngi].properties?.level)
+      const get = (dx, dy, dz) => strBlocks.get((x + dx) + ',' + (y + dy) + ',' + (z + dz))
+      const giName = (gi2) => (gi2 === undefined ? '' : shortName(palette[gi2].name))
+      const isFluid = (gi2) => giName(gi2) === name
+      const isSolid = (gi2) => gi2 !== undefined && !!palette[gi2].baked && palette[gi2].baked.fullCube && !giName(gi2).endsWith('_leaves')
+      const fluidH = (dx, dy, dz) => {
+        const ngi = get(dx, dy, dz)
+        if (ngi === undefined) return 0
+        if (giName(ngi) === name) {
+          if (isFluid(get(dx, dy + 1, dz))) return 1
+          return fluidHeight(palette[ngi].properties?.level)
+        }
+        return isSolid(ngi) ? -1 : 0
       }
+      const self = fluidH(0, 0, 0)
       const corner = (dx, dz) => {
-        const a = Math.max(self, nbh(dx, 0)), b = Math.max(self, nbh(0, dz))
-        return (self + a + b) / 3
+        const a = fluidH(dx, 0, 0)
+        const b = fluidH(0, 0, dz)
+        if (a >= 1 || b >= 1) return 1
+        let sum = 0, cnt = 0
+        const add = (h) => {
+          if (h >= 0.8) { sum += h * 10; cnt += 10 }
+          else if (h >= 0) { sum += h; cnt += 1 }
+        }
+        if (a > 0 || b > 0) {
+          const f = fluidH(dx, 0, dz)
+          if (f >= 1) return 1
+          add(f)
+        }
+        add(self); add(a); add(b)
+        return sum / cnt
       }
-      const h00 = corner(-1, -1), h10 = corner(1, -1), h01 = corner(-1, 1), h11 = corner(1, 1)
-      const fluidAt = (dx, dz) => {
-        const ngi = strBlocks.get((x + dx) + ',' + y + ',' + (z + dz))
-        return ngi !== undefined && isFluidName(palette[ngi].name)
+      let h00, h10, h01, h11
+      if (self >= 1) h00 = h10 = h01 = h11 = 1
+      else {
+        h00 = corner(-1, -1); h10 = corner(1, -1); h01 = corner(-1, 1); h11 = corner(1, 1)
       }
-      const occluded = (dy) => {
-        const ngi = strBlocks.get(x + ',' + (y + dy) + ',' + z)
-        if (ngi === undefined) return false
-        if (isFluidName(palette[ngi].name)) return true
-        return !!(palette[ngi].baked && palette[ngi].baked.fullCube && !isTransparent(palette[ngi].name))
-      }
+      const above = get(0, 1, 0)
+      const below = get(0, -1, 0)
+      const bottomShown = !isFluid(below) && !isSolid(below)
+      const w = bottomShown ? 0.001 : 0
+      const minCorner = Math.min(h00, h10, h01, h11)
+      const topShown = !isFluid(above) && !(isSolid(above) && minCorner >= 1)
       const push = (tex, pos, uv) => {
         let g = groups.get(tex)
         if (!g) { g = []; groups.set(tex, g) }
@@ -76,12 +98,12 @@ function buildReference(palette, strBlocks) {
         g.push(sig)
         emitted++
       }
-      if (!occluded(1)) push(still, [[x, y + h01, z + 1], [x + 1, y + h11, z + 1], [x, y + h00, z], [x + 1, y + h10, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-      if (!occluded(-1)) push(still, [[x + 1, y, z + 1], [x, y, z + 1], [x + 1, y, z], [x, y, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-      if (!fluidAt(0, -1)) push(flow, [[x + 1, y, z], [x, y, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-      if (!fluidAt(0, 1)) push(flow, [[x, y, z + 1], [x + 1, y, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-      if (!fluidAt(-1, 0)) push(flow, [[x, y + h00, z], [x, y, z], [x, y + h01, z + 1], [x, y, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
-      if (!fluidAt(1, 0)) push(flow, [[x + 1, y + h11, z + 1], [x + 1, y, z + 1], [x + 1, y + h10, z], [x + 1, y, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
+      if (topShown) push(still, [[x, y + h01 - 0.001, z + 1], [x + 1, y + h11 - 0.001, z + 1], [x, y + h00 - 0.001, z], [x + 1, y + h10 - 0.001, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+      if (bottomShown) push(still, [[x + 1, y + w, z + 1], [x, y + w, z + 1], [x + 1, y + w, z], [x, y + w, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+      if (!isFluid(get(0, 0, -1)) && !isSolid(get(0, 0, -1))) push(flow, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+      if (!isFluid(get(0, 0, 1)) && !isSolid(get(0, 0, 1))) push(flow, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+      if (!isFluid(get(-1, 0, 0)) && !isSolid(get(-1, 0, 0))) push(flow, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
+      if (!isFluid(get(1, 0, 0)) && !isSolid(get(1, 0, 0))) push(flow, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
       continue
     }
     for (const q of quadsByPalette[gi]) {
