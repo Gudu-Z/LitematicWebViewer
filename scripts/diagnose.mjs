@@ -80,7 +80,7 @@ async function main() {
   const raw = decompress(buf)
   console.log(`[diagnose] 解压后 ${raw.length} 字节`)
 
-  const data = parseLitematicaRaw(raw)
+  const data = await parseLitematicaRaw(raw)
   console.log(`[diagnose] 元数据：名称="${data.metadata.name}" 尺寸=${data.metadata.enclosingSize.x}×${data.metadata.enclosingSize.y}×${data.metadata.enclosingSize.z}`)
   console.log(`[diagnose] 调色板 ${data.palette.length} 种方块，方块映射 ${data.blocks.size} 个`)
 
@@ -91,7 +91,7 @@ async function main() {
   }
   console.log(`[diagnose] 可渲染的方块种类：${resolvable} / ${data.palette.length}`)
 
-  const { groups, emitted } = buildFaceGroups(data.palette, data.blocks)
+  const { groups, emitted } = await buildFaceGroups(data.palette, data.blocks, data.bounds)
   console.log(`[diagnose] 生成的面数：${emitted}，分组（贴图）数：${groups.size}`)
   console.log(`[diagnose] 结论：${emitted > 0 ? '面生成正常' : '面生成为零，问题在面生成/烘焙环节'}`)
 }

@@ -144,6 +144,7 @@ async function openFile(file) {
     ui.setProgress(0.35)
 
     currentData = data
+    ui.setStatus(`正在生成几何体（${data.blocks.size.toLocaleString()} 个方块）…`)
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
     await renderCurrentSigns()
     await renderCurrentEntities()
@@ -213,7 +214,8 @@ function extractSigns(data) {
       for (let i = 1; i <= 4; i++) lines.push(textComponentToString(te.nbt && te.nbt['Text' + i]))
     }
     if (lines.every((l) => !l)) continue
-    const gi = data.blocks.get(te.x + ',' + te.y + ',' + te.z)
+    const b = data.bounds
+    const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
     const rotation = gi !== undefined ? data.palette[gi].properties?.rotation : 0
     signs.push({ x: te.x, y: te.y, z: te.z, rotation: Number(rotation) || 0, lines })
   }

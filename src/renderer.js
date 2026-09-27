@@ -259,7 +259,7 @@ export class Renderer {
     this.clear()
     const { palette, blocks, bounds } = data
 
-    const { groups, emitted } = buildFaceGroups(palette, blocks)
+    const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45))
     if (emitted === 0) {
       throw new Error('没有生成任何可显示的面（方块可能全是空气或贴图解析失败）')
     }
@@ -280,13 +280,15 @@ export class Renderer {
           // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
           const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow'
           const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
+          // flatShading：方块每个面的 4 个顶点本就同法线，用几何导数算平直法线即可，
+          // 省去法线数组（超大投影可省数百 MB 内存），光照效果一致。
           const mat = isWater || isLava
             ? new THREE.MeshLambertMaterial(
                 isWater
-                  ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75 }
-                  : { map: texture, transparent: true, opacity: 0.9 },
+                  ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75, flatShading: true }
+                  : { map: texture, transparent: true, opacity: 0.9, flatShading: true },
               )
-            : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5 })
+            : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
           // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
           if (power !== null) {
             const c = redstoneTint(power)
@@ -303,15 +305,17 @@ export class Renderer {
       throw new Error(`贴图加载失败：${texKeys.length} 张贴图都未能加载（请确认已运行 npm run setup）`)
     }
 
+    let i = 0
     for (const [texKey, g] of groups) {
       const mat = materials.get(texKey)
       if (!mat) continue
       const geo = new THREE.BufferGeometry()
       geo.setAttribute('position', new THREE.Float32BufferAttribute(g.positions, 3))
-      geo.setAttribute('normal', new THREE.Float32BufferAttribute(g.normals, 3))
       geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2))
       geo.setIndex(g.indices)
       this.group.add(new THREE.Mesh(geo, mat))
+      // 超大几何体上传 GPU 时也定期让出主线程，避免最后一段卡顿
+      if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
     }
 
     this._fit(bounds)

@@ -14,26 +14,46 @@ const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'ba
 
 // 解码位压缩的 BlockStates（小端序），返回每个位置的调色板索引。
 // startIdx 支持分块解码：只解码 [startIdx, startIdx+total) 这段，用于超大投影分块处理。
+//
+// 性能说明：超大投影（上亿方块）解码是最耗时的环节。若每个方块做 BigInt 运算
+// （BigInt 比 Number 慢约一个数量级），全量解码要数十秒。这里把每个 64 位 long
+// 拆成两个 32 位半区，用纯 Number 位运算逐位提取，速度快 5 倍以上。
 export function decodeBlockStates(longs, bits, total, startIdx = 0) {
   const out = new Uint32Array(total)
-  const mask = (1n << BigInt(bits)) - 1n
+  const mask = (1 << bits) - 1 // bits 恒 ≤ 32，mask 落在 32 位整数范围内
+  let bit = startIdx * bits // 起始位偏移（可能位于某个 long 的中间）
+  let word = -1
+  let lo = 0
+  let hi = 0
   for (let j = 0; j < total; j++) {
-    const i = startIdx + j
-    const start = i * bits
-    // 注意：不能用 start >> 6 / start & 63，JS 位运算会截成 32 位，
-    // 超大型投影（i*bits > 2^31）会溢出导致 word 为负、longs[word] 为 undefined。
-    const word = Math.floor(start / 64)
-    const off = start % 64
-    let v
-    if (off + bits <= 64) {
-      v = (BigInt.asUintN(64, longs[word]) >> BigInt(off)) & mask
-    } else {
-      const low = BigInt.asUintN(64, longs[word]) >> BigInt(off)
-      const hiBits = off + bits - 64
-      const hi = BigInt.asUintN(64, longs[word + 1]) & ((1n << BigInt(hiBits)) - 1n)
-      v = low | (hi << BigInt(64 - off))
+    // 不能用 bit >> 6 / bit & 63（32 位溢出）；bit/64 在 <2^53 内是精确的整数，
+    // 且 word 值 <2^31，| 0 截断安全。off = bit & 63 取低 6 位，溢出也正确。
+    const w = (bit / 64) | 0
+    const off = bit & 63
+    if (w !== word) {
+      word = w
+      const b = BigInt.asUintN(64, longs[w])
+      lo = Number(b & 0xffffffffn)
+      hi = Number(b >> 32n)
     }
-    out[j] = Number(v)
+    let v
+    if (off + bits <= 32) {
+      v = (lo >>> off) & mask
+    } else if (off >= 32 && off + bits <= 64) {
+      v = (hi >>> (off - 32)) & mask
+    } else if (off >= 32) {
+      // 跨 64 位 word 边界：高位部分在当前 word 高半区，剩余低位在下一 word 低半区
+      const take = 64 - off
+      const next = BigInt.asUintN(64, longs[w + 1])
+      const nextLo = Number(next & 0xffffffffn)
+      v = ((hi >>> (off - 32)) | (nextLo << take)) & mask
+    } else {
+      // 跨 32 位半区边界，但仍在同一 word 内
+      const lowBits = 32 - off
+      v = ((lo >>> off) | ((hi & ((1 << (bits - lowBits)) - 1)) << lowBits)) & mask
+    }
+    out[j] = v
+    bit += bits
   }
   return out
 }
@@ -47,7 +67,11 @@ function vec(v) {
 }
 
 // 解析 .litematica 的 ArrayBuffer，返回：
-// { metadata, palette: [{name, properties, key}], blocks: Map<"x,y,z" -> paletteIndex>, bounds }
+// { metadata, palette: [{name, properties, key}], blocks: Map<整数key -> paletteIndex>, bounds }
+//
+// blocks 的 key 是把局部坐标编码成的整数：key = lx + lz*W + ly*(W*D)
+// （lx = wx-minX，W=宽，D=深，strideY = W*D）。相比 "x,y,z" 字符串 key，
+// 整数 key 的邻居查找是纯整数算术、速度快数倍，内存也更小，超大投影收益显著。
 // onProgress(fraction) 在解析过程中回调进度（0~1），用于超大文件显示进度。
 export async function parseLitematicaRaw(rawBytes, onProgress) {
   const root = parseNBT(rawBytes)
@@ -70,16 +94,31 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     throw new Error('文件中没有 Regions 数据')
   }
 
-  // 预先统计总方块数（用于进度显示）
+  // 第一遍：统计总方块数 + 全局边界（都由区域 Position/Size 直接得出，无需解码）
   let totalBlocks = 0
+  let minX = Infinity, minY = Infinity, minZ = Infinity
+  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
   for (const region of Object.values(regions)) {
+    const pos = vec(region.Position)
     const size = vec(region.Size)
     const dx = Math.abs(size.x)
     const dy = Math.abs(size.y)
     const dz = Math.abs(size.z)
     if (dx === 0 || dy === 0 || dz === 0) continue
     totalBlocks += dx * dy * dz
+    const wx0 = Math.min(pos.x, pos.x + size.x + 1)
+    const wy0 = Math.min(pos.y, pos.y + size.y + 1)
+    const wz0 = Math.min(pos.z, pos.z + size.z + 1)
+    minX = Math.min(minX, wx0)
+    maxX = Math.max(maxX, wx0 + dx - 1)
+    minY = Math.min(minY, wy0)
+    maxY = Math.max(maxY, wy0 + dy - 1)
+    minZ = Math.min(minZ, wz0)
+    maxZ = Math.max(maxZ, wz0 + dz - 1)
   }
+  const W = maxX - minX + 1
+  const D = maxZ - minZ + 1
+  const strideY = W * D // 每升高一层（y+1）整数 key 增加的步长
 
   const palette = []
   const paletteIndexByKey = new Map()
@@ -99,10 +138,9 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
   const blocks = new Map()
   const tileEntities = [] // 方块实体（如告示牌）
   const entities = [] // 实体（如矿车、物品展示框）
-  let minX = Infinity, minY = Infinity, minZ = Infinity
-  let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
   let doneBlocks = 0
 
+  // 第二遍：解码并建立整数 key 的方块映射
   for (const region of Object.values(regions)) {
     const pos = vec(region.Position)
     const size = vec(region.Size)
@@ -115,14 +153,6 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     const wx0 = Math.min(pos.x, pos.x + size.x + 1)
     const wy0 = Math.min(pos.y, pos.y + size.y + 1)
     const wz0 = Math.min(pos.z, pos.z + size.z + 1)
-
-    // 边界由区域范围直接得出（含空气），无需遍历每个方块
-    minX = Math.min(minX, wx0)
-    maxX = Math.max(maxX, wx0 + dx - 1)
-    minY = Math.min(minY, wy0)
-    maxY = Math.max(maxY, wy0 + dy - 1)
-    minZ = Math.min(minZ, wz0)
-    maxZ = Math.max(maxZ, wz0 + dz - 1)
 
     const paletteList = region.BlockStatePalette || []
     const localToGlobal = new Array(paletteList.length)
@@ -155,34 +185,36 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
 
     const bits = Math.max(2, Math.ceil(Math.log2(paletteList.length)))
     const rowSize = dz * dx // 每层（y 固定）的方块数
+    const lx0 = wx0 - minX
+    const lz0 = wz0 - minZ
+    const ly0 = wy0 - minY
 
     // 按「层」分块解码并即时存入 Map：避免一次性分配超大数组，
     // 且每解码一层让出一次主线程，防止超大投影（上亿方块）卡死界面。
     for (let y = 0; y < dy; y++) {
       const decoded = decodeBlockStates(region.BlockStates, bits, rowSize, y * rowSize)
+      const yKey = (ly0 + y) * strideY
       let rowIdx = 0
       for (let z = 0; z < dz; z++) {
+        const rowBase = yKey + (lz0 + z) * W + lx0
         for (let x = 0; x < dx; x++) {
           const li = decoded[rowIdx++]
           if (isSkip[li]) continue // 空气类方块不入 Map
-          const gi = localToGlobal[li] ?? 0
-          const wx = wx0 + x
-          const wy = wy0 + y
-          const wz = wz0 + z
-          blocks.set(wx + ',' + wy + ',' + wz, gi)
+          blocks.set(rowBase + x, localToGlobal[li] ?? 0)
         }
       }
       doneBlocks += rowSize
       onProgress?.(totalBlocks ? doneBlocks / totalBlocks : 0)
       await new Promise((r) => setTimeout(r, 0)) // 让出主线程，保持界面响应
     }
+    region.BlockStates = null // 该区域已解码完，释放大数组（超大投影可达数百 MB），降低峰值内存
   }
 
   const bounds = {
     minX, minY, minZ, maxX, maxY, maxZ,
-    width: maxX - minX + 1,
+    width: W,
     height: maxY - minY + 1,
-    depth: maxZ - minZ + 1,
+    depth: D,
   }
 
   return { metadata, palette, blocks, bounds, tileEntities, entities }
