@@ -24,8 +24,6 @@ const FACING_DIRS = {
 // 水平方向的 getPositiveHorizontalDegrees()（南 0 / 西 90 / 北 180 / 东 270）
 const HORIZ_DEG = { 2: 180, 3: 0, 4: 90, 5: 270 }
 const DEG = Math.PI / 180
-// 展示框渲染物品时的整体缩放（原版 ItemFrameRenderer 对物品施加的缩放）
-const FRAME_ITEM_SCALE = 0.25
 
 function shortName(id) {
   return (id || '').replace(/^minecraft:/, '')
@@ -150,7 +148,7 @@ async function buildItemFrame(entity, id, assets) {
     group.add(frame)
   }
 
-  // 内部物品：框口 0.4375 处，按 FRAME_ITEM_SCALE 缩放，绕框法线按 ItemRotation × 45° 旋转
+  // 内部物品：框口 0.4375 处，缩放 0.5（8px），绕框法线按 ItemRotation × 45° 旋转
   const item = entity.nbt?.Item
   if (item && item.id) {
     const itemMesh = await buildFrameItem(item, resolver, assets)
@@ -160,10 +158,6 @@ async function buildItemFrame(entity, id, assets) {
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q)
       itemMesh.position.copy(anchor).addScaledVector(forward, 0.4375)
       itemMesh.quaternion.copy(q).multiply(qz)
-      // 2D 物品的 fixed 变换含绕 Y 180°（让正面朝向玩家），否则看到的是镜像背面
-      if (itemMesh.userData.rotateY180) {
-        itemMesh.quaternion.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI))
-      }
       group.add(itemMesh)
     }
   }
@@ -281,13 +275,12 @@ async function buildFrameItem(item, resolver, assets) {
     if (tex) {
       const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
       holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
-      holder.scale.setScalar(FRAME_ITEM_SCALE)
-      holder.userData.rotateY180 = true // 2D 物品的 fixed 变换含绕 Y 180°，让正面朝向玩家
+      holder.scale.setScalar(0.5)
       return holder
     }
   }
 
-  // 方块物品：3D 方块模型，缩放 = 框体缩放 × 模型链的 fixed 缩放
+  // 方块物品：3D 方块模型，缩放 = 框体 0.5 × 模型链的 fixed 缩放（立方体 0.25，墙柱/植物 0.5）
   const props = await defaultItemProps(name, assets)
   const baked = await resolver.resolve('minecraft:' + name, props)
   if (baked && baked.quads && baked.quads.length) {
@@ -302,7 +295,7 @@ async function buildFrameItem(item, resolver, assets) {
     )
     holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
     const fixedScale = await blockFixedScale(name, assets)
-    holder.scale.setScalar(FRAME_ITEM_SCALE * fixedScale)
+    holder.scale.setScalar(0.5 * fixedScale)
     return holder
   }
 
@@ -314,7 +307,7 @@ async function buildFrameItem(item, resolver, assets) {
   if (tex) {
     const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
     holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
-    holder.scale.setScalar(FRAME_ITEM_SCALE)
+    holder.scale.setScalar(0.5)
     return holder
   }
   return null
