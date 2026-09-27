@@ -50,7 +50,7 @@ function fluidOfEntry(paletteEntry) {
   const props = paletteEntry.properties || {}
   if (n === 'water') return { kind: 'water', level: Number(props.level) || 0, waterlogged: false }
   if (n === 'lava') return { kind: 'lava', level: Number(props.level) || 0, waterlogged: false }
-  if (n === 'bubble_column') return { kind: 'water', level: 0, waterlogged: false }
+  if (n === 'bubble_column') return { kind: 'water', level: 0, waterlogged: false, bubble: true }
   const wl = props.waterlogged
   if (wl === true || wl === 'true' || wl === 1 || wl === '1') return { kind: 'water', level: 0, waterlogged: true }
   return null
@@ -116,8 +116,11 @@ function fullFaceMask(quads) {
   return mask
 }
 
-// 流动流体顶面的水平流向角度（弧度），仿原版 FlowableFluid.getVelocity：向高度更低的
-// 邻居求和方向向量。无水平流动返回 null（此时顶面用静止贴图）。
+// 流体顶面的水平流向角度（弧度），仿原版 FlowableFluid.getVelocity：向高度更低的
+// 「同种流体」邻居求和方向向量。无水平流动返回 null（此时顶面用静止贴图）。
+// 只统计同种流体邻居（空气/异种流体不贡献水平流速），因此：
+//   - 流动水/岩浆：流向更低处；
+//   - 水源方块：在「喂给旁边流动水」时也有流向，静止水体则无流向。
 function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind) {
   const selfH = fluidHeight(fluidOf[gi].level)
   let vx = 0
@@ -131,11 +134,8 @@ function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind) {
   for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
     const ngi = get(dx, dz)
     const nfo = ngi === undefined ? null : fluidOf[ngi]
-    let nh
-    if (nfo && nfo.kind === kind) nh = fluidHeight(nfo.level)
-    else if (nfo) continue // 不同流体不参与
-    else nh = 0 // 空气等非流体
-    const diff = selfH - nh
+    if (!nfo || nfo.kind !== kind) continue // 只比较同种流体
+    const diff = selfH - fluidHeight(nfo.level)
     if (diff !== 0) {
       vx += dx * diff
       vz += dz * diff
@@ -247,25 +247,22 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
 
   let count = 0
   if (topShown) {
-    // 顶面：流动水用 flow 贴图并按流向旋转（材质包据此标出流向）；静止/岩浆用 still。
-    // 原版只有水平流速非零时用 flow 贴图，这里以「流动 level 1..7」近似。
-    const flowing = !isLava && info.level > 0 && info.level < 8
+    // 顶面：有水平流速时用 flow 贴图并按流向旋转（水源、流动水、岩浆都适用）；
+    // 无流速（静止水体）用 still 贴图。原版正是按 getVelocity 的 x/z 分量是否为零来切换。
+    const angle = flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind)
     let topTex = stillTex
     let topUVs = [[0, 1], [1, 1], [0, 0], [1, 0]]
-    if (flowing) {
-      const angle = flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind)
+    if (angle !== null) {
       topTex = flowTex
-      if (angle !== null) {
-        const af = angle - Math.PI / 2
-        const ag = Math.sin(af) * 0.25
-        const ah = Math.cos(af) * 0.25
-        topUVs = [
-          [0.5 - ah + ag, 0.5 + ah + ag],
-          [0.5 + ah + ag, 0.5 + ah - ag],
-          [0.5 - ah - ag, 0.5 - ah + ag],
-          [0.5 + ah - ag, 0.5 - ah - ag],
-        ]
-      }
+      const af = angle - Math.PI / 2
+      const ag = Math.sin(af) * 0.25
+      const ah = Math.cos(af) * 0.25
+      topUVs = [
+        [0.5 - ah + ag, 0.5 + ah + ag],
+        [0.5 + ah + ag, 0.5 + ah - ag],
+        [0.5 - ah - ag, 0.5 - ah + ag],
+        [0.5 + ah - ag, 0.5 - ah - ag],
+      ]
     }
     record(topTex,
       [[x, y + h01 - 0.001, z + 1], [x + 1, y + h11 - 0.001, z + 1], [x, y + h00 - 0.001, z], [x + 1, y + h10 - 0.001, z]],
@@ -276,24 +273,19 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
     record(stillTex, [[x + 1, y + w, z + 1], [x, y + w, z + 1], [x + 1, y + w, z], [x, y + w, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  // 侧面（邻居为同种流体或完整方块、或含水方块自身满侧面时剔除）
+  // 侧面（邻居为同种流体或完整方块、或含水方块自身满侧面时剔除）。
+  // 气泡柱侧面改用「水 + 气泡」贴图，近似原版气泡粒子的上升/下沉效果。
   const side = (dx, dz) => get(dx, 0, dz)
-  if (!isFluid(side(0, -1)) && !isSolid(side(0, -1)) && !(selfMask & 4)) {
-    record(flowTex, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+  const sideTex = info.bubble ? 'block/bubble' : flowTex
+  const emitSide = (dx, dz, bit, pos, uv) => {
+    if (isFluid(side(dx, dz)) || isSolid(side(dx, dz)) || (selfMask & bit)) return
+    record(sideTex, pos, uv)
     count++
   }
-  if (!isFluid(side(0, 1)) && !isSolid(side(0, 1)) && !(selfMask & 8)) {
-    record(flowTex, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-    count++
-  }
-  if (!isFluid(side(-1, 0)) && !isSolid(side(-1, 0)) && !(selfMask & 16)) {
-    record(flowTex, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
-    count++
-  }
-  if (!isFluid(side(1, 0)) && !isSolid(side(1, 0)) && !(selfMask & 32)) {
-    record(flowTex, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
-    count++
-  }
+  emitSide(0, -1, 4, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+  emitSide(0, 1, 8, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+  emitSide(-1, 0, 16, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
+  emitSide(1, 0, 32, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
   return count
 }
 
@@ -366,10 +358,12 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
   // 每个调色板条目所属流体（含含水方块/气泡柱）与其「满覆盖」面掩码。
   // 只有含水方块需要 selfMask（其内部水体被自身实体面遮挡）；纯流体（水/岩浆/气泡柱）
   // 的 baked 是整块流体的占位立方体，若误当 selfMask 会把自己顶/底面全剔掉。
+  // 透明方块（树叶/玻璃等）的「满覆盖」面是 cutout，不能遮挡内部水体，故也为 0。
   const fluidOf = palette.map(fluidOfEntry)
   const selfMasks = palette.map((p) => {
     const fo = fluidOfEntry(p)
-    return fo && fo.waterlogged ? fullFaceMask(p.baked ? p.baked.quads : null) : 0
+    if (!fo || !fo.waterlogged || isTransparent(p.name)) return 0
+    return fullFaceMask(p.baked ? p.baked.quads : null)
   })
 
   const total = blocks.size

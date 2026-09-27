@@ -253,6 +253,42 @@ export class Renderer {
     return tex
   }
 
+  // 气泡柱侧面贴图：半透明水蓝色底 + 白色气泡，近似原版气泡粒子（静态替代）。
+  _makeBubbleTexture() {
+    if (this._bubbleTex) return this._bubbleTex
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 64
+    const ctx = canvas.getContext('2d')
+    ctx.fillStyle = 'rgba(63, 118, 228, 0.35)' // 水蓝
+    ctx.fillRect(0, 0, 64, 64)
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+    const bubbles = [
+      [12, 14, 5], [30, 6, 4], [48, 18, 6], [20, 30, 4],
+      [40, 34, 5], [10, 46, 4], [32, 50, 6], [52, 44, 4],
+      [22, 58, 3], [46, 60, 3],
+    ]
+    for (const [x, y, r] of bubbles) {
+      ctx.beginPath()
+      ctx.arc(x, y, r, 0, Math.PI * 2)
+      ctx.fill()
+      // 高光让气泡更像气泡
+      ctx.fillStyle = 'rgba(220, 235, 255, 0.7)'
+      ctx.beginPath()
+      ctx.arc(x - r * 0.35, y - r * 0.35, r * 0.4, 0, Math.PI * 2)
+      ctx.fill()
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+    }
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.wrapS = THREE.RepeatWrapping
+    tex.wrapT = THREE.RepeatWrapping
+    tex.magFilter = THREE.NearestFilter
+    tex.minFilter = THREE.NearestFilter
+    this._bubbleTex = tex
+    return tex
+  }
+
   // data: { palette: [{name, faces}], blocks: Map<"x,y,z" -> paletteIndex>, bounds }
   // 返回 { faces, textures }
   async render(data, assets, onProgress) {
@@ -274,12 +310,14 @@ export class Renderer {
         const sep = gKey.indexOf('|p')
         const texKey = sep >= 0 ? gKey.slice(0, sep) : gKey
         const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
-        const texture = await assets.getTexture(texKey)
+        const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow'
+        const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
+        // 气泡柱侧面：程序生成的「水 + 气泡」贴图（原版气泡是粒子，这里用静态纹理近似）
+        const isBubble = texKey === 'block/bubble'
+        const texture = isBubble ? this._makeBubbleTexture() : await assets.getTexture(texKey)
         if (texture) {
           // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
           // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
-          const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow'
-          const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
           // flatShading：方块每个面的 4 个顶点本就同法线，用几何导数算平直法线即可，
           // 省去法线数组（超大投影可省数百 MB 内存），光照效果一致。
           const mat = isWater || isLava
@@ -288,7 +326,9 @@ export class Renderer {
                   ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75, flatShading: true }
                   : { map: texture, transparent: true, opacity: 0.9, flatShading: true },
               )
-            : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
+            : isBubble
+              ? new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: 0.85, flatShading: true })
+              : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
           // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
           if (power !== null) {
             const c = redstoneTint(power)
