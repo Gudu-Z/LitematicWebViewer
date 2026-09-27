@@ -292,7 +292,7 @@ export class Renderer {
                   : { map: texture, transparent: true, opacity: 0.9, flatShading: true },
               )
             : isBubble
-              ? new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, flatShading: true })
+              ? new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, flatShading: true, side: THREE.DoubleSide })
               : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
           // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
           if (power !== null) {
