@@ -166,27 +166,67 @@ async function buildItemFrame(entity, id, assets) {
 }
 
 // 方块物品解析用的默认属性。
-// 普通（variants）方块传 axis:y（轴类方块正立）；multipart 方块（墙/栅栏/玻璃板/铁栏杆等）
-// 需还原其「默认状态」——即核心立柱可见、四周无连接，否则没有任何部件匹配（得到空模型）。
+// variants 方块给每个属性一个默认值（楼梯 facing=north/half=bottom/shape=straight，原木 axis=y 等），
+// 否则会选中按字母序排列的第一个变体（如楼梯变成内角楼梯），与游戏默认状态不符。
+// multipart 方块（墙/栅栏/玻璃板/铁栏杆等）还原「默认状态」——核心立柱可见、四周无连接。
 async function defaultItemProps(name, assets) {
   const bs = await assets.getJSON('blockstates/' + name + '.json')
-  if (!bs || !bs.multipart) return { axis: 'y' }
+  if (!bs) return { axis: 'y' }
+
+  if (bs.multipart) {
+    const props = {}
+    for (const part of bs.multipart) {
+      const when = part.when
+      if (!when || typeof when !== 'object') continue
+      for (const k of Object.keys(when)) {
+        if (k === 'OR' || props[k] !== undefined) continue
+        const v = when[k]
+        const first = Array.isArray(v) ? String(v[0]) : String(v).split('|')[0]
+        if (k === 'up') props[k] = 'true' // 墙的中心立柱
+        else if (first === 'low' || first === 'tall' || first === 'none') props[k] = 'none' // 墙的侧面
+        else if (first === 'true' || first === 'false') props[k] = 'false' // 布尔连接（孤立状态默认无连接）
+        else if (k === 'facing') props[k] = 'north'
+        else props[k] = 'none'
+      }
+    }
+    return props
+  }
+
+  // variants：给每个出现的属性一个默认值
   const props = {}
-  for (const part of bs.multipart) {
-    const when = part.when
-    if (!when || typeof when !== 'object') continue
-    for (const k of Object.keys(when)) {
-      if (k === 'OR' || props[k] !== undefined) continue
-      const v = when[k]
-      const first = Array.isArray(v) ? String(v[0]) : String(v).split('|')[0]
-      if (k === 'up') props[k] = 'true' // 墙的中心立柱
-      else if (first === 'low' || first === 'tall' || first === 'none') props[k] = 'none' // 墙的侧面
-      else if (first === 'true' || first === 'false') props[k] = 'false' // 布尔连接（孤立状态默认无连接）
-      else if (k === 'facing') props[k] = 'north'
-      else props[k] = 'none'
+  for (const k of Object.keys(bs.variants || {})) {
+    if (!k) continue
+    for (const part of k.split(',')) {
+      const eq = part.indexOf('=')
+      if (eq <= 0) continue
+      const p = part.slice(0, eq)
+      if (props[p] !== undefined) continue
+      props[p] = DEFAULT_BLOCK_PROP[p] ?? firstPropValue(p, bs.variants)
     }
   }
   return props
+}
+
+// 常见方块属性的默认值（对应原版 Block.getDefaultState()）
+const DEFAULT_BLOCK_PROP = {
+  facing: 'north', axis: 'y', half: 'bottom', shape: 'straight', type: 'bottom',
+  waterlogged: 'false', open: 'false', lit: 'false', powered: 'false', extended: 'false',
+  attached: 'false', hanging: 'false', in_wall: 'false', trigger: 'false', snowy: 'false',
+  persistent: 'false', distance: '7', mode: 'compare', hinge: 'left', part: 'foot',
+  eye: 'false', locked: 'false', signal_fire: 'false', level: '0', layers: '1', bites: '0',
+  age: '0', leaves: 'none', charges: '0', candles: '1', eggs: '1', hatch: '0',
+  orientation: 'north_up', vertical_direction: 'up',
+}
+
+// 兜底：取该属性在所有变体键里出现的第一个值
+function firstPropValue(prop, variants) {
+  for (const k of Object.keys(variants)) {
+    for (const part of k.split(',')) {
+      const eq = part.indexOf('=')
+      if (eq > 0 && part.slice(0, eq) === prop) return part.slice(eq + 1)
+    }
+  }
+  return 'false'
 }
 
 // 读取方块模型链里继承的 "fixed" 显示缩放：block/block.json 为 0.5（立方体方块），
