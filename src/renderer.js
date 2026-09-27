@@ -279,6 +279,9 @@ export class Renderer {
         // 气泡柱内的气泡：原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡）。
         // 用点精灵（THREE.Points）渲染，始终面向摄像头，任何角度都可见。
         const isBubble = texKey === 'particle/bubble'
+        // 铁轨是零厚度平面（含斜坡）：用 Lambert 会让朝下的面被 cull 后露出暗面（斜坡朝南的一面发黑），
+        // 改用无光照 + 双面，让铁轨从任何角度都保持同一亮度（原版铁轨本就不随朝向变暗）。
+        const isRail = texKey.includes('rail')
         const texture = await assets.getTexture(texKey)
         if (texture) {
           // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
@@ -294,7 +297,9 @@ export class Renderer {
             : isBubble
               // 气泡直径 0.3 格（原交叉面半径 0.15×2），sizeAttenuation 按距离透视缩放
               ? new THREE.PointsMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, size: 0.3, sizeAttenuation: true })
-              : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
+              : isRail
+                ? new THREE.MeshBasicMaterial({ map: texture, alphaTest: 0.5, side: THREE.DoubleSide })
+                : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
           // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
           if (power !== null) {
             const c = redstoneTint(power)
