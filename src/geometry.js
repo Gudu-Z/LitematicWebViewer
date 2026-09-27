@@ -309,19 +309,10 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
   emitSide(-1, 0, 16, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
   emitSide(1, 0, 32, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
   // 气泡柱内部的气泡：原版是柱内中心区域随机上升/下沉的粒子，这里在每个方块中心区域
-  // 散落几枚「交叉面」气泡（X 向 + Z 向各一面，从各个方向都可见），模拟柱体内的气泡流。
+  // 散落几枚气泡「点」（渲染端用 THREE.Points 点精灵，始终面向摄像头，任何角度可见）。
   if (info.bubble) {
-    const r = 0.15 // 气泡半径（约 2.4px）
     for (const [bx, by, bz] of bubbleScatter(lx, ly, lz)) {
-      // X 向面（面向 ±x）
-      record('particle/bubble',
-        [[x + bx, y + by + r, z + bz - r], [x + bx, y + by + r, z + bz + r], [x + bx, y + by - r, z + bz - r], [x + bx, y + by - r, z + bz + r]],
-        [[0, 1], [1, 1], [0, 0], [1, 0]])
-      count++
-      // Z 向面（面向 ±z）
-      record('particle/bubble',
-        [[x + bx - r, y + by + r, z + bz], [x + bx + r, y + by + r, z + bz], [x + bx - r, y + by - r, z + bz], [x + bx + r, y + by - r, z + bz]],
-        [[0, 1], [1, 1], [0, 0], [1, 0]])
+      record('particle/bubble', [x + bx, y + by, z + bz])
       count++
     }
   }
@@ -440,16 +431,19 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
     }
   }
 
-  // 分配精确大小的 typed arrays
+  // 分配精确大小的 typed arrays。
+  // 气泡组是「点」而非面：只存中心坐标（每点 3 个 float），渲染端用 THREE.Points。
   const groups = new Map()
   for (const [gKey, count] of counts) {
-    groups.set(gKey, {
-      positions: new Float32Array(count * 12),
-      uvs: new Float32Array(count * 8),
-      indices: new Uint32Array(count * 6),
-      v: 0,
-      f: 0,
-    })
+    groups.set(gKey, gKey === 'particle/bubble'
+      ? { positions: new Float32Array(count * 3), v: 0 }
+      : {
+          positions: new Float32Array(count * 12),
+          uvs: new Float32Array(count * 8),
+          indices: new Uint32Array(count * 6),
+          v: 0,
+          f: 0,
+        })
   }
 
   // —— 第二遍：填充几何数据 ——
@@ -468,7 +462,15 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
     const finfo = fluidOf[gi]
     if (finfo) {
       emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], (texKey, pos, uvs) => {
-        writeFace(groups.get(texKey), pos, uvs, 0, 0, 0)
+        const g = groups.get(texKey)
+        if (texKey === 'particle/bubble') {
+          g.positions[g.v] = pos[0]
+          g.positions[g.v + 1] = pos[1]
+          g.positions[g.v + 2] = pos[2]
+          g.v += 3
+        } else {
+          writeFace(g, pos, uvs, 0, 0, 0)
+        }
       })
       if (!finfo.waterlogged) continue
     }

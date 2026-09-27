@@ -276,8 +276,8 @@ export class Renderer {
         const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
         const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow'
         const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
-        // 气泡柱内的气泡：原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡），
-        // 每个气泡面用整张贴图，半透明浮在柱体中心。
+        // 气泡柱内的气泡：原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡）。
+        // 用点精灵（THREE.Points）渲染，始终面向摄像头，任何角度都可见。
         const isBubble = texKey === 'particle/bubble'
         const texture = await assets.getTexture(texKey)
         if (texture) {
@@ -292,7 +292,8 @@ export class Renderer {
                   : { map: texture, transparent: true, opacity: 0.9, flatShading: true },
               )
             : isBubble
-              ? new THREE.MeshLambertMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, flatShading: true, side: THREE.DoubleSide })
+              // 气泡直径 0.3 格（原交叉面半径 0.15×2），sizeAttenuation 按距离透视缩放
+              ? new THREE.PointsMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, size: 0.3, sizeAttenuation: true })
               : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
           // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
           if (power !== null) {
@@ -314,6 +315,13 @@ export class Renderer {
     for (const [texKey, g] of groups) {
       const mat = materials.get(texKey)
       if (!mat) continue
+      // 气泡组是点云：positions 只存中心坐标（每点 3 个 float）
+      if (texKey === 'particle/bubble') {
+        const geo = new THREE.BufferGeometry()
+        geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3))
+        this.group.add(new THREE.Points(geo, mat))
+        continue
+      }
       const geo = new THREE.BufferGeometry()
       // 注意：这里必须用 BufferAttribute 直接包装类型数组（不复制）——
       // Float32BufferAttribute 会复制一份（超大投影多占一倍内存），
