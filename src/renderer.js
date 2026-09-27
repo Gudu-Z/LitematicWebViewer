@@ -253,31 +253,29 @@ export class Renderer {
     return tex
   }
 
-  // 气泡柱侧面贴图：半透明水蓝色底 + 白色气泡，近似原版气泡粒子（静态替代）。
-  _makeBubbleTexture() {
+  // 气泡柱侧面贴图：把原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡）铺在
+  // 半透明水蓝色底上，近似原版气泡粒子的静态效果。
+  async _makeBubbleTexture(assets) {
     if (this._bubbleTex) return this._bubbleTex
+    const sprite = await assets.getTexture('particle/bubble')
     const canvas = document.createElement('canvas')
     canvas.width = 64
     canvas.height = 64
     const ctx = canvas.getContext('2d')
-    ctx.fillStyle = 'rgba(63, 118, 228, 0.35)' // 水蓝
+    ctx.fillStyle = 'rgba(63, 118, 228, 0.35)' // 水蓝底
     ctx.fillRect(0, 0, 64, 64)
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
-    const bubbles = [
-      [12, 14, 5], [30, 6, 4], [48, 18, 6], [20, 30, 4],
-      [40, 34, 5], [10, 46, 4], [32, 50, 6], [52, 44, 4],
-      [22, 58, 3], [46, 60, 3],
-    ]
-    for (const [x, y, r] of bubbles) {
-      ctx.beginPath()
-      ctx.arc(x, y, r, 0, Math.PI * 2)
-      ctx.fill()
-      // 高光让气泡更像气泡
-      ctx.fillStyle = 'rgba(220, 235, 255, 0.7)'
-      ctx.beginPath()
-      ctx.arc(x - r * 0.35, y - r * 0.35, r * 0.4, 0, Math.PI * 2)
-      ctx.fill()
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.9)'
+    if (sprite && sprite.image) {
+      const img = sprite.image
+      const s = img.width || 8
+      // 以错开的方式铺 8×8 气泡，模拟气泡散落
+      const cols = Math.floor(64 / s)
+      const rows = Math.floor(64 / s)
+      for (let r = 0; r < rows; r++) {
+        for (let c = 0; c < cols; c++) {
+          if ((r * 7 + c * 5) % 3 === 0) continue // 随机跳过一些，别铺满
+          ctx.drawImage(img, c * s + (r % 2) * (s / 2), r * s, s, s)
+        }
+      }
     }
     const tex = new THREE.CanvasTexture(canvas)
     tex.colorSpace = THREE.SRGBColorSpace
@@ -312,9 +310,9 @@ export class Renderer {
         const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
         const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow'
         const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
-        // 气泡柱侧面：程序生成的「水 + 气泡」贴图（原版气泡是粒子，这里用静态纹理近似）
+        // 气泡柱侧面：原版气泡粒子贴图（particle/bubble.png）铺在透明水色底上
         const isBubble = texKey === 'block/bubble'
-        const texture = isBubble ? this._makeBubbleTexture() : await assets.getTexture(texKey)
+        const texture = isBubble ? await this._makeBubbleTexture(assets) : await assets.getTexture(texKey)
         if (texture) {
           // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
           // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色

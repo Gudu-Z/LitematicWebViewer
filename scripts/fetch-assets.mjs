@@ -28,6 +28,10 @@ const PREFIXES = [
   'assets/minecraft/textures/entity/', // 实体贴图（矿车等）
   'assets/minecraft/textures/item/', // 物品贴图（物品展示框内容）
 ]
+// 额外单独下载的粒子贴图（气泡柱的气泡）
+const EXTRA_FILES = [
+  'assets/minecraft/textures/particle/bubble.png',
+]
 
 async function main() {
   console.log(`[fetch-assets] 目标版本：${version}`)
@@ -51,7 +55,7 @@ async function main() {
   const entries = []
   zip.forEach((rel, file) => {
     if (file.dir) return
-    if (PREFIXES.some((p) => rel.startsWith(p))) entries.push({ rel, file })
+    if (PREFIXES.some((p) => rel.startsWith(p)) || EXTRA_FILES.includes(rel)) entries.push({ rel, file })
   })
 
   console.log(`[fetch-assets] 找到 ${entries.length} 个资源文件，正在解压 …`)
