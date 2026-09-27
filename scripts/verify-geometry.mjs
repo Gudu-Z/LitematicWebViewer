@@ -24,6 +24,7 @@ function fluidHeight(l) { const v = Number(l) || 0; return v <= 0 ? 1 : v < 8 ? 
 function buildReference(palette, strBlocks) {
   const renderable = new Uint8Array(palette.length)
   const occludes = new Uint8Array(palette.length)
+  const hideSame = new Uint8Array(palette.length)
   const quadsByPalette = new Array(palette.length)
   for (let i = 0; i < palette.length; i++) {
     const name = palette[i].name
@@ -33,6 +34,8 @@ function buildReference(palette, strBlocks) {
       occludes[i] = baked.fullCube && !isTransparent(name) ? 1 : 0
       quadsByPalette[i] = baked.quads
     } else quadsByPalette[i] = null
+    const sn = shortName(name)
+    hideSame[i] = sn.includes('glass') || sn.endsWith('_leaves') ? 1 : 0
   }
 
   const groups = new Map() // gKey -> 面签名数组
@@ -109,7 +112,7 @@ function buildReference(palette, strBlocks) {
     for (const q of quadsByPalette[gi]) {
       if (q.cullface) {
         const ngi = strBlocks.get((x + q.cullface[0]) + ',' + (y + q.cullface[1]) + ',' + (z + q.cullface[2]))
-        if (ngi !== undefined && (occludes[ngi] || ngi === gi)) continue
+        if (ngi !== undefined && (occludes[ngi] || (ngi === gi && hideSame[ngi]))) continue
       }
       let gKey = q.texKey
       if (isRedstoneDustTex(q.texKey)) gKey = q.texKey + '|p' + (Number(palette[gi].properties?.power) || 0)

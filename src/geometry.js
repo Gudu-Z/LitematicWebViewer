@@ -50,9 +50,11 @@ function yieldThread() {
   return new Promise((r) => setTimeout(r, 0))
 }
 
-// 一个非流体方块的面是否应被剔除：模型声明了 cullface 且邻居为不透明完整方块
-// 或同类方块（如玻璃-玻璃、树叶-树叶）时，该面不可见。邻居越界视为空气（不剔除）。
-function faceCulled(blocks, occludes, q, lx, lz, ly, gi, grid) {
+// 一个非流体方块的面是否应被剔除：模型声明了 cullface 且邻居为不透明完整方块时，
+// 该面不可见。此外「同类互隐」（原版 isSideInvisible）只有玻璃、树叶这类方块才有：
+// 楼梯等方块即使邻居状态相同也不能剔面，否则楼梯之间会出现错误的镂空面。
+// 邻居越界视为空气（不剔除）。
+function faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid) {
   if (!q.cullface) return false
   const cf = q.cullface
   const nx = lx + cf[0]
@@ -60,7 +62,7 @@ function faceCulled(blocks, occludes, q, lx, lz, ly, gi, grid) {
   const nz = lz + cf[2]
   if (nx < 0 || nx >= grid.W || ny < 0 || ny >= grid.H || nz < 0 || nz >= grid.D) return false
   const ngi = blocks.get(nx + nz * grid.W + ny * grid.strideY)
-  return ngi !== undefined && (occludes[ngi] || ngi === gi)
+  return ngi !== undefined && (occludes[ngi] || (ngi === gi && hideSame[ngi]))
 }
 
 // 非流体方块的贴图组 key：红石粉按信号强度细分，便于渲染时按强度上色。
@@ -249,6 +251,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
 
   const renderable = new Uint8Array(palette.length)
   const occludes = new Uint8Array(palette.length)
+  const hideSame = new Uint8Array(palette.length)
   const quadsByPalette = new Array(palette.length)
   for (let i = 0; i < palette.length; i++) {
     const name = palette[i].name
@@ -260,6 +263,9 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
     } else {
       quadsByPalette[i] = null
     }
+    // 原版 isSideInvisible：玻璃/树叶同类相邻时隐藏共享面
+    const sn = shortName(name)
+    hideSame[i] = sn.includes('glass') || sn.endsWith('_leaves') ? 1 : 0
   }
 
   const total = blocks.size
@@ -287,7 +293,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
       continue
     }
     for (const q of quadsByPalette[gi]) {
-      if (faceCulled(blocks, occludes, q, lx, lz, ly, gi, grid)) continue
+      if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid)) continue
       const gKey = faceKey(palette, gi, q)
       counts.set(gKey, (counts.get(gKey) || 0) + 1)
       emitted++
@@ -327,7 +333,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
       continue
     }
     for (const q of quadsByPalette[gi]) {
-      if (faceCulled(blocks, occludes, q, lx, lz, ly, gi, grid)) continue
+      if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid)) continue
       const gKey = faceKey(palette, gi, q)
       writeFace(groups.get(gKey), q.verts, q.uvs, x, y, z)
     }
