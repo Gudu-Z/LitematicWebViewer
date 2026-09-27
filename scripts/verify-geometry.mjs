@@ -16,9 +16,18 @@ const fakeAssets = {
 }
 
 function shortName(n) { return (n || '').replace(/^minecraft:/, '') }
-function isFluidName(n) { const s = shortName(n); return s === 'water' || s === 'lava' }
+// 纯流体（水/岩浆/气泡柱）不参与此处的逐面比对：其几何由 geometry.js 的 emitFluidFaces
+// 按原版 FluidRenderer 生成（含水面高度、流向旋转等），有独立的校验逻辑。
+// 含水方块（waterlogged）在这里只比对其「方块自身」的面，内部水体不在参考中复现。
+function isPureFluid(p) {
+  const n = shortName(p.name)
+  return n === 'water' || n === 'lava' || n === 'bubble_column'
+}
+// 流体贴图组（新实现会生成、参考实现不生成，比对时跳过）
+function isFluidTexKey(k) {
+  return k === 'block/water_still' || k === 'block/water_flow' || k === 'block/lava_still' || k === 'block/lava_flow'
+}
 function isRedstoneDustTex(t) { return /(redstone_dust_dot|redstone_dust_line0|redstone_dust_line1)$/.test(t) }
-function fluidHeight(l) { const v = Number(l) || 0; return v <= 0 ? 1 : v < 8 ? 1 - v / 8 : 0.125 }
 
 // 参考实现：字符串 key、世界坐标查找、普通数组（改动前的原版逻辑）
 function buildReference(palette, strBlocks) {
@@ -44,71 +53,7 @@ function buildReference(palette, strBlocks) {
     if (!renderable[gi]) continue
     const parts = key.split(',')
     const x = +parts[0], y = +parts[1], z = +parts[2]
-    if (isFluidName(palette[gi].name)) {
-      // 流体参考：字符串查找版（复刻新 emitFluidFaces 的原版 FluidRenderer 算法）
-      const name = shortName(palette[gi].name)
-      const isLava = name === 'lava'
-      const still = isLava ? 'block/lava_still' : 'block/water_still'
-      const flow = isLava ? 'block/lava_flow' : 'block/water_flow'
-      const get = (dx, dy, dz) => strBlocks.get((x + dx) + ',' + (y + dy) + ',' + (z + dz))
-      const giName = (gi2) => (gi2 === undefined ? '' : shortName(palette[gi2].name))
-      const isFluid = (gi2) => giName(gi2) === name
-      const isSolid = (gi2) => gi2 !== undefined && !!palette[gi2].baked && palette[gi2].baked.fullCube && !giName(gi2).endsWith('_leaves')
-      const fluidH = (dx, dy, dz) => {
-        const ngi = get(dx, dy, dz)
-        if (ngi === undefined) return 0
-        if (giName(ngi) === name) {
-          if (isFluid(get(dx, dy + 1, dz))) return 1
-          return fluidHeight(palette[ngi].properties?.level)
-        }
-        return isSolid(ngi) ? -1 : 0
-      }
-      const self = fluidH(0, 0, 0)
-      const corner = (dx, dz) => {
-        const a = fluidH(dx, 0, 0)
-        const b = fluidH(0, 0, dz)
-        if (a >= 1 || b >= 1) return 1
-        let sum = 0, cnt = 0
-        const add = (h) => {
-          if (h >= 0.8) { sum += h * 10; cnt += 10 }
-          else if (h >= 0) { sum += h; cnt += 1 }
-        }
-        if (a > 0 || b > 0) {
-          const f = fluidH(dx, 0, dz)
-          if (f >= 1) return 1
-          add(f)
-        }
-        add(self); add(a); add(b)
-        return sum / cnt
-      }
-      let h00, h10, h01, h11
-      if (self >= 1) h00 = h10 = h01 = h11 = 1
-      else {
-        h00 = corner(-1, -1); h10 = corner(1, -1); h01 = corner(-1, 1); h11 = corner(1, 1)
-      }
-      const above = get(0, 1, 0)
-      const below = get(0, -1, 0)
-      const bottomShown = !isFluid(below) && !isSolid(below)
-      const w = bottomShown ? 0.001 : 0
-      const minCorner = Math.min(h00, h10, h01, h11)
-      const topShown = !isFluid(above) && !(isSolid(above) && minCorner >= 1)
-      const push = (tex, pos, uv) => {
-        let g = groups.get(tex)
-        if (!g) { g = []; groups.set(tex, g) }
-        // Math.fround：参考值也量化到 Float32 精度（与 typed array 存储一致）
-        let sig = ''
-        for (let k = 0; k < 4; k++) sig += Math.fround(pos[k][0]) + ',' + Math.fround(pos[k][1]) + ',' + Math.fround(pos[k][2]) + ',' + Math.fround(uv[k][0]) + ',' + Math.fround(uv[k][1]) + ';'
-        g.push(sig)
-        emitted++
-      }
-      if (topShown) push(still, [[x, y + h01 - 0.001, z + 1], [x + 1, y + h11 - 0.001, z + 1], [x, y + h00 - 0.001, z], [x + 1, y + h10 - 0.001, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-      if (bottomShown) push(still, [[x + 1, y + w, z + 1], [x, y + w, z + 1], [x + 1, y + w, z], [x, y + w, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-      if (!isFluid(get(0, 0, -1)) && !isSolid(get(0, 0, -1))) push(flow, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-      if (!isFluid(get(0, 0, 1)) && !isSolid(get(0, 0, 1))) push(flow, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-      if (!isFluid(get(-1, 0, 0)) && !isSolid(get(-1, 0, 0))) push(flow, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
-      if (!isFluid(get(1, 0, 0)) && !isSolid(get(1, 0, 0))) push(flow, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
-      continue
-    }
+    if (isPureFluid(palette[gi])) continue
     for (const q of quadsByPalette[gi]) {
       if (q.cullface) {
         const ngi = strBlocks.get((x + q.cullface[0]) + ',' + (y + q.cullface[1]) + ',' + (z + q.cullface[2]))
@@ -155,6 +100,7 @@ console.log(`新实现: ${emitted} 面, ${groups.size} 组；参考实现: ${ref
 let totalDiff = 0
 const allKeys = new Set([...groups.keys(), ...ref.groups.keys()])
 for (const gKey of allKeys) {
+  if (isFluidTexKey(gKey)) continue // 流体面（水面/流向）不在此比对
   const newSigs = []
   const g = groups.get(gKey)
   if (g) {

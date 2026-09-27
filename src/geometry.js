@@ -26,7 +26,7 @@ export function isSkipBlock(name) {
 // 透明方块：不遮挡邻居，但仍以 alphaTest 方式渲染出边框/树叶。
 export function isTransparent(name) {
   const n = shortName(name)
-  return n.endsWith('_leaves') || n.includes('glass') || n === 'ice' || n === 'water' || n === 'lava'
+  return n.endsWith('_leaves') || n.includes('glass') || n === 'ice' || n === 'water' || n === 'lava' || n === 'bubble_column'
 }
 
 // 红石粉的线/点贴图需要按信号强度分别染色
@@ -34,15 +34,26 @@ function isRedstoneDustTex(texKey) {
   return /(redstone_dust_dot|redstone_dust_line0|redstone_dust_line1)$/.test(texKey)
 }
 
-// 流体（水/岩浆）高度（0-1）：level 0=满，1-7 逐级下降，8+ 下落近似薄层
+// 流体（水/岩浆）高度（0-1）：与原版 FluidState.getHeight() = 内部 level / 9 一致。
+// 方块状态里的 level：0=水源(内部 level 8)、1..7=流动(内部 8-level)、8=下落(内部 8)。
+// 故 source / falling → 8/9；flowing L → (8-L)/9。这里的 8/9 正是原版 FLUID_HEIGHT 常量。
 function fluidHeight(level) {
   const l = Number(level) || 0
-  return l <= 0 ? 1 : l < 8 ? 1 - l / 8 : 0.125
+  return (l <= 0 || l >= 8) ? 8 / 9 : (8 - l) / 9
 }
 
-function isFluidName(name) {
-  const n = shortName(name)
-  return n === 'water' || n === 'lava'
+// 方块所属流体：kind = 'water' | 'lava' | null；level 为方块状态 level 值。
+// 含水方块（waterlogged）与气泡柱（bubble_column）都视作「water 源」（level 0），
+// 这样相邻的水面高度、同流体剔除都会把它们当成同种水处理（原版它们的 FluidState 就是水）。
+function fluidOfEntry(paletteEntry) {
+  const n = shortName(paletteEntry.name)
+  const props = paletteEntry.properties || {}
+  if (n === 'water') return { kind: 'water', level: Number(props.level) || 0, waterlogged: false }
+  if (n === 'lava') return { kind: 'lava', level: Number(props.level) || 0, waterlogged: false }
+  if (n === 'bubble_column') return { kind: 'water', level: 0, waterlogged: false }
+  const wl = props.waterlogged
+  if (wl === true || wl === 'true' || wl === 1 || wl === '1') return { kind: 'water', level: 0, waterlogged: true }
+  return null
 }
 
 // 让出主线程一小段时间（超大投影分块处理时保持界面响应）
@@ -73,19 +84,82 @@ function faceKey(palette, gi, q) {
   return q.texKey
 }
 
+// 计算一个方块「满覆盖」的面位掩码（含水方块内部的水体据此剔除被自身实体面遮挡的水面）。
+// bit: up=1 down=2 north=4 south=8 west=16 east=32。
+// 一个面「满覆盖」某方向 = 该面法线沿该方向、且贴在该方向的边界、且另两轴铺满 16×16。
+const FULL_BIT = { '0,1,0': 1, '0,-1,0': 2, '0,0,-1': 4, '0,0,1': 8, '-1,0,0': 16, '1,0,0': 32 }
+function fullFaceMask(quads) {
+  if (!quads) return 0
+  let mask = 0
+  for (const q of quads) {
+    const nk = q.normal.map((v) => Math.round(v)).join(',')
+    const bit = FULL_BIT[nk]
+    if (!bit) continue
+    let ax, b1, b2
+    if (nk === '1,0,0' || nk === '-1,0,0') { ax = 0; b1 = 1; b2 = 2 }
+    else if (nk === '0,1,0' || nk === '0,-1,0') { ax = 1; b1 = 0; b2 = 2 }
+    else { ax = 2; b1 = 0; b2 = 1 }
+    // 法线轴坐标必须全部相等且贴边界（0 或 16）
+    const av = Math.round(q.verts[0][ax] * 16)
+    if (av !== 0 && av !== 16) continue
+    let full = true
+    for (const v of q.verts) if (Math.round(v[ax] * 16) !== av) { full = false; break }
+    if (!full) continue
+    // 另两轴必须铺满 0..16
+    const b1min = Math.min(...q.verts.map((v) => v[b1]))
+    const b1max = Math.max(...q.verts.map((v) => v[b1]))
+    const b2min = Math.min(...q.verts.map((v) => v[b2]))
+    const b2max = Math.max(...q.verts.map((v) => v[b2]))
+    if (b1min > 0.001 || b1max < 0.999 || b2min > 0.001 || b2max < 0.999) continue
+    mask |= bit
+  }
+  return mask
+}
+
+// 流动流体顶面的水平流向角度（弧度），仿原版 FlowableFluid.getVelocity：向高度更低的
+// 邻居求和方向向量。无水平流动返回 null（此时顶面用静止贴图）。
+function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind) {
+  const selfH = fluidHeight(fluidOf[gi].level)
+  let vx = 0
+  let vz = 0
+  const get = (dx, dz) => {
+    const nx = lx + dx
+    const nz = lz + dz
+    if (nx < 0 || nx >= grid.W || nz < 0 || nz >= grid.D) return undefined
+    return blocks.get(nx + nz * grid.W + ly * grid.strideY)
+  }
+  for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
+    const ngi = get(dx, dz)
+    const nfo = ngi === undefined ? null : fluidOf[ngi]
+    let nh
+    if (nfo && nfo.kind === kind) nh = fluidHeight(nfo.level)
+    else if (nfo) continue // 不同流体不参与
+    else nh = 0 // 空气等非流体
+    const diff = selfH - nh
+    if (diff !== 0) {
+      vx += dx * diff
+      vz += dz * diff
+    }
+  }
+  if (vx === 0 && vz === 0) return null
+  return Math.atan2(vz, vx)
+}
+
 // 收集一个流体方块应生成的面，逐个交给 record(texKey, pos, uvs)。
 // lx/lz/ly 是局部坐标（用于邻居查找与越界判断），x/y/z 是世界坐标（用于顶点）。
 //
 // 表面高度算法按原版 FluidRenderer（1.21.11 反编译源码）移植：
-//   - getFluidHeight：同种流体取 (8-level)/8（上方有同种流体视为满格 1）；
+//   - getFluidHeight：同种流体取 (8-level)/9（上方有同种流体视为满格 1）；
 //     非同种方块：实心（原版 isSolid，树叶除外）为 -1，其余（空气等）为 0。
 //   - calculateFluidHeight：角点 = 自身 + 两相邻 + 对角 的加权平均；
 //     高度 ≥ 0.8 权重 ×10（让表面贴近高水位），< 0 的实心贡献不参与；
 //     任一相邻高度 ≥ 1 时角点直接取 1。
 //     相邻方块计算同一世界坐标角点时的数值集合相同，因此表面连续，不会出现台阶。
-function emitFluidFaces(palette, blocks, lx, lz, ly, x, y, z, gi, grid, record) {
-  const name = shortName(palette[gi].name)
-  const isLava = name === 'lava'
+// selfMask：含水方块自身「满覆盖」面的位掩码，用于剔除被自身实体面挡住的水面。
+function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMask, record) {
+  const info = fluidOf[gi]
+  const kind = info.kind
+  const isLava = kind === 'lava'
   const stillTex = isLava ? 'block/lava_still' : 'block/water_still'
   const flowTex = isLava ? 'block/lava_flow' : 'block/water_flow'
 
@@ -98,20 +172,22 @@ function emitFluidFaces(palette, blocks, lx, lz, ly, x, y, z, gi, grid, record) 
     return blocks.get(nx + nz * grid.W + ny * grid.strideY)
   }
   const giName = (gi2) => (gi2 === undefined ? '' : shortName(palette[gi2].name))
-  const isFluid = (gi2) => giName(gi2) === name
+  // 同种流体（水/岩浆分开；含水方块、气泡柱都算水）
+  const isFluid = (gi2) => gi2 !== undefined && !!fluidOf[gi2] && fluidOf[gi2].kind === kind
   // 原版 isSolid 的近似：完整方块且不是树叶（玻璃等透明完整方块在原版也算 solid，
-  // 同样会遮挡相邻的流体面；树叶的 culling shape 为空，不遮挡）
+  // 同样会遮挡相邻的流体面；树叶的 culling shape 为空，不遮挡）。流体本身不算 solid。
   const isSolid = (gi2) =>
-    gi2 !== undefined && !!palette[gi2].baked && palette[gi2].baked.fullCube && !giName(gi2).endsWith('_leaves')
+    gi2 !== undefined && !!palette[gi2].baked && palette[gi2].baked.fullCube && !fluidOf[gi2] && !giName(gi2).endsWith('_leaves')
 
   // 原版 getFluidHeight
   const fluidH = (dx, dy, dz) => {
     const ngi = get(dx, dy, dz)
     if (ngi === undefined) return 0
-    if (giName(ngi) === name) {
+    const nfo = fluidOf[ngi]
+    if (nfo && nfo.kind === kind) {
       // 上方有同种流体 → 视为满格
       if (isFluid(get(dx, dy + 1, dz))) return 1
-      return fluidHeight(palette[ngi].properties?.level)
+      return fluidHeight(nfo.level)
     }
     return isSolid(ngi) ? -1 : 0
   }
@@ -162,40 +238,59 @@ function emitFluidFaces(palette, blocks, lx, lz, ly, x, y, z, gi, grid, record) 
   const below = get(0, -1, 0)
   const aboveFluid = isFluid(above)
   const belowFluid = isFluid(below)
-  // 底面：下方不是同种流体且不被完整方块遮挡（原版 isSideCovered：非顶面一律视为被遮挡）
-  const bottomShown = !belowFluid && !isSolid(below)
+  // 底面：下方不是同种流体且不被完整方块遮挡；含水方块自身满底面时也剔除
+  const bottomShown = !belowFluid && !isSolid(below) && !(selfMask & 2)
   const w = bottomShown ? 0.001 : 0 // 原版：底面存在时侧面底边抬高 0.001 防闪烁
-  // 顶面：上方不是同种流体；上方为完整方块时只有表面满格才遮挡（原版 isSideCovered 逻辑）
+  // 顶面：上方不是同种流体；上方为完整方块时只有表面满格才遮挡；含水方块自身满顶面时也剔除
   const minCorner = Math.min(h00, h10, h01, h11)
-  const topShown = !aboveFluid && !(isSolid(above) && minCorner >= 1)
+  const topShown = !aboveFluid && !(isSolid(above) && minCorner >= 1) && !(selfMask & 1)
 
   let count = 0
   if (topShown) {
-    // 顶面（四角各降 0.001 防闪烁，同原版）
-    record(stillTex,
+    // 顶面：流动水用 flow 贴图并按流向旋转（材质包据此标出流向）；静止/岩浆用 still。
+    // 原版只有水平流速非零时用 flow 贴图，这里以「流动 level 1..7」近似。
+    const flowing = !isLava && info.level > 0 && info.level < 8
+    let topTex = stillTex
+    let topUVs = [[0, 1], [1, 1], [0, 0], [1, 0]]
+    if (flowing) {
+      const angle = flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind)
+      topTex = flowTex
+      if (angle !== null) {
+        const af = angle - Math.PI / 2
+        const ag = Math.sin(af) * 0.25
+        const ah = Math.cos(af) * 0.25
+        topUVs = [
+          [0.5 - ah + ag, 0.5 + ah + ag],
+          [0.5 + ah + ag, 0.5 + ah - ag],
+          [0.5 - ah - ag, 0.5 - ah + ag],
+          [0.5 + ah - ag, 0.5 - ah - ag],
+        ]
+      }
+    }
+    record(topTex,
       [[x, y + h01 - 0.001, z + 1], [x + 1, y + h11 - 0.001, z + 1], [x, y + h00 - 0.001, z], [x + 1, y + h10 - 0.001, z]],
-      [[0, 1], [1, 1], [0, 0], [1, 0]])
+      topUVs)
     count++
   }
   if (bottomShown) {
     record(stillTex, [[x + 1, y + w, z + 1], [x, y + w, z + 1], [x + 1, y + w, z], [x, y + w, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  // 侧面（邻居为同种流体或完整方块时剔除）
+  // 侧面（邻居为同种流体或完整方块、或含水方块自身满侧面时剔除）
   const side = (dx, dz) => get(dx, 0, dz)
-  if (!isFluid(side(0, -1)) && !isSolid(side(0, -1))) {
+  if (!isFluid(side(0, -1)) && !isSolid(side(0, -1)) && !(selfMask & 4)) {
     record(flowTex, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  if (!isFluid(side(0, 1)) && !isSolid(side(0, 1))) {
+  if (!isFluid(side(0, 1)) && !isSolid(side(0, 1)) && !(selfMask & 8)) {
     record(flowTex, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  if (!isFluid(side(-1, 0)) && !isSolid(side(-1, 0))) {
+  if (!isFluid(side(-1, 0)) && !isSolid(side(-1, 0)) && !(selfMask & 16)) {
     record(flowTex, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
     count++
   }
-  if (!isFluid(side(1, 0)) && !isSolid(side(1, 0))) {
+  if (!isFluid(side(1, 0)) && !isSolid(side(1, 0)) && !(selfMask & 32)) {
     record(flowTex, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
     count++
   }
@@ -268,6 +363,15 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
     hideSame[i] = sn.includes('glass') || sn.endsWith('_leaves') ? 1 : 0
   }
 
+  // 每个调色板条目所属流体（含含水方块/气泡柱）与其「满覆盖」面掩码。
+  // 只有含水方块需要 selfMask（其内部水体被自身实体面遮挡）；纯流体（水/岩浆/气泡柱）
+  // 的 baked 是整块流体的占位立方体，若误当 selfMask 会把自己顶/底面全剔掉。
+  const fluidOf = palette.map(fluidOfEntry)
+  const selfMasks = palette.map((p) => {
+    const fo = fluidOfEntry(p)
+    return fo && fo.waterlogged ? fullFaceMask(p.baked ? p.baked.quads : null) : 0
+  })
+
   const total = blocks.size
   const counts = new Map() // gKey -> 面数
   let emitted = 0
@@ -279,19 +383,22 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
       onProgress?.(total ? (0.5 * n) / total : 0)
       await yieldThread()
     }
-    if (!renderable[gi]) continue
     const lx = key % grid.W
     const lz = Math.floor(key / grid.W) % grid.D
     const ly = Math.floor(key / grid.strideY)
     const x = lx + minX
     const y = ly + minY
     const z = lz + minZ
-    if (isFluidName(palette[gi].name)) {
-      emitted += emitFluidFaces(palette, blocks, lx, lz, ly, x, y, z, gi, grid, (texKey) => {
+    const finfo = fluidOf[gi]
+    if (finfo) {
+      // 流体（水/岩浆/气泡柱/含水方块的内部水体）
+      emitted += emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], (texKey) => {
         counts.set(texKey, (counts.get(texKey) || 0) + 1)
       })
-      continue
+      if (!finfo.waterlogged) continue // 纯流体：不再渲染方块自身
+      // 含水方块：继续渲染方块自身的面（下面）
     }
+    if (!renderable[gi]) continue
     for (const q of quadsByPalette[gi]) {
       if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid)) continue
       const gKey = faceKey(palette, gi, q)
@@ -319,19 +426,20 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
       onProgress?.(total ? 0.5 + (0.5 * n) / total : 0)
       await yieldThread()
     }
-    if (!renderable[gi]) continue
     const lx = key % grid.W
     const lz = Math.floor(key / grid.W) % grid.D
     const ly = Math.floor(key / grid.strideY)
     const x = lx + minX
     const y = ly + minY
     const z = lz + minZ
-    if (isFluidName(palette[gi].name)) {
-      emitFluidFaces(palette, blocks, lx, lz, ly, x, y, z, gi, grid, (texKey, pos, uvs) => {
+    const finfo = fluidOf[gi]
+    if (finfo) {
+      emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], (texKey, pos, uvs) => {
         writeFace(groups.get(texKey), pos, uvs, 0, 0, 0)
       })
-      continue
+      if (!finfo.waterlogged) continue
     }
+    if (!renderable[gi]) continue
     for (const q of quadsByPalette[gi]) {
       if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid)) continue
       const gKey = faceKey(palette, gi, q)
