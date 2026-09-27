@@ -184,7 +184,8 @@ async function buildFrameItem(item, resolver, assets) {
       }),
     )
     holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
-    holder.scale.setScalar(0.5)
+    // 方块模型继承 block/block.json 的 "fixed" 显示缩放 0.5，叠加框体的 0.5 后总缩放 0.25（4px）
+    holder.scale.setScalar(0.25)
     return holder
   }
 
