@@ -151,24 +151,54 @@ async function buildItemFrame(entity, id, assets) {
   // 内部物品：框口 0.4375 处，缩放 0.5（8px），绕框法线按 ItemRotation × 45° 旋转
   const item = entity.nbt?.Item
   if (item && item.id) {
-    const name = shortName(item.id)
-    const itemTex =
-      (await assets.getTexture('item/' + name)) ||
-      (await assets.getTexture('block/' + name)) ||
-      (await assets.getTexture('entity/' + name))
-    if (itemTex) {
+    const itemMesh = await buildFrameItem(item, resolver, assets)
+    if (itemMesh) {
       const rot = Number(entity.nbt?.ItemRotation) || 0
       const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rot * 45 * DEG)
-      const itemMat = new THREE.MeshLambertMaterial({ map: itemTex, alphaTest: 0.5, side: THREE.DoubleSide })
-      const plane = new THREE.Mesh(quadGeometry(0.5, 0.5), itemMat)
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q)
-      plane.position.copy(anchor).addScaledVector(forward, 0.4375)
-      plane.quaternion.copy(q).multiply(qz)
-      group.add(plane)
+      itemMesh.position.copy(anchor).addScaledVector(forward, 0.4375)
+      itemMesh.quaternion.copy(q).multiply(qz)
+      group.add(itemMesh)
     }
   }
 
   return group
+}
+
+// 框内物品网格（已缩放到 0.5 = 8px）：
+// 方块物品用 3D 方块模型渲染（游戏内图标即方块模型，axis 方块默认正立 y）；
+// 非方块（箭等）回退到 16px 贴图平面。
+async function buildFrameItem(item, resolver, assets) {
+  const name = shortName(item.id)
+  const holder = new THREE.Group()
+
+  const baked = await resolver.resolve('minecraft:' + name, { axis: 'y' })
+  if (baked && baked.quads && baked.quads.length) {
+    const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
+    const mats = new Map()
+    await Promise.all(
+      texKeys.map(async (tk) => {
+        const tex = await assets.getTexture(tk)
+        // DoubleSide：玻璃/植物等十字模型与透明方块背面也要可见（原版 cutout 不剔除背面）
+        if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide }))
+      }),
+    )
+    holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
+    holder.scale.setScalar(0.5)
+    return holder
+  }
+
+  const tex =
+    (await assets.getTexture('item/' + name)) ||
+    (await assets.getTexture('block/' + name)) ||
+    (await assets.getTexture('entity/' + name))
+  if (tex) {
+    const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+    holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
+    holder.scale.setScalar(0.5)
+    return holder
+  }
+  return null
 }
 
 // 矿车：车身 + 4 轮（+ 漏斗）
