@@ -147,6 +147,25 @@ function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind) {
   return Math.atan2(vz, vx)
 }
 
+// 气泡柱内部气泡的散布位置（方块局部坐标 0..1）。
+// 原版气泡是每 tick 在柱内随机位置生成的上升/下沉粒子（中心一枚 + 随机一枚），
+// 这里用「按方块坐标的确定性伪随机」静态近似：中心区域散落几枚、每格位置不同，
+// 看起来是柱体内零散的气泡流而不是整齐排列。
+function bubbleScatter(lx, ly, lz) {
+  let h = (lx * 374761393 + ly * 668265263 + lz * 1442695041) >>> 0
+  const rnd = () => {
+    h = (h * 1664525 + 1013904223) >>> 0
+    return h / 4294967296
+  }
+  const out = []
+  const n = 4 + (h % 3) // 每格 4~6 枚
+  for (let i = 0; i < n; i++) {
+    // 集中在中心区域（x/z 0.38~0.62），高度随机
+    out.push([0.38 + rnd() * 0.24, 0.05 + rnd() * 0.9, 0.38 + rnd() * 0.24])
+  }
+  return out
+}
+
 // 收集一个流体方块应生成的面，逐个交给 record(texKey, pos, uvs)。
 // lx/lz/ly 是局部坐标（用于邻居查找与越界判断），x/y/z 是世界坐标（用于顶点）。
 //
@@ -278,28 +297,34 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
     record(stillTex, [[x + 1, y + w, z + 1], [x, y + w, z + 1], [x + 1, y + w, z], [x, y + w, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  // 侧面（邻居为同种流体或不透明完整方块、或含水方块自身满侧面时剔除）。
-  // 气泡柱额外在侧面内移一点叠一张原版气泡粒子贴图（particle/bubble），
-  // 模拟原版气泡在水流内部上升/下沉的粒子效果。
+  // 侧面（邻居为同种流体或不透明完整方块、或含水方块自身满侧面时剔除）
   const side = (dx, dz) => get(dx, 0, dz)
-  const emitSide = (dx, dz, bit, pos, uv, insetA, insetS) => {
+  const emitSide = (dx, dz, bit, pos, uv) => {
     if (isFluid(side(dx, dz)) || isCullingSolid(side(dx, dz)) || (selfMask & bit)) return
     record(flowTex, pos, uv)
     count++
-    if (info.bubble) {
-      const bpos = pos.map((p) => {
-        const q = [...p]
-        q[insetA === 'x' ? 0 : 2] += insetS * 0.02 // 向方块内部偏移 0.02
-        return q
-      })
-      record('particle/bubble', bpos, uv)
+  }
+  emitSide(0, -1, 4, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+  emitSide(0, 1, 8, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
+  emitSide(-1, 0, 16, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
+  emitSide(1, 0, 32, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
+  // 气泡柱内部的气泡：原版是柱内中心区域随机上升/下沉的粒子，这里在每个方块中心区域
+  // 散落几枚「交叉面」气泡（X 向 + Z 向各一面，从各个方向都可见），模拟柱体内的气泡流。
+  if (info.bubble) {
+    const r = 0.15 // 气泡半径（约 2.4px）
+    for (const [bx, by, bz] of bubbleScatter(lx, ly, lz)) {
+      // X 向面（面向 ±x）
+      record('particle/bubble',
+        [[x + bx, y + by + r, z + bz - r], [x + bx, y + by + r, z + bz + r], [x + bx, y + by - r, z + bz - r], [x + bx, y + by - r, z + bz + r]],
+        [[0, 1], [1, 1], [0, 0], [1, 0]])
+      count++
+      // Z 向面（面向 ±z）
+      record('particle/bubble',
+        [[x + bx - r, y + by + r, z + bz], [x + bx + r, y + by + r, z + bz], [x + bx - r, y + by - r, z + bz], [x + bx + r, y + by - r, z + bz]],
+        [[0, 1], [1, 1], [0, 0], [1, 0]])
       count++
     }
   }
-  emitSide(0, -1, 4, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]], 'z', 1)
-  emitSide(0, 1, 8, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]], 'z', -1)
-  emitSide(-1, 0, 16, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]], 'x', 1)
-  emitSide(1, 0, 32, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]], 'x', -1)
   return count
 }
 
