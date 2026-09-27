@@ -9,14 +9,19 @@
 
 import { parseNBT, decompressNBT } from './nbt.js'
 
+// 空气类方块：解析时直接跳过、不存入 blocks Map，避免超大型投影占用过多内存。
+const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
+
 // 解码位压缩的 BlockStates（小端序），返回每个位置的调色板索引。
 export function decodeBlockStates(longs, bits, total) {
   const out = new Uint32Array(total)
   const mask = (1n << BigInt(bits)) - 1n
   for (let i = 0; i < total; i++) {
     const start = i * bits
-    const word = start >> 6
-    const off = start & 63
+    // 注意：不能用 start >> 6 / start & 63，JS 位运算会截成 32 位，
+    // 超大型投影（i*bits > 2^31）会溢出导致 word 为负、longs[word] 为 undefined。
+    const word = Math.floor(start / 64)
+    const off = start % 64
     let v
     if (off + bits <= 64) {
       v = (BigInt.asUintN(64, longs[word]) >> BigInt(off)) & mask
@@ -96,10 +101,20 @@ export function parseLitematicaRaw(rawBytes) {
     const wy0 = Math.min(pos.y, pos.y + size.y + 1)
     const wz0 = Math.min(pos.z, pos.z + size.z + 1)
 
+    // 边界由区域范围直接得出（含空气），无需遍历每个方块
+    minX = Math.min(minX, wx0)
+    maxX = Math.max(maxX, wx0 + dx - 1)
+    minY = Math.min(minY, wy0)
+    maxY = Math.max(maxY, wy0 + dy - 1)
+    minZ = Math.min(minZ, wz0)
+    maxZ = Math.max(maxZ, wz0 + dz - 1)
+
     const paletteList = region.BlockStatePalette || []
     const localToGlobal = new Array(paletteList.length)
+    const isSkip = new Uint8Array(paletteList.length)
     for (let i = 0; i < paletteList.length; i++) {
       localToGlobal[i] = getGlobalIndex(paletteList[i].Name, paletteList[i].Properties)
+      isSkip[i] = SKIP_NAMES.has((paletteList[i].Name || '').replace(/^minecraft:/, '')) ? 1 : 0
     }
 
     if (Array.isArray(region.TileEntities)) {
@@ -131,17 +146,13 @@ export function parseLitematicaRaw(rawBytes) {
     for (let y = 0; y < dy; y++) {
       for (let z = 0; z < dz; z++) {
         for (let x = 0; x < dx; x++) {
-          const gi = localToGlobal[decoded[idx++]] ?? 0
+          const li = decoded[idx++]
+          if (isSkip[li]) continue // 空气类方块不入 Map
+          const gi = localToGlobal[li] ?? 0
           const wx = wx0 + x
           const wy = wy0 + y
           const wz = wz0 + z
           blocks.set(wx + ',' + wy + ',' + wz, gi)
-          if (wx < minX) minX = wx
-          if (wx > maxX) maxX = wx
-          if (wy < minY) minY = wy
-          if (wy > maxY) maxY = wy
-          if (wz < minZ) minZ = wz
-          if (wz > maxZ) maxZ = wz
         }
       }
     }
