@@ -315,11 +315,17 @@ export class Renderer {
     for (const [texKey, g] of groups) {
       const mat = materials.get(texKey)
       if (!mat) continue
-      // 气泡组是点云：positions 只存中心坐标（每点 3 个 float）
+      // 气泡组是点云：positions 只存中心坐标（每点 3 个 float）。
+      // renderOrder = -1：强制气泡在所有透明物体之前绘制——水会写深度（默认 depthWrite），
+      // 若气泡排在水后面，柱内的气泡会被水面深度全部挡住（只有个别角度可见）。
+      // 气泡先画、只和实体方块做深度测试，水随后混合在其上（气泡带一点水的蓝色），
+      // 与原版一致：水不遮挡其内部的气泡粒子。
       if (texKey === 'particle/bubble') {
         const geo = new THREE.BufferGeometry()
         geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3))
-        this.group.add(new THREE.Points(geo, mat))
+        const points = new THREE.Points(geo, mat)
+        points.renderOrder = -1
+        this.group.add(points)
         continue
       }
       const geo = new THREE.BufferGeometry()
