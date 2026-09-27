@@ -70,34 +70,18 @@ function chestTex(blockName, type, p) {
   return 'entity/chest/' + t + suffix
 }
 
-// 潜影盒：箱盖(顶部 12px) + 底座(底部 4px) 两段式，贴图 entity/shulker/*（64×64）。
-// 顶部=浅紫盖顶、四周=中紫盖侧、底部=深紫底座。朝向由 facing 属性旋转。
+// 潜影盒：箱盖(顶部 12px) + 底座(底部 8px) 两段式，贴图 entity/shulker/*（64×64）。
+// 几何与 UV 与原版 ShulkerEntityModel.getShulkerBoxTexturedModelData 一致：
+//   base = uv(0,28) cuboid 16×8×16（y 0..8），lid = uv(0,0) cuboid 16×12×16（y 4..16），
+// 两段在 y4..8 重叠（关盒时看不到内部面）。UV 用 texBox 自动布局（与原版 Cuboid 相同）：
+//   底座顶面 u32-48、底面 u16-32、侧面 v44-52；箱盖顶面 u32-48、内面 u16-32、侧面 v16-28。
+// 朝向由 facing 属性旋转。
 function shulkerModel(texKey) {
   return {
     textures: { all: texKey },
     elements: [
-      { // 箱盖 16×12×16（顶部 12px）
-        from: [0, 4, 0], to: [16, 16, 16],
-        faces: {
-          up: face(16, 0, 32, 16),
-          down: face(32, 0, 48, 16),
-          east: face(0, 16, 16, 28),
-          south: face(16, 16, 32, 28),
-          west: face(32, 16, 48, 28),
-          north: face(48, 16, 64, 28),
-        },
-      },
-      { // 底座 16×4×16（底部 4px，侧面取底座侧条底部 4px，避免整条拉伸）
-        from: [0, 0, 0], to: [16, 4, 16],
-        faces: {
-          up: face(16, 28, 32, 44),
-          down: face(32, 28, 48, 44),
-          east: face(0, 56, 16, 60),
-          south: face(16, 56, 32, 60),
-          west: face(32, 56, 48, 60),
-          north: face(48, 56, 64, 60),
-        },
-      },
+      texBox([0, 0, 0], [16, 8, 16], 0, 28), // 底座 16×8×16
+      texBox([0, 4, 0], [16, 16, 16], 0, 0), // 箱盖 16×12×16
     ],
   }
 }
