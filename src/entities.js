@@ -94,12 +94,12 @@ async function buildItemFrame(entity, id, assets) {
   const [px, py, pz] = entity.pos
   const facingByte = Number(entity.nbt?.Facing)
   const F = FACING_DIRS[facingByte] || [0, 0, -1]
-  const fvec = new THREE.Vector3(F[0], F[1], F[2])
 
-  // 附着方块中心（由 Pos 反推：Pos = 附着中心 − facing × 15/32）
+  // 附着方块中心（由 Pos 反推：Pos = 附着中心 − facing × 15/32）。
+  // 注意：这里的「附着方块」是框自己所在的空气方块（TileX/Y/Z），墙在 facing 的反面。
   const aCenter = new THREE.Vector3(px + F[0] * 0.46875, py + F[1] * 0.46875, pz + F[2] * 0.46875)
-  // 框体锚点 = 附着中心 + facing × 1.0
-  const anchor = aCenter.clone().addScaledVector(fvec, 1.0)
+  // 框体锚点 = 框所在方块中心；模型 +z 经旋转后指向 −facing（框背贴墙，墙在 −facing 侧）
+  const anchor = aCenter.clone()
 
   // 朝向（原版）：水平 f=0, g = 180 − positiveHorizontalDegrees；垂直 f = −90 × offset, g = 180
   let f, g
