@@ -25,7 +25,7 @@ function isPureFluid(p) {
 }
 // 流体贴图组（新实现会生成、参考实现不生成，比对时跳过）
 function isFluidTexKey(k) {
-  return k === 'block/water_still' || k === 'block/water_flow' || k === 'block/lava_still' || k === 'block/lava_flow' || k === 'block/bubble'
+  return k === 'block/water_still' || k === 'block/water_flow' || k === 'block/lava_still' || k === 'block/lava_flow' || k === 'particle/bubble'
 }
 function isRedstoneDustTex(t) { return /(redstone_dust_dot|redstone_dust_line0|redstone_dust_line1)$/.test(t) }
 

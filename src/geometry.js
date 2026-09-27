@@ -24,9 +24,11 @@ export function isSkipBlock(name) {
 }
 
 // 透明方块：不遮挡邻居，但仍以 alphaTest 方式渲染出边框/树叶。
+// 格栅（铜格栅）、铁栏杆、锁链等是 TransparentBlock（cutout 纹理有洞），同样不遮挡。
 export function isTransparent(name) {
   const n = shortName(name)
   return n.endsWith('_leaves') || n.includes('glass') || n === 'ice' || n === 'water' || n === 'lava' || n === 'bubble_column'
+    || n.endsWith('_grate') || n.endsWith('_bars') || n === 'chain' || n.endsWith('_chain') || n === 'tripwire'
 }
 
 // 红石粉的线/点贴图需要按信号强度分别染色
@@ -174,10 +176,12 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
   const giName = (gi2) => (gi2 === undefined ? '' : shortName(palette[gi2].name))
   // 同种流体（水/岩浆分开；含水方块、气泡柱都算水）
   const isFluid = (gi2) => gi2 !== undefined && !!fluidOf[gi2] && fluidOf[gi2].kind === kind
-  // 原版 isSolid 的近似：完整方块且不是树叶（玻璃等透明完整方块在原版也算 solid，
-  // 同样会遮挡相邻的流体面；树叶的 culling shape 为空，不遮挡）。流体本身不算 solid。
+  // 高度计算用的 isSolid：完整方块（含玻璃等透明完整方块，原版按 isSolid() 判定）→ -1 不参与平均。
   const isSolid = (gi2) =>
     gi2 !== undefined && !!palette[gi2].baked && palette[gi2].baked.fullCube && !fluidOf[gi2] && !giName(gi2).endsWith('_leaves')
+  // 面剔除用的 isCullingSolid：只有「不透明」的完整方块才遮挡水面；
+  // 玻璃/树叶/格栅等透明方块的 culling shape 为空（原版 TransparentBlock），水应透过它们显示。
+  const isCullingSolid = (gi2) => isSolid(gi2) && !isTransparent(palette[gi2].name)
 
   // 原版 getFluidHeight
   const fluidH = (dx, dy, dz) => {
@@ -206,11 +210,12 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
       if (h >= 0.8) {
         sum += h * 10
         cnt += 10
-      } else if (h >= 0) {
+      } else if (h > 0) {
         sum += h
         cnt += 1
       }
-      // h < 0（实心方块）不参与平均，避免把表面拖低
+      // h <= 0（空气/实心方块）不参与平均：水面不会被边缘的空气拖低，
+      // 与游戏内实际显示一致（水面保持平齐，仅在水体内部有过渡）。
     }
     if (a > 0 || b > 0) {
       const f = fluidH(dx, 0, dz)
@@ -238,12 +243,12 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
   const below = get(0, -1, 0)
   const aboveFluid = isFluid(above)
   const belowFluid = isFluid(below)
-  // 底面：下方不是同种流体且不被完整方块遮挡；含水方块自身满底面时也剔除
-  const bottomShown = !belowFluid && !isSolid(below) && !(selfMask & 2)
+  // 底面：下方不是同种流体且不被不透明完整方块遮挡；含水方块自身满底面时也剔除
+  const bottomShown = !belowFluid && !isCullingSolid(below) && !(selfMask & 2)
   const w = bottomShown ? 0.001 : 0 // 原版：底面存在时侧面底边抬高 0.001 防闪烁
-  // 顶面：上方不是同种流体；上方为完整方块时只有表面满格才遮挡；含水方块自身满顶面时也剔除
+  // 顶面：上方不是同种流体；上方为不透明完整方块时只有表面满格才遮挡；含水方块自身满顶面时也剔除
   const minCorner = Math.min(h00, h10, h01, h11)
-  const topShown = !aboveFluid && !(isSolid(above) && minCorner >= 1) && !(selfMask & 1)
+  const topShown = !aboveFluid && !(isCullingSolid(above) && minCorner >= 1) && !(selfMask & 1)
 
   let count = 0
   if (topShown) {
@@ -273,19 +278,28 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
     record(stillTex, [[x + 1, y + w, z + 1], [x, y + w, z + 1], [x + 1, y + w, z], [x, y + w, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
     count++
   }
-  // 侧面（邻居为同种流体或完整方块、或含水方块自身满侧面时剔除）。
-  // 气泡柱侧面改用「水 + 气泡」贴图，近似原版气泡粒子的上升/下沉效果。
+  // 侧面（邻居为同种流体或不透明完整方块、或含水方块自身满侧面时剔除）。
+  // 气泡柱额外在侧面内移一点叠一张原版气泡粒子贴图（particle/bubble），
+  // 模拟原版气泡在水流内部上升/下沉的粒子效果。
   const side = (dx, dz) => get(dx, 0, dz)
-  const sideTex = info.bubble ? 'block/bubble' : flowTex
-  const emitSide = (dx, dz, bit, pos, uv) => {
-    if (isFluid(side(dx, dz)) || isSolid(side(dx, dz)) || (selfMask & bit)) return
-    record(sideTex, pos, uv)
+  const emitSide = (dx, dz, bit, pos, uv, insetA, insetS) => {
+    if (isFluid(side(dx, dz)) || isCullingSolid(side(dx, dz)) || (selfMask & bit)) return
+    record(flowTex, pos, uv)
     count++
+    if (info.bubble) {
+      const bpos = pos.map((p) => {
+        const q = [...p]
+        q[insetA === 'x' ? 0 : 2] += insetS * 0.02 // 向方块内部偏移 0.02
+        return q
+      })
+      record('particle/bubble', bpos, uv)
+      count++
+    }
   }
-  emitSide(0, -1, 4, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-  emitSide(0, 1, 8, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]])
-  emitSide(-1, 0, 16, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]])
-  emitSide(1, 0, 32, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]])
+  emitSide(0, -1, 4, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]], 'z', 1)
+  emitSide(0, 1, 8, [[x, y + w, z + 1], [x + 1, y + w, z + 1], [x, y + h01, z + 1], [x + 1, y + h11, z + 1]], [[0, 1], [1, 1], [0, 0], [1, 0]], 'z', -1)
+  emitSide(-1, 0, 16, [[x, y + h00, z], [x, y + w, z], [x, y + h01, z + 1], [x, y + w, z + 1]], [[0, 0], [0, 1], [1, 0], [1, 1]], 'x', 1)
+  emitSide(1, 0, 32, [[x + 1, y + h11, z + 1], [x + 1, y + w, z + 1], [x + 1, y + h10, z], [x + 1, y + w, z]], [[0, 0], [0, 1], [1, 0], [1, 1]], 'x', -1)
   return count
 }
 
