@@ -129,7 +129,10 @@ async function openFile(file) {
     ui.setProgress(0.02)
     const buffer = await file.arrayBuffer()
 
-    const data = await parseLitematica(buffer)
+    const data = await parseLitematica(buffer, (f) => {
+      ui.setProgress(0.02 + f * 0.18)
+      ui.setStatus(`正在解析文件 … ${Math.round(f * 100)}%`)
+    })
     ui.setProgress(0.2)
 
     const palette = data.palette

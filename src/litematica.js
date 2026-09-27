@@ -13,10 +13,12 @@ import { parseNBT, decompressNBT } from './nbt.js'
 const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
 
 // 解码位压缩的 BlockStates（小端序），返回每个位置的调色板索引。
-export function decodeBlockStates(longs, bits, total) {
+// startIdx 支持分块解码：只解码 [startIdx, startIdx+total) 这段，用于超大投影分块处理。
+export function decodeBlockStates(longs, bits, total, startIdx = 0) {
   const out = new Uint32Array(total)
   const mask = (1n << BigInt(bits)) - 1n
-  for (let i = 0; i < total; i++) {
+  for (let j = 0; j < total; j++) {
+    const i = startIdx + j
     const start = i * bits
     // 注意：不能用 start >> 6 / start & 63，JS 位运算会截成 32 位，
     // 超大型投影（i*bits > 2^31）会溢出导致 word 为负、longs[word] 为 undefined。
@@ -31,7 +33,7 @@ export function decodeBlockStates(longs, bits, total) {
       const hi = BigInt.asUintN(64, longs[word + 1]) & ((1n << BigInt(hiBits)) - 1n)
       v = low | (hi << BigInt(64 - off))
     }
-    out[i] = Number(v)
+    out[j] = Number(v)
   }
   return out
 }
@@ -46,7 +48,8 @@ function vec(v) {
 
 // 解析 .litematica 的 ArrayBuffer，返回：
 // { metadata, palette: [{name, properties, key}], blocks: Map<"x,y,z" -> paletteIndex>, bounds }
-export function parseLitematicaRaw(rawBytes) {
+// onProgress(fraction) 在解析过程中回调进度（0~1），用于超大文件显示进度。
+export async function parseLitematicaRaw(rawBytes, onProgress) {
   const root = parseNBT(rawBytes)
 
   const meta = root.Metadata || {}
@@ -65,6 +68,17 @@ export function parseLitematicaRaw(rawBytes) {
   const regions = root.Regions || root.SubRegions
   if (!regions || typeof regions !== 'object') {
     throw new Error('文件中没有 Regions 数据')
+  }
+
+  // 预先统计总方块数（用于进度显示）
+  let totalBlocks = 0
+  for (const region of Object.values(regions)) {
+    const size = vec(region.Size)
+    const dx = Math.abs(size.x)
+    const dy = Math.abs(size.y)
+    const dz = Math.abs(size.z)
+    if (dx === 0 || dy === 0 || dz === 0) continue
+    totalBlocks += dx * dy * dz
   }
 
   const palette = []
@@ -87,6 +101,7 @@ export function parseLitematicaRaw(rawBytes) {
   const entities = [] // 实体（如矿车、物品展示框）
   let minX = Infinity, minY = Infinity, minZ = Infinity
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+  let doneBlocks = 0
 
   for (const region of Object.values(regions)) {
     const pos = vec(region.Position)
@@ -139,14 +154,16 @@ export function parseLitematicaRaw(rawBytes) {
     }
 
     const bits = Math.max(2, Math.ceil(Math.log2(paletteList.length)))
-    const total = dx * dy * dz
-    const decoded = decodeBlockStates(region.BlockStates, bits, total)
+    const rowSize = dz * dx // 每层（y 固定）的方块数
 
-    let idx = 0
+    // 按「层」分块解码并即时存入 Map：避免一次性分配超大数组，
+    // 且每解码一层让出一次主线程，防止超大投影（上亿方块）卡死界面。
     for (let y = 0; y < dy; y++) {
+      const decoded = decodeBlockStates(region.BlockStates, bits, rowSize, y * rowSize)
+      let rowIdx = 0
       for (let z = 0; z < dz; z++) {
         for (let x = 0; x < dx; x++) {
-          const li = decoded[idx++]
+          const li = decoded[rowIdx++]
           if (isSkip[li]) continue // 空气类方块不入 Map
           const gi = localToGlobal[li] ?? 0
           const wx = wx0 + x
@@ -155,6 +172,9 @@ export function parseLitematicaRaw(rawBytes) {
           blocks.set(wx + ',' + wy + ',' + wz, gi)
         }
       }
+      doneBlocks += rowSize
+      onProgress?.(totalBlocks ? doneBlocks / totalBlocks : 0)
+      await new Promise((r) => setTimeout(r, 0)) // 让出主线程，保持界面响应
     }
   }
 
@@ -168,7 +188,7 @@ export function parseLitematicaRaw(rawBytes) {
   return { metadata, palette, blocks, bounds, tileEntities, entities }
 }
 
-export async function parseLitematica(buffer) {
+export async function parseLitematica(buffer, onProgress) {
   const raw = await decompressNBT(new Uint8Array(buffer))
-  return parseLitematicaRaw(raw)
+  return parseLitematicaRaw(raw, onProgress)
 }
