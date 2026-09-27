@@ -310,9 +310,12 @@ export class Renderer {
       const mat = materials.get(texKey)
       if (!mat) continue
       const geo = new THREE.BufferGeometry()
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(g.positions, 3))
-      geo.setAttribute('uv', new THREE.Float32BufferAttribute(g.uvs, 2))
-      geo.setIndex(g.indices)
+      // 注意：这里必须用 BufferAttribute 直接包装类型数组（不复制）——
+      // Float32BufferAttribute 会复制一份（超大投影多占一倍内存），
+      // 且 setIndex 只自动转换普通数组，直接传 Uint32Array 会被当成裸数组导致渲染报错。
+      geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3))
+      geo.setAttribute('uv', new THREE.BufferAttribute(g.uvs, 2))
+      geo.setIndex(new THREE.BufferAttribute(g.indices, 1))
       this.group.add(new THREE.Mesh(geo, mat))
       // 超大几何体上传 GPU 时也定期让出主线程，避免最后一段卡顿
       if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
