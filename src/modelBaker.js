@@ -150,12 +150,13 @@ function autoUV(dir, from, to) {
   }
 }
 
-// 元素旋转的 rescale：把元素在「垂直于旋转轴」的两个方向上按 1/(|cos|+|sin|) 缩放
-// （缩放中心为旋转 origin），使旋转后仍能放进原来的包围盒。
-// 对应原版 FaceBakery.computeRescale / RESCALE_22_5、RESCALE_45 常量（铁轨斜坡、十字植物等）。
+// 元素旋转的 rescale：把元素在「垂直于旋转轴」的两个方向上按 1/|cos(angle)| 缩放
+// （缩放中心为旋转 origin），使旋转后元素投影仍占满原包围盒。
+// 对应原版 FaceBakery.computeRescale：RESCALE_45 = 1/cos45° = √2、RESCALE_22_5 = 1/cos22.5°。
+// 例：铁轨斜坡（45° 平板）缩放后 y 恰好从 1/16 到 17/16，与上下两条平轨无缝衔接。
 function rescaleAround([x, y, z], axis, angleDeg, origin) {
   const a = (angleDeg * Math.PI) / 180
-  const scale = 1 / (Math.abs(Math.cos(a)) + Math.abs(Math.sin(a)))
+  const scale = 1 / Math.abs(Math.cos(a))
   const px = x - origin[0]
   const py = y - origin[1]
   const pz = z - origin[2]
