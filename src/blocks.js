@@ -71,17 +71,39 @@ function chestTex(blockName, type, p) {
 }
 
 // 潜影盒：箱盖(顶部 12px) + 底座(底部 8px) 两段式，贴图 entity/shulker/*（64×64）。
-// 几何与 UV 与原版 ShulkerEntityModel.getShulkerBoxTexturedModelData 一致：
-//   base = uv(0,28) cuboid 16×8×16（y 0..8），lid = uv(0,0) cuboid 16×12×16（y 4..16），
-// 两段在 y4..8 重叠（关盒时看不到内部面）。UV 用 texBox 自动布局（与原版 Cuboid 相同）：
-//   底座顶面 u32-48、底面 u16-32、侧面 v44-52；箱盖顶面 u32-48、内面 u16-32、侧面 v16-28。
+// 几何与原版 ShulkerEntityModel 一致：base 16×8×16（y 0..8）、lid 16×12×16（y 4..16）。
+//
+// 贴图布局（64×64，与原版 Cuboid 顶/底面的 u 列约定相反——潜影盒顶面在 u+dz 列、
+// 底面在 u+dz+dx 列，与箱子相反，以游戏内实际显示为准）：
+//   箱盖顶面 u16-32（紫色带花纹）、内面 u32-48（深色带边框）、侧面 v16-28；
+//   底座顶面（箱内地板）u16-32（深色）、底面（外底）u32-48（紫色）、侧面 v44-52。
 // 朝向由 facing 属性旋转。
 function shulkerModel(texKey) {
   return {
     textures: { all: texKey },
     elements: [
-      texBox([0, 0, 0], [16, 8, 16], 0, 28), // 底座 16×8×16
-      texBox([0, 4, 0], [16, 16, 16], 0, 0), // 箱盖 16×12×16
+      { // 底座 16×8×16
+        from: [0, 0, 0], to: [16, 8, 16],
+        faces: {
+          up: face(16, 44, 32, 28), // u16-32, v28-44（深色箱内地板）
+          down: face(48, 28, 32, 44), // u32-48, v28-44（紫色外底）
+          west: face(16, 52, 0, 44),
+          north: face(32, 52, 16, 44),
+          east: face(48, 52, 32, 44),
+          south: face(64, 52, 48, 44),
+        },
+      },
+      { // 箱盖 16×12×16
+        from: [0, 4, 0], to: [16, 16, 16],
+        faces: {
+          up: face(16, 16, 32, 0), // u16-32, v0-16（紫色盖顶）
+          down: face(48, 0, 32, 16), // u32-48, v0-16（深色内面）
+          west: face(16, 28, 0, 16),
+          north: face(32, 28, 16, 16),
+          east: face(48, 28, 32, 16),
+          south: face(64, 28, 48, 16),
+        },
+      },
     ],
   }
 }
