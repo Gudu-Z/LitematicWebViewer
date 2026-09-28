@@ -278,7 +278,7 @@ function cuboidElement(from, to, texU, texV) {
 }
 
 // 盔甲架：无 JSON 模型（Java 硬编码），按原版 ArmorStandEntityModel.getTexturedModelData
-// 的盒体尺寸/位置/UV 复现，用 bakeModel 烘焙 + entity/armorstand/wood.png 贴图。
+// 的盒体尺寸/位置/UV 复现，用 bakeModel 烘焙 + entity/armorstand/armorstand.png 贴图。
 // 支持 ShowArms（双臂）、Small（缩小）、NoBasePlate（去底板）。
 async function buildArmorStand(entity, assets) {
   const group = new THREE.Group()
@@ -304,8 +304,8 @@ async function buildArmorStand(entity, assets) {
     elements.push(cuboidElement([5, 12, -1], [7, 24, 1], 32, 16)) // 左臂
   }
 
-  const baked = bakeModel({ textures: { all: 'entity/armorstand/wood' }, elements }, {}, 64)
-  const tex = await assets.getTexture('entity/armorstand/wood')
+  const baked = bakeModel({ textures: { all: 'entity/armorstand/armorstand' }, elements }, {}, 64)
+  const tex = await assets.getTexture('entity/armorstand/armorstand')
   const mat = tex
     ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, flatShading: true })
     : new THREE.MeshLambertMaterial({ color: 0x9c7a4d, flatShading: true })
@@ -326,7 +326,7 @@ async function buildMinecart(entity, id, assets) {
   const yaw = Number(entity.rotation?.[0]) || 0
 
   const model = ENTITY_MODELS.MinecartEntityModel
-  const tex = await assets.getTexture('entity/minecart')
+  const tex = await assets.getTexture('entity/minecart/minecart')
   const bodyMat = tex
     ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     : new THREE.MeshLambertMaterial({ color: 0x7a7a7a })
@@ -492,17 +492,17 @@ const MOB_TABLE = {
   panda: ['PandaEntityModel', 'entity/panda/panda'],
   polar_bear: ['PolarBearEntityModel', 'entity/bear/polarbear'],
   wolf: ['WolfEntityModel', 'entity/wolf/wolf'],
-  cat: ['Feline', 'entity/cat/tabby'],
+  cat: ['Feline', 'entity/cat/cat_tabby'],
   ocelot: ['Feline', 'entity/cat/ocelot'],
   fox: ['FoxEntityModel', 'entity/fox/fox'],
-  rabbit: ['RabbitEntityModel', 'entity/rabbit/brown'],
+  rabbit: ['RabbitEntityModel', 'entity/rabbit/rabbit_brown'],
   horse: ['Horse', 'entity/horse/horse_brown'],
   donkey: ['Horse', 'entity/horse/donkey'],
   mule: ['Horse', 'entity/horse/mule'],
-  llama: ['LlamaEntityModel', 'entity/llama/creamy'],
+  llama: ['LlamaEntityModel', 'entity/llama/llama_creamy'],
   turtle: ['TurtleEntityModel', 'entity/turtle/turtle'],
   chicken: ['ChickenEntityModel', 'entity/chicken/chicken_temperate'],
-  frog: ['FrogEntityModel', 'entity/frog/temperate_frog'],
+  frog: ['FrogEntityModel', 'entity/frog/frog_temperate'],
   axolotl: ['AxolotlEntityModel', 'entity/axolotl/axolotl_wild'],
   camel: ['CamelEntityModel', 'entity/camel/camel'],
   sniffer: ['SnifferEntityModel', 'entity/sniffer/sniffer'],
