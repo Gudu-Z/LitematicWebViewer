@@ -38,6 +38,8 @@ function evalExpr(expr, consts = {}) {
   // 去掉 (float) / (double) 强制转换
   s = s.replace(/\(float\)\s*/g, '').replace(/\(double\)\s*/g, '')
   s = s.replace(/Math\.PI/g, PI.toString())
+  // MathHelper.cos/sin 等 -> Math.cos/sin（用于末影龙、凋零尾巴的 pivot 计算）
+  s = s.replace(/MathHelper\./g, 'Math.')
   // 数字后缀 F/f/L/d
   s = s.replace(/(\d+\.?\d*)[fF]/g, '$1')
   s = s.replace(/(\d+)[lL]\b/g, '$1')
@@ -45,8 +47,8 @@ function evalExpr(expr, consts = {}) {
   for (const k of Object.keys(consts)) {
     if (typeof consts[k] === 'number') s = s.replace(new RegExp(`\\b${k}\\b`, 'g'), consts[k].toString())
   }
-  // 只允许数字、运算符、括号、空白、点、负号
-  if (/[^0-9+\-*/().\s]/.test(s)) return null
+  // 只允许数字、运算符、括号、空白、点、负号、Math 方法名
+  if (/[^0-9+\-*/().\sA-Za-z_]/.test(s)) return null
   try {
     // eslint-disable-next-line no-new-func
     return Function('return (' + s + ');')()
