@@ -1,6 +1,7 @@
 // 实体渲染：把 .litematica 里的实体转成 Three.js 网格。
 // 目前支持：item_frame / glow_item_frame（物品展示框）、*_minecart（矿车，含漏斗/箱子/熔炉/TNT）、
-// armor_stand（盔甲架）。
+// armor_stand（盔甲架）、*_boat（船，含箱船）、以及带 Health 的生物实体（猪/牛/羊/村民等，
+// 通用四足形状纯色近似）。
 //
 // 物品展示框严格按原版 ItemFrameEntityRenderer 的变换复现（1.21.11）：
 //   - 实体 Pos = 附着方块中心 − facing × 15/32（新版展示框位置移到支撑方块内，实测 NBT 印证）
@@ -42,6 +43,12 @@ export async function buildEntityMesh(entity, assets) {
   }
   if (id === 'armor_stand') {
     return buildArmorStand(entity, assets)
+  }
+  if (id.endsWith('_boat')) {
+    return buildBoat(entity, id, assets)
+  }
+  if (entity.nbt && 'Health' in entity.nbt) {
+    return buildMob(entity, id, assets) // 生物实体（猪/牛/羊/村民等）
   }
   return null
 }
@@ -363,6 +370,80 @@ async function buildMinecart(entity, id, assets) {
   }
 
   // 朝向：Minecraft yaw 与 Three.js rotation.y 方向相反
+  group.rotation.y = -(yaw * Math.PI) / 180
+  return group
+}
+
+// 常见生物实体的近似颜色（纯色，只求有形状）
+const MOB_COLORS = {
+  pig: 0xf2a9a5, cow: 0x5a3a24, sheep: 0xe6e2d8, chicken: 0xf0efe6,
+  horse: 0x8a5a2b, donkey: 0x7a6a55, mule: 0x5a4a38, llama: 0xb89a72,
+  villager: 0x8a6a4a, wandering_trader: 0x4a6a8a, zombie: 0x5f8f5f,
+  skeleton: 0xc8c4bc, creeper: 0x5fbf5f, spider: 0x2a2a2a,
+  enderman: 0x1a1a2a, iron_golem: 0xb0a8a0, snow_golem: 0xf0f0f0,
+  wolf: 0x8a8a8a, cat: 0xd8b078, rabbit: 0xd8c8b0, fox: 0xd97a2b,
+  panda: 0x1a1a1a, polar_bear: 0xf0f0e8, bee: 0xf0c820, frog: 0x5a8a4a,
+  goat: 0xe0d0c0, axolotl: 0xf0a0b0, turtle: 0x5a8a5a, dolphin: 0x8a9aa0,
+}
+
+// 船：硬编码船体 + 箱子（箱船）。船体用木色近似（原版是 skin 贴图，这里只求形状）。
+async function buildBoat(entity, id, assets) {
+  const group = new THREE.Group()
+  const [x, y, z] = entity.pos
+  const yaw = Number(entity.rotation?.[0]) || 0
+
+  const hullMat = new THREE.MeshLambertMaterial({ color: 0x8a6a45 })
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.5, 1.3), hullMat)
+  hull.position.set(x, y, z)
+  group.add(hull)
+
+  // 箱船：顶部加箱子
+  if (id.endsWith('_chest_boat')) {
+    const resolver = new BlockModelResolver(assets)
+    const baked = await resolver.resolve('minecraft:chest', { type: 'single', facing: 'north' })
+    if (baked && baked.quads && baked.quads.length) {
+      const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
+      const mats = new Map()
+      await Promise.all(
+        texKeys.map(async (tk) => {
+          const tex = await assets.getTexture(tk)
+          if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex }))
+        }),
+      )
+      const chest = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
+      chest.scale.setScalar(0.5)
+      chest.position.set(x, y + 0.4, z)
+      group.add(chest)
+    }
+  }
+
+  group.rotation.y = -(yaw * Math.PI) / 180
+  return group
+}
+
+// 生物实体：通用四足形状（躯干 + 头 + 四条腿），纯色近似，只求有个形状。
+async function buildMob(entity, id, assets) {
+  const group = new THREE.Group()
+  const [x, y, z] = entity.pos
+  const yaw = Number(entity.rotation?.[0]) || 0
+
+  const mat = new THREE.MeshLambertMaterial({ color: MOB_COLORS[id] || 0xa0806a })
+  const add = (cx, cy, cz, w, h, d) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat)
+    m.position.set(cx, cy, cz)
+    group.add(m)
+  }
+
+  // 躯干
+  add(0, 0.5, 0, 0.6, 0.4, 0.9)
+  // 头（朝 +z）
+  add(0, 0.6, 0.55, 0.4, 0.35, 0.35)
+  // 四条腿
+  for (const [lx, lz] of [[-0.22, -0.3], [-0.22, 0.3], [0.22, -0.3], [0.22, 0.3]]) {
+    add(lx, 0.175, lz, 0.15, 0.35, 0.15)
+  }
+
+  group.position.set(x, y, z)
   group.rotation.y = -(yaw * Math.PI) / 180
   return group
 }
