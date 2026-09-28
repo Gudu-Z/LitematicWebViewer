@@ -395,6 +395,10 @@ function cuboidFaces(c, texW, texH) {
     [['v5', 'v1', 'v2', 'v6'], [uE, vM, uS, vB], [1, 0, 0]], // east(+x)
     [['v4', 'v5', 'v6', 'v7'], [uS, vM, uS2, vB], [0, 0, 1]], // south(+z)
   ]
+  // 平面（某维度为 0）的“背面”采样与“正面”相同的 UV，避免背面空白（如炽足兽刚毛、沼泽骷髅蘑菇）
+  if (dy === 0) FACES[1][1] = FACES[0][1].slice()
+  if (dz === 0) FACES[5][1] = FACES[3][1].slice()
+  if (dx === 0) FACES[4][1] = FACES[2][1].slice()
   const out = []
   for (const [idx, [u1, v1, u2, v2], dir] of FACES) {
     const nuv = (uu, vv) => [uu / texW, vv / texH]

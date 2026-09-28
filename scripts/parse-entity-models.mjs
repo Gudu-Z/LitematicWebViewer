@@ -423,6 +423,21 @@ function injectLoopParts(models) {
     }
   }
 
+  // 兔子：26.3 的贴图是 64×64（成年兔子画在下半张 y=32..64），而 1.21.11 模型是 64×32。
+  // 这里把兔子所有 cuboid 的 v 坐标 +32，并把贴图尺寸改成 64×64。
+  const rabbit = models.RabbitEntityModel
+  if (rabbit) {
+    rabbit.w = 64
+    rabbit.h = 64
+    const shiftV = (node) => {
+      for (const p of Object.values(node)) {
+        for (const c of p.cuboids || []) c.v += 32
+        if (p.children) shiftV(p.children)
+      }
+    }
+    shiftV(rabbit.parts)
+  }
+
   // 女巫：addChild("head") 覆盖了村民的头（应合并旧 children 里的 nose），
   // 解析器没做合并，且 getChild("nose") 的 mole 被误挂到 hat4 下。这里补上 nose 并移动 mole。
   const witch = models.WitchEntityModel
