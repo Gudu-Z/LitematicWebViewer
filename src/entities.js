@@ -617,14 +617,22 @@ async function buildBoat(entity, id, assets) {
   const group = new THREE.Group()
   const [x, y, z] = entity.pos
   const yaw = Number(entity.rotation?.[0]) || 0
+  const type = String(entity.nbt?.Type || 'oak').replace(/^minecraft:/, '')
+  const isChest = id.endsWith('_chest_boat')
 
-  const hullMat = new THREE.MeshLambertMaterial({ color: 0x8a6a45 })
-  const hull = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.5, 1.3), hullMat)
-  hull.position.set(x, y, z)
+  // 船体：原版 BoatEntityModel（船底 + 四壁 + 双桨）+ 船皮贴图
+  const model = ENTITY_MODELS.BoatEntityModel
+  const tex = await assets.getTexture('entity/boat/' + type)
+  const hullMat = tex
+    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+    : new THREE.MeshLambertMaterial({ color: 0x8a6a45 })
+  const hull = quadsToEntityMesh(compileModel(model), hullMat)
+  // 编译后船体中心在局部 y≈1.406，下移使船体中心落在吃水线（实体 Pos）
+  hull.position.set(0, -22.5 / 16, 0)
   group.add(hull)
 
-  // 箱船：顶部加箱子
-  if (id.endsWith('_chest_boat')) {
+  // 箱船：船体之上加箱子
+  if (isChest) {
     const resolver = new BlockModelResolver(assets)
     const baked = await resolver.resolve('minecraft:chest', { type: 'single', facing: 'north' })
     if (baked && baked.quads && baked.quads.length) {
@@ -638,11 +646,13 @@ async function buildBoat(entity, id, assets) {
       )
       const chest = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
       chest.scale.setScalar(0.5)
-      chest.position.set(x, y + 0.4, z)
+      chest.position.set(0, 0.4, 0)
       group.add(chest)
     }
   }
 
-  group.rotation.y = -(yaw * Math.PI) / 180
+  group.position.set(x, y, z)
+  // 船模型长度沿 X（front 在 +x），实体 yaw 0=南(+z)，故绕 Y 转 -(yaw+90°)
+  group.rotation.y = -((yaw + 90) * Math.PI) / 180
   return group
 }

@@ -459,7 +459,7 @@ function parseClass(src) {
   const methodDecl = /(?:public|protected|private)?\s*static\s+(?:TexturedModelData|ModelData|ModelPartData|void)\s+(\w+)\s*\(/g
   let md
   while ((md = methodDecl.exec(src))) {
-    if (md[1] === 'getTexturedModelData' || md[1] === 'getModelData' || md[1] === 'addLimbs') order.push(md[1])
+    if (md[1] === 'getTexturedModelData' || md[1] === 'getModelData' || md[1] === 'addLimbs' || md[1] === 'addParts') order.push(md[1])
   }
   let parts = {}
   let scale = null
