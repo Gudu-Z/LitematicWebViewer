@@ -9,6 +9,68 @@
 
 export const EXTRA_MODELS = {
   // ---------------------------------------------------------------------------
+  // 史莱姆（64×32）。原版用 getOuterTexturedModelData/getInnerTexturedModelData，
+  // 解析器不支持，这里手写：外皮主体 + 内层的眼睛/嘴（前移到前表面外，因本项目无半透明）。
+  SlimeEntityModel: {
+    w: 64, h: 32,
+    parts: {
+      cube: { pivot: [0, 0, 0], cuboids: [{ u: 0, v: 0, x: -4, y: 16, z: -4, dx: 8, dy: 8, dz: 8 }], children: {} },
+      right_eye: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 0, x: -3.25, y: 18, z: -4.5, dx: 2, dy: 2, dz: 1 }], children: {} },
+      left_eye: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 4, x: 1.25, y: 18, z: -4.5, dx: 2, dy: 2, dz: 1 }], children: {} },
+      mouth: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 8, x: 0, y: 21, z: -4.5, dx: 1, dy: 1, dz: 1 }], children: {} },
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // 岩浆怪（64×64）。原版是 8 层薄片叠成身体 + 内芯，这里照原版转录。
+  MagmaCubeEntityModel: {
+    w: 64, h: 64,
+    parts: {
+      cube0: { pivot: [0, 0, 0], cuboids: [{ u: 0, v: 0, x: -4, y: 16, z: -4, dx: 8, dy: 1, dz: 8 }], children: {} },
+      cube1: { pivot: [0, 0, 0], cuboids: [{ u: 0, v: 9, x: -4, y: 17, z: -4, dx: 8, dy: 1, dz: 8 }], children: {} },
+      cube2: { pivot: [0, 0, 0], cuboids: [{ u: 0, v: 18, x: -4, y: 18, z: -4, dx: 8, dy: 1, dz: 8 }], children: {} },
+      cube3: { pivot: [0, 0, 0], cuboids: [{ u: 0, v: 27, x: -4, y: 19, z: -4, dx: 8, dy: 1, dz: 8 }], children: {} },
+      cube4: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 0, x: -4, y: 20, z: -4, dx: 8, dy: 1, dz: 8 }], children: {} },
+      cube5: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 9, x: -4, y: 21, z: -4, dx: 8, dy: 1, dz: 8 }], children: {} },
+      cube6: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 18, x: -4, y: 22, z: -4, dx: 8, dy: 1, dz: 8 }], children: {} },
+      cube7: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 27, x: -4, y: 23, z: -4, dx: 8, dy: 1, dz: 8 }], children: {} },
+      inside_cube: { pivot: [0, 0, 0], cuboids: [{ u: 24, v: 40, x: -2, y: 18, z: -2, dx: 4, dy: 4, dz: 4 }], children: {} },
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // 旋风人（32×32）。原版用私有 createModelData() + resetChildrenExcept()，
+  // 解析器不支持，这里手写主体（头 + 三根棒子），略去半透明旋风层。
+  BreezeEntityModel: {
+    w: 32, h: 32,
+    parts: {
+      body: {
+        pivot: [0, 0, 0],
+        cuboids: [],
+        children: {
+          rods: {
+            pivot: [0, 8, 0],
+            cuboids: [],
+            children: {
+              rod_1: { pivot: [2.5981, -3, 1.5], rot: [-2.7489, -1.0472, 3.1416], cuboids: [{ u: 0, v: 17, x: -1, y: 0, z: -3, dx: 2, dy: 8, dz: 2 }], children: {} },
+              rod_2: { pivot: [-2.5981, -3, 1.5], rot: [-2.7489, 1.0472, 3.1416], cuboids: [{ u: 0, v: 17, x: -1, y: 0, z: -3, dx: 2, dy: 8, dz: 2 }], children: {} },
+              rod_3: { pivot: [0, -3, -3], rot: [0.3927, 0, 0], cuboids: [{ u: 0, v: 17, x: -1, y: 0, z: -3, dx: 2, dy: 8, dz: 2 }], children: {} },
+            },
+          },
+          head: {
+            pivot: [0, 4, 0],
+            cuboids: [
+              { u: 4, v: 24, x: -5, y: -5, z: -4.2, dx: 10, dy: 3, dz: 4 },
+              { u: 0, v: 0, x: -4, y: -8, z: -4, dx: 8, dy: 8, dz: 8 },
+            ],
+            children: {},
+          },
+        },
+      },
+    },
+  },
+
+  // ---------------------------------------------------------------------------
   // 蝌蚪（16×16）
   TadpoleEntityModel: {
     w: 16, h: 16,
