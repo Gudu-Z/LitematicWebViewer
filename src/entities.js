@@ -318,33 +318,24 @@ async function buildArmorStand(entity, assets) {
   return group
 }
 
-// 矿车：原版 MinecartEntityModel（5 部件）+ minecart.png 贴图 + 4 轮（+ 内容方块）
+// 矿车：原版 MinecartEntityModel（5 部件）+ minecart.png 贴图（+ 内容方块）。
+// 原版模型不含车轮（轮子在旧版由渲染器单独绘制、这份源码里已移除），故不加。
 async function buildMinecart(entity, id, assets) {
   const group = new THREE.Group()
   const [x, y, z] = entity.pos
   const yaw = Number(entity.rotation?.[0]) || 0
 
-  // 车身：原版模型 + 贴图。compileModel 把模型放在局部 y≈1.19..1.81，整体下移 24/16=1.5
-  // 使车体中心落在实体中心（矿车 Pos 是包围盒中心，不像生物是脚底）。
   const model = ENTITY_MODELS.MinecartEntityModel
   const tex = await assets.getTexture('entity/minecart')
   const bodyMat = tex
     ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
     : new THREE.MeshLambertMaterial({ color: 0x7a7a7a })
   const body = quadsToEntityMesh(compileModel(model), bodyMat)
-  body.position.set(0, -1.5, 0)
+  // 编译后车底在局部 y=19/16，下移使车底贴到铁轨（原版车底在 Pos 上方 1/16=0.0625）
+  body.position.set(0, -1.125, 0)
   group.add(body)
 
-  // 4 个车轮（原版为无贴图深色盒体）
-  const wheelGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18)
-  const wheelMat = new THREE.MeshLambertMaterial({ color: 0x2a2a2a })
-  for (const [wx, wz] of [[0.4, 0.3], [0.4, -0.3], [-0.4, 0.3], [-0.4, -0.3]]) {
-    const wheel = new THREE.Mesh(wheelGeo, wheelMat)
-    wheel.position.set(wx, -0.33, wz)
-    group.add(wheel)
-  }
-
-  // 内容方块（漏斗/箱子/熔炉/TNT），缩 0.5 放在车体内
+  // 内容方块（漏斗/箱子/熔炉/TNT），缩 0.5 放在车体中心
   const resolver = new BlockModelResolver(assets)
   let contentName = null
   let contentProps = {}
@@ -365,13 +356,14 @@ async function buildMinecart(entity, id, assets) {
       )
       const content = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
       content.scale.setScalar(0.5)
-      content.position.set(0, 0.05, 0)
+      content.position.set(0, 0.375, 0)
       group.add(content)
     }
   }
 
   group.position.set(x, y, z)
-  group.rotation.y = -(yaw * Math.PI) / 180
+  // 矿车模型长度沿 X 轴（front 在 -x），而实体 yaw 0=南(+z)，故绕 Y 转 (90°-yaw) 对齐
+  group.rotation.y = ((90 - yaw) * Math.PI) / 180
   return group
 }
 
