@@ -567,7 +567,7 @@ const MOB_TABLE = {
   copper_golem: ['CopperGolemEntityModel', 'entity/copper_golem/copper_golem'],
   tadpole: ['TadpoleEntityModel', 'entity/tadpole/tadpole'],
   tropical_fish: ['SmallTropicalFishEntityModel', 'entity/fish/tropical_a'],
-  trader_llama: ['LlamaEntityModel', 'entity/llama/llama_creamy'],
+  trader_llama: ['LlamaEntityModel', 'entity/llama/llama_creamy', 1, ['entity/equipment/llama_body/trader_llama']],
   skeleton_horse: ['Horse', 'entity/horse/horse_skeleton'],
   zombie_horse: ['Horse', 'entity/horse/horse_zombie'],
   giant: ['Biped', 'entity/zombie/zombie', 6],
@@ -587,6 +587,29 @@ async function buildMob(entity, id, assets) {
   const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
   const quads = compileModel(model)
   group.add(quadsToEntityMesh(quads, mat))
+
+  // 第二层贴图：叠在身体上的额外贴图层（如行商羊驼的地毯），透明部分不遮挡底层。
+  // 用 polygonOffset 让叠层略向相机偏移，避免与底层共面时闪烁。
+  const overlays = entry && entry[3]
+  if (Array.isArray(overlays)) {
+    for (const ovKey of overlays) {
+      const ovTex = await assets.getTexture(ovKey)
+      if (!ovTex) continue
+      const ovMat = new THREE.MeshLambertMaterial({
+        map: ovTex,
+        alphaTest: 0.5,
+        side: THREE.DoubleSide,
+        flatShading: true,
+        transparent: true,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -1,
+        polygonOffsetUnits: -1,
+      })
+      group.add(quadsToEntityMesh(quads, ovMat))
+    }
+  }
+
   const scale = (entry && entry[2]) || (model.scale) || 1
   if (scale !== 1) group.scale.setScalar(scale)
 
