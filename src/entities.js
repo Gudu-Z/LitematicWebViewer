@@ -46,7 +46,7 @@ export async function buildEntityMesh(entity, assets, data) {
   if (id === 'armor_stand') {
     return buildArmorStand(entity, assets)
   }
-  if (id.endsWith('_boat')) {
+  if (id.endsWith('_boat') || id.endsWith('_raft')) {
     return buildBoat(entity, id, assets)
   }
   if (entity.nbt && 'Health' in entity.nbt) {
@@ -715,11 +715,16 @@ async function buildBoat(entity, id, assets) {
   const group = new THREE.Group()
   const [x, y, z] = entity.pos
   const yaw = Number(entity.rotation?.[0]) || 0
-  const type = String(entity.nbt?.Type || 'oak').replace(/^minecraft:/, '')
-  const isChest = id.endsWith('_chest_boat')
+  // 类型从实体 id 推断（1.19+ 每种船/筏是独立实体类型，NBT 里不存 Type）：
+  // oak_boat / oak_chest_boat / bamboo_raft / bamboo_chest_raft -> 木材类型
+  const type =
+    id.replace(/_chest_boat$/, '').replace(/_chest_raft$/, '').replace(/_boat$/, '').replace(/_raft$/, '') ||
+    String(entity.nbt?.Type || 'oak').replace(/^minecraft:/, '')
+  const isChest = id.includes('_chest_')
+  const isRaft = id.includes('_raft')
 
-  // 船体：原版 BoatEntityModel（船底 + 四壁 + 双桨）+ 船皮贴图
-  const model = ENTITY_MODELS.BoatEntityModel
+  // 船体：BoatEntityModel（船底 + 四壁 + 双桨）/ RaftModel（平底木筏 + 双桨）+ 船皮贴图
+  const model = isRaft ? EXTRA_MODELS.RaftModel : ENTITY_MODELS.BoatEntityModel
   const tex = await assets.getTexture('entity/boat/' + type)
   const hullMat = tex
     ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })

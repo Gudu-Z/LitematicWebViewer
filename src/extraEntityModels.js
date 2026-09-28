@@ -379,7 +379,7 @@ export const EXTRA_MODELS = {
             children: {
               right_haunch: {
                 pivot: [0, -0.5, 0], rot: [0, 0.3926999866962433, 0],
-                cuboids: [{ u: 20, v: 24, x: -1, y: 0, z: -5, dx: 2, dy: 1, dz: 6 }],
+                cuboids: [{ u:20, v:24, x:-1, y:0, z:-5, dx:2, dy:1, dz:6 }],
                 children: {},
               },
             },
@@ -390,12 +390,46 @@ export const EXTRA_MODELS = {
             children: {
               left_haunch: {
                 pivot: [0, -0.5, 0], rot: [0, -0.3926999866962433, 0],
-                cuboids: [{ u: 36, v: 24, x: -1, y: 0, z: -5, dx: 2, dy: 1, dz: 6 }],
+                cuboids: [{ u:36, v:24, x:-1, y:0, z:-5, dx:2, dy:1, dz:6 }],
                 children: {},
               },
             },
           },
         },
+      },
+    },
+  },
+
+  // ---------------------------------------------------------------------------
+  // 竹筏（26.3，128×64）。原版 RaftModel（geom API），与 BoatModel 同坐标约定，
+  // 但形状是平底木筏（无尖船头/侧壁）：bottom（甲板 + 水线以下部分）+ 双桨。
+  // 这里从 26.3 client.jar 的 RaftModel.addCommonParts 反汇编转录。
+  RaftModel: {
+    w: 128, h: 64,
+    parts: {
+      bottom: {
+        pivot: [0, -2.1, 1], rot: [Math.PI / 2, 0, 0],
+        cuboids: [
+          { u: 0, v: 0, x: -14, y: -11, z: -4, dx: 28, dy: 20, dz: 4 },
+          { u: 0, v: 0, x: -14, y: -9, z: -8, dx: 28, dy: 16, dz: 4 },
+        ],
+        children: {},
+      },
+      left_paddle: {
+        pivot: [3, -4, 9], rot: [0, 0, Math.PI / 16],
+        cuboids: [
+          { u: 0, v: 24, x: -1, y: 0, z: -5, dx: 2, dy: 2, dz: 18 },
+          { u: 0, v: 24, x: -1.001, y: -3, z: 8, dx: 1, dy: 6, dz: 7 },
+        ],
+        children: {},
+      },
+      right_paddle: {
+        pivot: [3, -4, -9], rot: [0, Math.PI, Math.PI / 16],
+        cuboids: [
+          { u: 40, v: 24, x: -1, y: 0, z: -5, dx: 2, dy: 2, dz: 18 },
+          { u: 40, v: 24, x: 0.001, y: -3, z: 8, dx: 1, dy: 6, dz: 7 },
+        ],
+        children: {},
       },
     },
   },
