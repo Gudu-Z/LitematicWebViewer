@@ -423,14 +423,9 @@ function injectLoopParts(models) {
     }
   }
 
-  // 兔子：26.3 的贴图 rabbit_brown.png 是 64×64，但成年兔子画在“上半张”（y=0..32），
-  // 下半张（y=32..64）是空的；1.21.11 模型贴图尺寸是 64×32（v 坐标 0..32）。
-  // 只要把模型贴图高度改成 64，让 v/64 落在上半张即可，v 坐标本身不用偏移。
-  const rabbit = models.RabbitEntityModel
-  if (rabbit) {
-    rabbit.w = 64
-    rabbit.h = 64
-  }
+  // 兔子：26.3 的 rabbit_brown.png 是 64×64，但布局是针对 26.3 新版兔子模型（头部在 x≈8..40）；
+  // 我们的 1.21.11 模型是 64×32、头部在 uv(32,0)，两者不匹配。改用仍随资源包打包的 64×32 老贴图
+  // brown.png，与 64×32 模型 UV 一致，因此这里不需要任何偏移/尺寸覆盖。
 
   // 女巫：addChild("head") 覆盖了村民的头（应合并旧 children 里的 nose），
   // 解析器没做合并，且 getChild("nose") 的 mole 被误挂到 hat4 下。这里补上 nose 并移动 mole。
