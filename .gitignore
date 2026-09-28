@@ -3,3 +3,7 @@ dist/
 vite.log
 .DS_Store
 public/assets/minecraft/
+
+# 反编译参考源码与临时文件（由 parse-entity-models.mjs 生成/下载）
+scripts/_ref/
+scripts/_tree.json
