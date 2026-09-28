@@ -262,7 +262,7 @@ function parseAddChilds(code, consts) {
     const p = { name, pivot: tf ? tf.pivot : [0, 0, 0], rot: tf ? tf.rot : [0, 0, 0], cuboids, children: {} }
     const receiver = (m[2] || '').trim()
     let parentPath = null
-    if (receiver === 'modelPartData' || receiver === 'root' || /getRoot/.test(receiver)) {
+    if (receiver === 'modelPartData' || receiver === 'root' || receiver === 'data' || /getRoot/.test(receiver)) {
       parentPath = null
     } else if (receiver in varPath) {
       parentPath = varPath[receiver]
@@ -382,6 +382,38 @@ function injectLoopParts(models) {
         ])
       }
       head.children.eye = part([0, 0, -8.25], [0, 0, 0], [{ u: 8, v: 0, x: -1, y: 15, z: 0, dx: 2, dy: 2, dz: 1, mirror: false, dil: [0, 0, 0] }])
+    }
+  }
+
+  // 沼泽骷髅（Bogged）：继承 SkeletonEntityModel 应是细肢体，但解析器没展开
+  // SkeletonEntityModel.addLimbs 跨类调用；蘑菇也因 modelPartData2 变量未被追踪而被错误链式嵌套。
+  const bogged = models.BoggedEntityModel
+  if (bogged) {
+    Object.assign(bogged.parts, {
+      right_arm: part([-5, 2, 0], [0, 0, 0], [{ u: 40, v: 16, x: -1, y: -2, z: -1, dx: 2, dy: 12, dz: 2 }]),
+      left_arm: part([5, 2, 0], [0, 0, 0], [{ u: 40, v: 16, x: -1, y: -2, z: -1, dx: 2, dy: 12, dz: 2, mirror: true }]),
+      right_leg: part([-2, 12, 0], [0, 0, 0], [{ u: 0, v: 16, x: -1, y: 0, z: -1, dx: 2, dy: 12, dz: 2 }]),
+      left_leg: part([2, 12, 0], [0, 0, 0], [{ u: 0, v: 16, x: -1, y: 0, z: -1, dx: 2, dy: 12, dz: 2, mirror: true }]),
+    })
+    const shroomNames = ['red_mushroom_1', 'red_mushroom_2', 'brown_mushroom_1', 'brown_mushroom_2', 'brown_mushroom_3', 'brown_mushroom_4']
+    const shrooms = []
+    const collect = (node) => {
+      for (const name of Object.keys(node)) {
+        const p = node[name]
+        if (shroomNames.includes(name)) {
+          if (p.children) collect(p.children)
+          shrooms.push([name, p])
+          delete node[name]
+        } else if (p.children) {
+          collect(p.children)
+        }
+      }
+    }
+    collect(bogged.parts)
+    const head = bogged.parts.head
+    if (head) {
+      head.children.mushrooms = { pivot: [0, 0, 0], rot: [0, 0, 0], cuboids: [], children: {} }
+      for (const [name, p] of shrooms) head.children.mushrooms.children[name] = p
     }
   }
 }
