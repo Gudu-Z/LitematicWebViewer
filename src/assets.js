@@ -111,8 +111,10 @@ function textureFromBlob(blob) {
     const img = new Image()
     img.onload = () => {
       let source = img
-      // 动画贴图是「宽×宽 N 帧」的竖向长条（如 16×512、32×1024）；裁取第一帧，避免整条被压到面上
-      if (img.height > img.width && img.height % img.width === 0) {
+      // 动画贴图是「宽×宽 N 帧」的竖向长条（如 16×512、32×1024）；裁取第一帧，避免整条被压到面上。
+      // 但 64×128 这类「高比宽」的单张生物贴图（女巫/炽足兽）不能被误裁：帧数极多时宽高比才大，
+      // 这里用 >=4 区分（原版动画至少 8 帧，如 16×512 比值 32）。
+      if (img.height > img.width && img.height % img.width === 0 && img.height / img.width >= 4) {
         const w = img.width
         const c = document.createElement('canvas')
         c.width = w

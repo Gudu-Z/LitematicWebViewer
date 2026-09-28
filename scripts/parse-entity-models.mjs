@@ -423,19 +423,13 @@ function injectLoopParts(models) {
     }
   }
 
-  // 兔子：26.3 的贴图是 64×64（成年兔子画在下半张 y=32..64），而 1.21.11 模型是 64×32。
-  // 这里把兔子所有 cuboid 的 v 坐标 +32，并把贴图尺寸改成 64×64。
+  // 兔子：26.3 的贴图 rabbit_brown.png 是 64×64，但成年兔子画在“上半张”（y=0..32），
+  // 下半张（y=32..64）是空的；1.21.11 模型贴图尺寸是 64×32（v 坐标 0..32）。
+  // 只要把模型贴图高度改成 64，让 v/64 落在上半张即可，v 坐标本身不用偏移。
   const rabbit = models.RabbitEntityModel
   if (rabbit) {
     rabbit.w = 64
     rabbit.h = 64
-    const shiftV = (node) => {
-      for (const p of Object.values(node)) {
-        for (const c of p.cuboids || []) c.v += 32
-        if (p.children) shiftV(p.children)
-      }
-    }
-    shiftV(rabbit.parts)
   }
 
   // 女巫：addChild("head") 覆盖了村民的头（应合并旧 children 里的 nose），
