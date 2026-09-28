@@ -39,7 +39,7 @@ export async function buildEntityMesh(entity, assets) {
   if (id === 'item_frame' || id === 'glow_item_frame') {
     return buildItemFrame(entity, id, assets)
   }
-  if (id.endsWith('_minecart')) {
+  if (id === 'minecart' || id.endsWith('_minecart')) {
     return buildMinecart(entity, id, assets)
   }
   if (id === 'armor_stand') {
