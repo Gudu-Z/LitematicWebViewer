@@ -257,8 +257,19 @@ async function buildArmorStand(entity, assets) {
   const showArms = Number(nbt.ShowArms) === 1
   const showBase = Number(nbt.NoBasePlate) !== 1
 
-  // 木头色近似（原版贴图 entity/armorstand/wood.png，这里用纯色简化）
-  const woodMat = new THREE.MeshLambertMaterial({ color: 0x9c7a4d })
+  // 木头贴图 entity/armorstand/wood.png（64×64，含各部件 UV）。这里统一取左上角 16×16
+  // 的木头纹理铺满各盒体（原版各部件用不同 UV 区域，但木纹基本一致，近似即可）。
+  const woodTex = await assets.getTexture('entity/armorstand/wood')
+  let woodMat
+  if (woodTex) {
+    const tex = woodTex.clone()
+    tex.repeat.set(0.25, 0.25)
+    tex.offset.set(0, 0)
+    tex.needsUpdate = true
+    woodMat = new THREE.MeshLambertMaterial({ map: tex })
+  } else {
+    woodMat = new THREE.MeshLambertMaterial({ color: 0x9c7a4d })
+  }
   const add = (cx, cy, cz, w, h, d) => {
     const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat)
     m.position.set(cx, cy, cz)
