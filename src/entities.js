@@ -527,7 +527,7 @@ const MOB_TABLE = {
   bee: ['BeeEntityModel', 'entity/bee/bee'],
   zombie: ['Biped', 'entity/zombie/zombie'],
   husk: ['Biped', 'entity/zombie/husk'],
-  drowned: ['DrownedEntityModel', 'entity/zombie/drowned'],
+  drowned: ['DrownedEntityModel', 'entity/zombie/drowned', 1, ['entity/zombie/drowned_outer_layer']],
   zombie_villager: ['ZombieVillagerEntityModel', 'entity/zombie_villager/zombie_villager'],
   skeleton: ['SkeletonEntityModel', 'entity/skeleton/skeleton'],
   stray: ['SkeletonEntityModel', 'entity/skeleton/stray', 1, ['entity/skeleton/stray_overlay']],
