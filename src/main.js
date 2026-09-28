@@ -197,7 +197,7 @@ async function renderCurrentSigns() {
 // 渲染当前结构里的实体
 async function renderCurrentEntities() {
   if (!currentData || !renderer) return
-  await renderer.renderEntities(currentData.entities || [], assets)
+  await renderer.renderEntities(currentData.entities || [], assets, currentData)
 }
 
 // 从方块实体中提取告示牌：{x, y, z, rotation, lines}

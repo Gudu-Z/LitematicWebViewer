@@ -177,10 +177,10 @@ export class Renderer {
   }
 
   // 渲染实体（矿车、物品展示框等）
-  async renderEntities(entities, assets) {
+  async renderEntities(entities, assets, data) {
     this.clearEntities()
     if (!entities || !entities.length) return
-    const meshes = await Promise.all(entities.map((e) => buildEntityMesh(e, assets).catch(() => null)))
+    const meshes = await Promise.all(entities.map((e) => buildEntityMesh(e, assets, data).catch(() => null)))
     for (const m of meshes) if (m) this.entitiesGroup.add(m)
   }
 

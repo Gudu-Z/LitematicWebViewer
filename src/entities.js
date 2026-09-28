@@ -35,13 +35,13 @@ function shortName(id) {
 }
 
 // 把实体转成网格；不支持的实体返回 null
-export async function buildEntityMesh(entity, assets) {
+export async function buildEntityMesh(entity, assets, data) {
   const id = shortName(entity.id)
   if (id === 'item_frame' || id === 'glow_item_frame') {
     return buildItemFrame(entity, id, assets)
   }
   if (id === 'minecart' || id.endsWith('_minecart')) {
-    return buildMinecart(entity, id, assets)
+    return buildMinecart(entity, id, assets, data)
   }
   if (id === 'armor_stand') {
     return buildArmorStand(entity, assets)
@@ -321,10 +321,47 @@ async function buildArmorStand(entity, assets) {
 
 // 矿车：原版 MinecartEntityModel（5 部件）+ minecart.png 贴图（+ 内容方块）。
 // 原版模型不含车轮（轮子在旧版由渲染器单独绘制、这份源码里已移除），故不加。
-async function buildMinecart(entity, id, assets) {
+// 铁轨 shape -> 前进方向 [dx, dy, dz]（dy=1 表示上坡）。方向取「正方向」，矿车左右对称故无碍。
+const RAIL_SHAPES = {
+  north_south: [0, 0, 1],
+  east_west: [1, 0, 0],
+  ascending_east: [1, 1, 0],
+  ascending_west: [-1, 1, 0],
+  ascending_north: [0, 1, -1],
+  ascending_south: [0, 1, 1],
+  south_east: [1, 0, 1],
+  south_west: [-1, 0, 1],
+  north_west: [-1, 0, -1],
+  north_east: [1, 0, -1],
+}
+
+const RAIL_NAMES = new Set(['rail', 'powered_rail', 'detector_rail', 'activator_rail'])
+
+// 查找矿车所在铁轨的前进方向：先查脚下方块，再查下一格（矿车可能停在 ascending 铁轨顶端）。
+function railDirectionAt(data, x, y, z) {
+  if (!data?.blocks || !data?.palette || !data?.bounds) return null
+  const { blocks, palette, bounds } = data
+  const cx = Math.floor(x)
+  const cz = Math.floor(z)
+  const W = bounds.width
+  const strideY = W * bounds.depth
+  for (const cy of [Math.floor(y), Math.floor(y) - 1]) {
+    const key = (cx - bounds.minX) + (cz - bounds.minZ) * W + (cy - bounds.minY) * strideY
+    const gi = blocks.get(key)
+    if (gi === undefined) continue
+    const p = palette[gi]
+    const name = (p?.name || '').replace(/^minecraft:/, '')
+    if (RAIL_NAMES.has(name)) {
+      const shape = p.properties?.shape
+      if (shape && RAIL_SHAPES[shape]) return RAIL_SHAPES[shape]
+    }
+  }
+  return null
+}
+
+async function buildMinecart(entity, id, assets, data) {
   const group = new THREE.Group()
   const [x, y, z] = entity.pos
-  const yaw = Number(entity.rotation?.[0]) || 0
 
   const model = ENTITY_MODELS.MinecartEntityModel
   const tex = await assets.getTexture('entity/minecart/minecart')
@@ -368,12 +405,25 @@ async function buildMinecart(entity, id, assets) {
   }
 
   group.position.set(x, y, z)
-  // 矿车模型长度沿 X 轴（front 在 -x），而实体 yaw 0=南(+z)，故绕 Y 转 (90°-yaw) 对齐；
-  // 斜向/爬坡铁轨的矿车带 pitch（Rotation[1]），绕 Z 俯仰对齐原版 rotateZ(-pitch)。
-  const pitch = Number(entity.rotation?.[1]) || 0
+  // 矿车朝向与铁轨一致：原版默认控制器渲染时不读实体存储的 Rotation，而是
+  // snapPositionToRail + simulateMovement(±0.3) 算出 railDirection，再
+  // yaw=atan2(dz,dx)、pitch=atan(dy)*73。本渲染器矿车模型 front 在 -x，
+  // 故 rotation.y=atan2(dz,-dx) 让车头指向铁轨前进方向，上坡时 rotation.z=-pitch 车头上仰。
+  const railDir = railDirectionAt(data, x, y, z)
+  let yawDeg, pitchDeg
+  if (railDir) {
+    const [dx, dy, dz] = railDir
+    yawDeg = (Math.atan2(dz, -dx) * 180) / Math.PI
+    const invLen = 1 / Math.hypot(dx, dy, dz)
+    pitchDeg = dy ? Math.atan(dy * invLen) * 73 : 0
+  } else {
+    // 找不到铁轨时回退到实体存储的 Rotation
+    yawDeg = 90 - (Number(entity.rotation?.[0]) || 0)
+    pitchDeg = Number(entity.rotation?.[1]) || 0
+  }
   group.rotation.order = 'YXZ'
-  group.rotation.y = ((90 - yaw) * Math.PI) / 180
-  group.rotation.z = -(pitch * Math.PI) / 180
+  group.rotation.y = (yawDeg * Math.PI) / 180
+  group.rotation.z = -(pitchDeg * Math.PI) / 180
   return group
 }
 
