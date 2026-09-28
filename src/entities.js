@@ -477,8 +477,10 @@ function quadsToEntityMesh(quads, mat) {
       normals[i * 12 + k * 3 + 2] = q.normal[2]
     }
     const b = i * 4
+    // 实体 quad 顶点是「周边顺序」（vanilla ModelPart.Quad），须用 0,1,2 + 0,2,3 三角化
+    // 才能让两个三角形绕向一致（否则其中一个三角形法线朝内、渲染发暗/消失）。
     indices[i * 6] = b; indices[i * 6 + 1] = b + 1; indices[i * 6 + 2] = b + 2
-    indices[i * 6 + 3] = b + 2; indices[i * 6 + 4] = b + 1; indices[i * 6 + 5] = b + 3
+    indices[i * 6 + 3] = b; indices[i * 6 + 4] = b + 2; indices[i * 6 + 5] = b + 3
   }
   const geo = new THREE.BufferGeometry()
   geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
