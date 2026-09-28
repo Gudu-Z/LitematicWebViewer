@@ -1,5 +1,6 @@
 // 实体渲染：把 .litematica 里的实体转成 Three.js 网格。
-// 目前支持：item_frame / glow_item_frame（物品展示框）、*_minecart（矿车，含漏斗矿车）。
+// 目前支持：item_frame / glow_item_frame（物品展示框）、*_minecart（矿车，含漏斗/箱子/熔炉/TNT）、
+// armor_stand（盔甲架）。
 //
 // 物品展示框严格按原版 ItemFrameEntityRenderer 的变换复现（1.21.11）：
 //   - 实体 Pos = 附着方块中心 − facing × 15/32（新版展示框位置移到支撑方块内，实测 NBT 印证）
@@ -37,6 +38,9 @@ export async function buildEntityMesh(entity, assets) {
   }
   if (id.endsWith('_minecart')) {
     return buildMinecart(entity, id, assets)
+  }
+  if (id === 'armor_stand') {
+    return buildArmorStand(entity, assets)
   }
   return null
 }
@@ -241,7 +245,53 @@ async function buildFrameItem(item, resolver, assets) {
   return null
 }
 
-// 矿车：车身 + 4 轮（+ 漏斗）
+// 盔甲架：无 JSON 模型（Java 硬编码），按原版 ArmorStandEntityModel.getTexturedModelData
+// 的盒体尺寸/位置用硬编码盒体近似。模型 Y 轴向下，这里换算成世界坐标（脚底 y=0），
+// 1 模型单位 = 1/16 方块。支持 ShowArms（双臂）、Small（缩小）、NoBasePlate（去底板）。
+async function buildArmorStand(entity, assets) {
+  const group = new THREE.Group()
+  const [x, y, z] = entity.pos
+  const nbt = entity.nbt || {}
+  const yaw = Number(entity.rotation?.[0]) || 0
+  const small = Number(nbt.Small) === 1
+  const showArms = Number(nbt.ShowArms) === 1
+  const showBase = Number(nbt.NoBasePlate) !== 1
+
+  // 木头色近似（原版贴图 entity/armorstand/wood.png，这里用纯色简化）
+  const woodMat = new THREE.MeshLambertMaterial({ color: 0x9c7a4d })
+  const add = (cx, cy, cz, w, h, d) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat)
+    m.position.set(cx, cy, cz)
+    group.add(m)
+  }
+
+  // 底板（12×1×12）
+  if (showBase) add(0, 0.03125, 0, 0.75, 0.0625, 0.75)
+  // 双腿（2×11×2，x=±1.9）
+  add(-0.11875, 0.40625, 0, 0.125, 0.6875, 0.125)
+  add(0.11875, 0.40625, 0, 0.125, 0.6875, 0.125)
+  // 躯干连接：左右竖条（2×7×2，x=±2）+ 肩横条（8×2×2）
+  add(-0.125, 1.09375, 0, 0.125, 0.4375, 0.125)
+  add(0.125, 1.09375, 0, 0.125, 0.4375, 0.125)
+  add(0, 0.8125, 0, 0.5, 0.125, 0.125)
+  // 躯干（12×3×3）
+  add(0, 1.40625, 0, 0.75, 0.1875, 0.1875)
+  // 头（2×7×2）
+  add(0, 1.65625, 0, 0.125, 0.4375, 0.125)
+  // 双臂（可选，2×12×2，x=±6）
+  if (showArms) {
+    add(-0.375, 1.125, 0, 0.125, 0.75, 0.125)
+    add(0.375, 1.125, 0, 0.125, 0.75, 0.125)
+  }
+
+  if (small) group.scale.setScalar(0.5)
+
+  group.position.set(x, y, z)
+  group.rotation.y = -(yaw * Math.PI) / 180
+  return group
+}
+
+// 矿车：车身 + 4 轮（+ 漏斗/箱子/熔炉/TNT）
 async function buildMinecart(entity, id, assets) {
   const group = new THREE.Group()
   const [x, y, z] = entity.pos
@@ -267,6 +317,30 @@ async function buildMinecart(entity, id, assets) {
     const hopper = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.7), hopperMat)
     hopper.position.set(x, y + 0.55, z)
     group.add(hopper)
+  } else if (id === 'chest_minecart' || id === 'furnace_minecart' || id === 'tnt_minecart') {
+    // 顶部内容：箱子/熔炉/TNT 用方块模型，缩放 0.5 放在车身之上
+    const resolver = new BlockModelResolver(assets)
+    const [name, props] =
+      id === 'chest_minecart'
+        ? ['minecraft:chest', { type: 'single', facing: 'north' }]
+        : id === 'furnace_minecart'
+          ? ['minecraft:furnace', { facing: 'north', lit: 'false' }]
+          : ['minecraft:tnt', {}]
+    const baked = await resolver.resolve(name, props)
+    if (baked && baked.quads && baked.quads.length) {
+      const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
+      const mats = new Map()
+      await Promise.all(
+        texKeys.map(async (tk) => {
+          const tex = await assets.getTexture(tk)
+          if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex }))
+        }),
+      )
+      const content = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
+      content.scale.setScalar(0.5)
+      content.position.set(x, y + 0.55, z)
+      group.add(content)
+    }
   }
 
   // 朝向：Minecraft yaw 与 Three.js rotation.y 方向相反
