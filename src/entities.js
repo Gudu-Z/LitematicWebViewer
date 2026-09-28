@@ -299,7 +299,7 @@ async function buildArmorStand(entity, assets) {
   const baked = bakeModel({ textures: { all: 'entity/armorstand/wood' }, elements }, {}, 64)
   const tex = await assets.getTexture('entity/armorstand/wood')
   const mat = tex
-    ? new THREE.MeshLambertMaterial({ map: tex })
+    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5 })
     : new THREE.MeshLambertMaterial({ color: 0x9c7a4d })
   group.add(quadsToMesh(baked.quads, [0, 0, 0], () => mat))
 
