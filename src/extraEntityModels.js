@@ -316,6 +316,89 @@ export const EXTRA_MODELS = {
       },
     },
   },
+
+  // ---------------------------------------------------------------------------
+  // 兔子（26.3 新版，64×64，成年）。26.3 把兔子重构为 geom API + createBodyLayer，
+  // 几何和 UV 全变了（body 8×6×10、head 5×5×5 居中、新增 frontlegs/backlegs 分组、
+  // 耳朵/hind_leg 不再有独立 foot 部件），与 1.21.11 的 64×32 旧模型完全不匹配。
+  // 这里从 26.3 client.jar 的 AdultRabbitModel.createBodyLayer 反汇编逐条转录。
+  // 注意：26.3 模型本身无缩放（旧版的 ModelTransformer.scaling(0.6) 已移除），故不设 scale。
+  AdultRabbitModel: {
+    w: 64, h: 64,
+    parts: {
+      body: {
+        pivot: [0, 23, 4], rot: [-0.3926999866962433, 0, 0],
+        cuboids: [{ u: 0, v: 0, x: -4, y: -6, z: -9, dx: 8, dy: 6, dz: 10 }],
+        children: {
+          tail: {
+            pivot: [0, -4.991600036621094, 0.012500000186264515],
+            cuboids: [{ u: 20, v: 16, x: -2, y: -3.0083999633789062, z: -1.0125000476837158, dx: 4, dy: 4, dz: 4 }],
+            children: {},
+          },
+          head: {
+            pivot: [0, -5.292900085449219, -8.121299743652344], rot: [0.3926999866962433, 0, 0],
+            cuboids: [{ u: 0, v: 16, x: -2.5, y: -3, z: -4, dx: 5, dy: 5, dz: 5 }],
+            children: {
+              left_ear: {
+                pivot: [1.5, -3.7070999145507812, -0.8787000179290771],
+                cuboids: [{ u: 32, v: 0, x: -1, y: -4.292900085449219, z: -0.12129999697208405, dx: 2, dy: 5, dz: 1 }],
+                children: {},
+              },
+              right_ear: {
+                pivot: [-1.5, -3.7070999145507812, -0.8787000179290771],
+                cuboids: [{ u: 26, v: 0, x: -1, y: -4.292900085449219, z: -0.12129999697208405, dx: 2, dy: 5, dz: 1 }],
+                children: {},
+              },
+            },
+          },
+          frontlegs: {
+            pivot: [0, -1.5348999500274658, -6.310800075531006],
+            cuboids: [],
+            children: {
+              right_front_leg: {
+                pivot: [-2, 1.9239000082015991, 0.38269999623298645], rot: [0.3926999866962433, 0, 0],
+                cuboids: [{ u: 36, v: 18, x: -0.8999999761581421, y: -1, z: -0.8999999761581421, dx: 2, dy: 4, dz: 2 }],
+                children: {},
+              },
+              left_front_leg: {
+                pivot: [2, 1.9239000082015991, 0.482699990272522], rot: [0.3926999866962433, 0, 0],
+                cuboids: [{ u: 44, v: 18, x: -1, y: -1, z: -1, dx: 2, dy: 4, dz: 2 }],
+                children: {},
+              },
+            },
+          },
+        },
+      },
+      backlegs: {
+        pivot: [0, 23, 4],
+        cuboids: [],
+        children: {
+          right_hind_leg: {
+            pivot: [-3, 0.5, 0],
+            cuboids: [],
+            children: {
+              right_haunch: {
+                pivot: [0, -0.5, 0], rot: [0, 0.3926999866962433, 0],
+                cuboids: [{ u: 20, v: 24, x: -1, y: 0, z: -5, dx: 2, dy: 1, dz: 6 }],
+                children: {},
+              },
+            },
+          },
+          left_hind_leg: {
+            pivot: [3, 0.5, 0],
+            cuboids: [],
+            children: {
+              left_haunch: {
+                pivot: [0, -0.5, 0], rot: [0, -0.3926999866962433, 0],
+                cuboids: [{ u: 36, v: 24, x: -1, y: 0, z: -5, dx: 2, dy: 1, dz: 6 }],
+                children: {},
+              },
+            },
+          },
+        },
+      },
+    },
+  },
 }
 
 // 龙颈/龙尾共用的两个盒体（"box" + "scale"）

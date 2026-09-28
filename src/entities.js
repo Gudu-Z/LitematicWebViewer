@@ -500,7 +500,7 @@ const MOB_TABLE = {
   cat: ['Feline', 'entity/cat/cat_tabby'],
   ocelot: ['Feline', 'entity/cat/ocelot'],
   fox: ['FoxEntityModel', 'entity/fox/fox'],
-  rabbit: ['RabbitEntityModel', 'entity/rabbit/brown'],
+  rabbit: ['AdultRabbitModel', 'entity/rabbit/rabbit_brown'],
   horse: ['Horse', 'entity/horse/horse_brown'],
   donkey: ['Horse', 'entity/horse/donkey'],
   mule: ['Horse', 'entity/horse/mule'],
