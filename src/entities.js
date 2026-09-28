@@ -152,7 +152,7 @@ async function buildItemFrame(entity, id, assets) {
     await Promise.all(
       texKeys.map(async (tk) => {
         const tex = await assets.getTexture(tk)
-        if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5 }))
+        if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, flatShading: true }))
       }),
     )
     const frame = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
@@ -215,7 +215,7 @@ async function buildFrameItem(item, resolver, assets) {
     const texKey = String(layer0).replace(/^minecraft:/, '')
     const tex = await assets.getTexture(texKey)
     if (tex) {
-      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
       holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
       holder.scale.setScalar(0.5)
       return holder
@@ -232,7 +232,7 @@ async function buildFrameItem(item, resolver, assets) {
       texKeys.map(async (tk) => {
         const tex = await assets.getTexture(tk)
         // DoubleSide：玻璃/植物等十字模型与透明方块背面也要可见（原版 cutout 不剔除背面）
-        if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide }))
+        if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true }))
       }),
     )
     holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
@@ -246,7 +246,7 @@ async function buildFrameItem(item, resolver, assets) {
     (await assets.getTexture('block/' + name)) ||
     (await assets.getTexture('entity/' + name))
   if (tex) {
-    const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+    const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
     holder.scale.setScalar(0.5)
     return holder
@@ -307,8 +307,8 @@ async function buildArmorStand(entity, assets) {
   const baked = bakeModel({ textures: { all: 'entity/armorstand/wood' }, elements }, {}, 64)
   const tex = await assets.getTexture('entity/armorstand/wood')
   const mat = tex
-    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5 })
-    : new THREE.MeshLambertMaterial({ color: 0x9c7a4d })
+    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, flatShading: true })
+    : new THREE.MeshLambertMaterial({ color: 0x9c7a4d, flatShading: true })
   group.add(quadsToMesh(baked.quads, [0, 0, 0], () => mat))
 
   if (small) group.scale.setScalar(0.5)
@@ -328,7 +328,7 @@ async function buildMinecart(entity, id, assets) {
   const model = ENTITY_MODELS.MinecartEntityModel
   const tex = await assets.getTexture('entity/minecart')
   const bodyMat = tex
-    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     : new THREE.MeshLambertMaterial({ color: 0x7a7a7a })
   const body = quadsToEntityMesh(compileModel(model), bodyMat)
   // 编译后车底在局部 y=19/16，下移使车底贴到铁轨（原版车底在 Pos 上方 1/16=0.0625）
@@ -351,7 +351,7 @@ async function buildMinecart(entity, id, assets) {
       await Promise.all(
         texKeys.map(async (tk) => {
           const tex = await assets.getTexture(tk)
-          if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5 }))
+          if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, flatShading: true }))
         }),
       )
       const content = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
@@ -573,7 +573,7 @@ async function buildMob(entity, id, assets) {
   const tex = entry ? await assets.getTexture(entry[1]) : null
   if (!model || !tex) return buildMobFallback(entity, id)
 
-  const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+  const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
   const quads = compileModel(model)
   group.add(quadsToEntityMesh(quads, mat))
   if (model.scale) group.scale.setScalar(model.scale)
@@ -624,7 +624,7 @@ async function buildBoat(entity, id, assets) {
   const model = ENTITY_MODELS.BoatEntityModel
   const tex = await assets.getTexture('entity/boat/' + type)
   const hullMat = tex
-    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     : new THREE.MeshLambertMaterial({ color: 0x8a6a45 })
   const hull = quadsToEntityMesh(compileModel(model), hullMat)
   // 编译后船体中心在局部 y≈1.406，下移使船体中心落在吃水线（实体 Pos）
@@ -641,7 +641,7 @@ async function buildBoat(entity, id, assets) {
       await Promise.all(
         texKeys.map(async (tk) => {
           const tex = await assets.getTexture(tk)
-          if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex }))
+          if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, flatShading: true }))
         }),
       )
       const chest = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
