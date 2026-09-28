@@ -336,14 +336,19 @@ async function buildMinecart(entity, id, assets) {
   body.position.set(0, -1.125, 0)
   group.add(body)
 
-  // 内容方块（漏斗/箱子/熔炉/TNT），缩 0.5 放在车体中心
+  // 内容方块（漏斗/箱子/熔炉/TNT/命令方块/刷怪笼）。原版缩放 DISPLAY_BLOCK_SCALE=0.75，
+  // 并按 displayOffset 上下偏移（chest=8 最高、hopper=1 最低、其余默认 6），
+  // translate(-0.5,(offset-8)/16,0.5) 后块中心 y = 0.375 + 0.75*(0.5 + (offset-8)/16)。
   const resolver = new BlockModelResolver(assets)
   let contentName = null
   let contentProps = {}
-  if (id === 'hopper_minecart') { contentName = 'minecraft:hopper'; contentProps = { facing: 'down', enabled: 'true' } }
-  else if (id === 'chest_minecart') { contentName = 'minecraft:chest'; contentProps = { type: 'single', facing: 'north' } }
+  let contentOffset = 6
+  if (id === 'hopper_minecart') { contentName = 'minecraft:hopper'; contentProps = { facing: 'down', enabled: 'true' }; contentOffset = 1 }
+  else if (id === 'chest_minecart') { contentName = 'minecraft:chest'; contentProps = { type: 'single', facing: 'north' }; contentOffset = 8 }
   else if (id === 'furnace_minecart') { contentName = 'minecraft:furnace'; contentProps = { facing: 'north', lit: 'false' } }
   else if (id === 'tnt_minecart') { contentName = 'minecraft:tnt'; contentProps = {} }
+  else if (id === 'command_block_minecart') { contentName = 'minecraft:command_block'; contentProps = { conditional: 'false', facing: 'up' } }
+  else if (id === 'spawner_minecart') { contentName = 'minecraft:spawner'; contentProps = {} }
   if (contentName) {
     const baked = await resolver.resolve(contentName, contentProps)
     if (baked && baked.quads && baked.quads.length) {
@@ -356,15 +361,19 @@ async function buildMinecart(entity, id, assets) {
         }),
       )
       const content = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
-      content.scale.setScalar(0.5)
-      content.position.set(0, 0.375, 0)
+      content.scale.setScalar(0.75)
+      content.position.set(0, 0.375 + 0.75 * (0.5 + (contentOffset - 8) / 16), 0)
       group.add(content)
     }
   }
 
   group.position.set(x, y, z)
-  // 矿车模型长度沿 X 轴（front 在 -x），而实体 yaw 0=南(+z)，故绕 Y 转 (90°-yaw) 对齐
+  // 矿车模型长度沿 X 轴（front 在 -x），而实体 yaw 0=南(+z)，故绕 Y 转 (90°-yaw) 对齐；
+  // 斜向/爬坡铁轨的矿车带 pitch（Rotation[1]），绕 Z 俯仰对齐原版 rotateZ(-pitch)。
+  const pitch = Number(entity.rotation?.[1]) || 0
+  group.rotation.order = 'YXZ'
   group.rotation.y = ((90 - yaw) * Math.PI) / 180
+  group.rotation.z = -(pitch * Math.PI) / 180
   return group
 }
 
@@ -684,8 +693,9 @@ async function buildBoat(entity, id, assets) {
         }),
       )
       const chest = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
-      chest.scale.setScalar(0.5)
-      chest.position.set(0, 0.4, 0)
+      // 原版箱船的箱子是船模型里 12×12×12（0.75 方块）的 chest_bottom+chest_lid，中心在船体中心
+      chest.scale.setScalar(0.75)
+      chest.position.set(0, 0.28, 0)
       group.add(chest)
     }
   }
