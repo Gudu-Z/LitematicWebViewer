@@ -179,23 +179,27 @@ function parseBuilder(builderExpr, consts, builderVars) {
       curMirror = args.length === 0 || args[0] === 'true'
     } else if (m[1] === 'cuboid') {
       let a = args
+      let named = false
       // 首个参数若为字符串字面量则是 cuboid 名称，跳过
-      if (a[0] && /^"/.test(a[0])) a = a.slice(1)
+      if (a[0] && /^"/.test(a[0])) { a = a.slice(1); named = true }
       const nums = a.map((s) => evalExpr(s, consts))
       const x = nums[0], y = nums[1], z = nums[2], dx = nums[3], dy = nums[4], dz = nums[5]
       if (x == null || y == null || z == null || dx == null || dy == null || dz == null) continue
       let u = curU
       let v = curV
       let dil = [0, 0, 0]
-      const hasDilation = a.length >= 7
-      if (hasDilation) dil = parseDilation(a[6])
-      // 命名 cuboid 的尾部 (textureX, textureY) 会覆盖 uv
-      if (a.length >= 8) {
-        const texX = evalExpr(a[7], consts)
-        const texY = evalExpr(a[8], consts)
-        if (texX != null && texY != null) { u = texX; v = texY }
+      let mirror = curMirror
+      if (named) {
+        // 命名 cuboid 重载：6 参数（无 u/v）；8 参数 = 末尾 (u,v)；9 参数 = (dilation,u,v)
+        if (a.length >= 9) { dil = parseDilation(a[6]); u = nums[7]; v = nums[8] }
+        else if (a.length >= 8) { u = nums[6]; v = nums[7] }
+      } else if (a.length >= 7) {
+        // 非命名：第 7 参数可能是 boolean mirror 或 Dilation
+        const a6 = String(a[6]).trim()
+        if (a6 === 'true' || a6 === 'false') { mirror = a6 === 'true' }
+        else { dil = parseDilation(a[6]) }
       }
-      cuboids.push({ u, v, x, y, z, dx, dy, dz, mirror: curMirror, dil })
+      cuboids.push({ u, v, x, y, z, dx, dy, dz, mirror, dil })
     }
   }
   return cuboids
@@ -418,6 +422,22 @@ function injectLoopParts(models) {
       for (const [name, p] of shrooms) head.children.mushrooms.children[name] = p
     }
   }
+
+  // 女巫：addChild("head") 覆盖了村民的头（应合并旧 children 里的 nose），
+  // 解析器没做合并，且 getChild("nose") 的 mole 被误挂到 hat4 下。这里补上 nose 并移动 mole。
+  const witch = models.WitchEntityModel
+  if (witch && witch.parts.head) {
+    const witchHead = witch.parts.head
+    witchHead.children.nose = part([0, -2, 0], [0, 0, 0], [{ u: 24, v: 0, x: -1, y: -1, z: -6, dx: 2, dy: 4, dz: 2 }])
+    const hat = witchHead.children.hat
+    const hat2 = hat && hat.children.hat2
+    const hat3 = hat2 && hat2.children.hat3
+    const hat4 = hat3 && hat3.children.hat4
+    if (hat4 && hat4.children.mole) {
+      witchHead.children.nose.children.mole = hat4.children.mole
+      delete hat4.children.mole
+    }
+  }
 }
 
 // ---------------------------------------------------------------- 模型方法定位
@@ -590,6 +610,8 @@ const models = {} // modelKey -> { w, h, parts }
 
 // getTexturedModelData 返回 ModelData（无 TexturedModelData.of）的模型，贴图尺寸手动补
 const TEX_OVERRIDES = { WolfEntityModel: [64, 32] }
+// 缩放用条件表达式（baby ? BABY : ADULT）导致 findScale 取不到，这里手动补（成年缩放）
+const SCALE_OVERRIDES = { RabbitEntityModel: 0.6 }
 
 for (const f of files) {
   const cls = f.replace(/\.java$/, '')
@@ -598,7 +620,8 @@ for (const f of files) {
   const tex = parsed.tex || TEX_OVERRIDES[cls]
   if (parsed && tex && Object.keys(parsed.parts).length > 0) {
     const m = { w: tex[0], h: tex[1], parts: parsed.parts }
-    if (parsed.scale) m.scale = parsed.scale
+    const scale = parsed.scale || SCALE_OVERRIDES[cls]
+    if (scale) m.scale = scale
     models[cls] = m
   }
 }
