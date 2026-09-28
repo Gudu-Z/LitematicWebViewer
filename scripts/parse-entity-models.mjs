@@ -366,9 +366,9 @@ function injectLoopParts(models) {
   // 守卫者：12 根尖刺 + 眼睛（挂到头下）
   const guardian = models.GuardianEntityModel
   if (guardian) {
-    delete guardian.parts['getSpikeName(i)']
     const head = guardian.parts.head
     if (head) {
+      delete head.children['getSpikeName(i)']
       const PX = [0, 0, 8, -8, -8, 8, 8, -8, 0, 0, 8, -8]
       const PY = [-8, -8, -8, -8, 0, 0, 0, 0, 8, 8, 8, 8]
       const PZ = [8, -8, 0, 0, -8, -8, 8, 8, 8, -8, 0, 0]
@@ -376,7 +376,8 @@ function injectLoopParts(models) {
       const YAW = [0, 0, 0, 0, 0.25, 1.75, 1.25, 0.75, 0, 0, 0, 0]
       const ROL = [0, 0, 0.25, 1.75, 0, 0, 0, 0, 0, 0, 0.75, 1.25]
       for (let i = 0; i < 12; i++) {
-        head.children['spike' + i] = part([PX[i], PY[i], PZ[i]], [PIT[i] * Math.PI, YAW[i] * Math.PI, ROL[i] * Math.PI], [
+        // getSpikePivotY = 16 + SPIKE_PIVOTS_Y[i] * getAngle(...)（getAngle≈1），故 Y 要 +16
+        head.children['spike' + i] = part([PX[i], 16 + PY[i], PZ[i]], [PIT[i] * Math.PI, YAW[i] * Math.PI, ROL[i] * Math.PI], [
           { u: 0, v: 0, x: -1, y: -4.5, z: -1, dx: 2, dy: 9, dz: 2, mirror: false, dil: [0, 0, 0] },
         ])
       }

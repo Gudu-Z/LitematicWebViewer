@@ -543,7 +543,7 @@ const MOB_TABLE = {
   endermite: ['EndermiteEntityModel', 'entity/endermite/endermite'],
   shulker: ['ShulkerEntityModel', 'entity/shulker/shulker'],
   guardian: ['GuardianEntityModel', 'entity/guardian/guardian'],
-  elder_guardian: ['GuardianEntityModel', 'entity/guardian/guardian_elder'],
+  elder_guardian: ['GuardianEntityModel', 'entity/guardian/guardian_elder', 2.35],
   wither: ['WitherEntityModel', 'entity/wither/wither', 2],
   ravager: ['RavagerEntityModel', 'entity/illager/ravager'],
   vex: ['VexEntityModel', 'entity/illager/vex'],
