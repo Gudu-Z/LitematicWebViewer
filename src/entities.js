@@ -15,6 +15,7 @@ import * as THREE from 'three'
 import { BlockModelResolver } from './blocks.js'
 import { bakeModel } from './modelBaker.js'
 import { ENTITY_MODELS } from './entityModelData.js'
+import { EXTRA_MODELS } from './extraEntityModels.js'
 
 // Minecraft Direction 枚举：Facing 字节 -> 方向向量
 const FACING_DIRS = {
@@ -560,12 +561,22 @@ const MOB_TABLE = {
   piglin: ['Piglin', 'entity/piglin/piglin'],
   piglin_brute: ['Piglin', 'entity/piglin/piglin_brute'],
   zombified_piglin: ['Piglin', 'entity/piglin/zombified_piglin'],
+  // 之前漏掉的实体（26.3 新增/旧实体）：
+  ender_dragon: ['DragonEntityModel', 'entity/enderdragon/dragon'],
+  happy_ghast: ['HappyGhastEntityModel', 'entity/ghast/happy_ghast'],
+  copper_golem: ['CopperGolemEntityModel', 'entity/copper_golem/copper_golem'],
+  tadpole: ['TadpoleEntityModel', 'entity/tadpole/tadpole'],
+  tropical_fish: ['SmallTropicalFishEntityModel', 'entity/fish/tropical_a'],
+  trader_llama: ['LlamaEntityModel', 'entity/llama/decor/trader_llama'],
+  skeleton_horse: ['Horse', 'entity/horse/horse_skeleton'],
+  zombie_horse: ['Horse', 'entity/horse/horse_zombie'],
+  giant: ['Biped', 'entity/zombie/zombie', 6],
 }
 
 // 生物实体：真实模型 + 皮肤贴图
 async function buildMob(entity, id, assets) {
   const entry = MOB_TABLE[id]
-  const model = entry ? ENTITY_MODELS[entry[0]] : null
+  const model = entry ? (ENTITY_MODELS[entry[0]] || EXTRA_MODELS[entry[0]]) : null
   const group = new THREE.Group()
   const [x, y, z] = entity.pos
   const yaw = Number(entity.rotation?.[0]) || 0
@@ -576,7 +587,8 @@ async function buildMob(entity, id, assets) {
   const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
   const quads = compileModel(model)
   group.add(quadsToEntityMesh(quads, mat))
-  if (model.scale) group.scale.setScalar(model.scale)
+  const scale = (entry && entry[2]) || (model.scale) || 1
+  if (scale !== 1) group.scale.setScalar(scale)
 
   group.position.set(x, y, z)
   group.rotation.y = -(yaw * Math.PI) / 180
