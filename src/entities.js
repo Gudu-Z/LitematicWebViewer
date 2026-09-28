@@ -318,59 +318,59 @@ async function buildArmorStand(entity, assets) {
   return group
 }
 
-// 矿车：车身 + 4 轮（+ 漏斗/箱子/熔炉/TNT）
+// 矿车：原版 MinecartEntityModel（5 部件）+ minecart.png 贴图 + 4 轮（+ 内容方块）
 async function buildMinecart(entity, id, assets) {
   const group = new THREE.Group()
   const [x, y, z] = entity.pos
   const yaw = Number(entity.rotation?.[0]) || 0
 
-  // 车身用纯色（矿车贴图是 2:1 图集，直接贴到盒体会拉伸，这里简化为铁灰色）
-  const bodyMat = new THREE.MeshLambertMaterial({ color: 0x7a7a7a })
-  const body = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.7, 0.98), bodyMat)
-  body.position.set(x, y, z)
+  // 车身：原版模型 + 贴图。compileModel 把模型放在局部 y≈1.19..1.81，整体下移 24/16=1.5
+  // 使车体中心落在实体中心（矿车 Pos 是包围盒中心，不像生物是脚底）。
+  const model = ENTITY_MODELS.MinecartEntityModel
+  const tex = await assets.getTexture('entity/minecart')
+  const bodyMat = tex
+    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide })
+    : new THREE.MeshLambertMaterial({ color: 0x7a7a7a })
+  const body = quadsToEntityMesh(compileModel(model), bodyMat)
+  body.position.set(0, -1.5, 0)
   group.add(body)
 
-  const wheelGeo = new THREE.BoxGeometry(0.16, 0.16, 0.16)
+  // 4 个车轮（原版为无贴图深色盒体）
+  const wheelGeo = new THREE.BoxGeometry(0.18, 0.18, 0.18)
   const wheelMat = new THREE.MeshLambertMaterial({ color: 0x2a2a2a })
-  for (const [wx, wz] of [[0.3, 0.3], [0.3, -0.3], [-0.3, 0.3], [-0.3, -0.3]]) {
+  for (const [wx, wz] of [[0.4, 0.3], [0.4, -0.3], [-0.4, 0.3], [-0.4, -0.3]]) {
     const wheel = new THREE.Mesh(wheelGeo, wheelMat)
-    wheel.position.set(x + wx, y - 0.43, z + wz)
+    wheel.position.set(wx, -0.33, wz)
     group.add(wheel)
   }
 
-  if (id === 'hopper_minecart') {
-    const hopperTex = await assets.getTexture('block/hopper_outside')
-    const hopperMat = new THREE.MeshLambertMaterial({ map: hopperTex || null })
-    const hopper = new THREE.Mesh(new THREE.BoxGeometry(0.7, 0.5, 0.7), hopperMat)
-    hopper.position.set(x, y + 0.55, z)
-    group.add(hopper)
-  } else if (id === 'chest_minecart' || id === 'furnace_minecart' || id === 'tnt_minecart') {
-    // 顶部内容：箱子/熔炉/TNT 用方块模型，缩放 0.5 放在车身之上
-    const resolver = new BlockModelResolver(assets)
-    const [name, props] =
-      id === 'chest_minecart'
-        ? ['minecraft:chest', { type: 'single', facing: 'north' }]
-        : id === 'furnace_minecart'
-          ? ['minecraft:furnace', { facing: 'north', lit: 'false' }]
-          : ['minecraft:tnt', {}]
-    const baked = await resolver.resolve(name, props)
+  // 内容方块（漏斗/箱子/熔炉/TNT），缩 0.5 放在车体内
+  const resolver = new BlockModelResolver(assets)
+  let contentName = null
+  let contentProps = {}
+  if (id === 'hopper_minecart') { contentName = 'minecraft:hopper'; contentProps = { facing: 'down', enabled: 'true' } }
+  else if (id === 'chest_minecart') { contentName = 'minecraft:chest'; contentProps = { type: 'single', facing: 'north' } }
+  else if (id === 'furnace_minecart') { contentName = 'minecraft:furnace'; contentProps = { facing: 'north', lit: 'false' } }
+  else if (id === 'tnt_minecart') { contentName = 'minecraft:tnt'; contentProps = {} }
+  if (contentName) {
+    const baked = await resolver.resolve(contentName, contentProps)
     if (baked && baked.quads && baked.quads.length) {
       const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
       const mats = new Map()
       await Promise.all(
         texKeys.map(async (tk) => {
           const tex = await assets.getTexture(tk)
-          if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex }))
+          if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5 }))
         }),
       )
       const content = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
       content.scale.setScalar(0.5)
-      content.position.set(x, y + 0.55, z)
+      content.position.set(0, 0.05, 0)
       group.add(content)
     }
   }
 
-  // 朝向：Minecraft yaw 与 Three.js rotation.y 方向相反
+  group.position.set(x, y, z)
   group.rotation.y = -(yaw * Math.PI) / 180
   return group
 }
