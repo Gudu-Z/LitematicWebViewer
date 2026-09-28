@@ -567,7 +567,7 @@ const MOB_TABLE = {
   copper_golem: ['CopperGolemEntityModel', 'entity/copper_golem/copper_golem'],
   tadpole: ['TadpoleEntityModel', 'entity/tadpole/tadpole'],
   tropical_fish: ['SmallTropicalFishEntityModel', 'entity/fish/tropical_a'],
-  trader_llama: ['LlamaEntityModel', 'entity/llama/decor/trader_llama'],
+  trader_llama: ['LlamaEntityModel', 'entity/llama/llama_creamy'],
   skeleton_horse: ['Horse', 'entity/horse/horse_skeleton'],
   zombie_horse: ['Horse', 'entity/horse/horse_zombie'],
   giant: ['Biped', 'entity/zombie/zombie', 6],
