@@ -176,9 +176,9 @@ export const EXTRA_MODELS = {
           { u: 176, v: 44, x: -6, y: -1, z: -24, dx: 12, dy: 5, dz: 16 },
           { u: 112, v: 30, x: -8, y: -8, z: -10, dx: 16, dy: 16, dz: 16 },
           { u: 0, v: 0, x: -5, y: -12, z: -4, dx: 2, dy: 4, dz: 6, mirror: true },
-          { u: 112, v: 0, x: -5, y: -3, z: -22, dx: 2, dy: 2, dz: 4 },
+          { u: 112, v: 0, x: -5, y: -3, z: -22, dx: 2, dy: 2, dz: 4, mirror: true },
           { u: 0, v: 0, x: 3, y: -12, z: -4, dx: 2, dy: 4, dz: 6, mirror: true },
-          { u: 112, v: 0, x: 3, y: -3, z: -22, dx: 2, dy: 2, dz: 4 },
+          { u: 112, v: 0, x: 3, y: -3, z: -22, dx: 2, dy: 2, dz: 4, mirror: true },
         ],
         children: {
           jaw: { pivot: [0, 4, -8], cuboids: [{ u: 176, v: 65, x: -6, y: 0, z: -16, dx: 12, dy: 4, dz: 16 }], children: {} },
@@ -214,14 +214,14 @@ export const EXTRA_MODELS = {
             pivot: [12, 2, -6],
             cuboids: [
               { u: 112, v: 88, x: 0, y: -4, z: -4, dx: 56, dy: 8, dz: 8, mirror: true },
-              { u: -56, v: 88, x: 0, y: 0, z: 2, dx: 56, dy: 0, dz: 56 },
+              { u: -56, v: 88, x: 0, y: 0, z: 2, dx: 56, dy: 0, dz: 56, mirror: true },
             ],
             children: {
               left_wing_tip: {
                 pivot: [56, 0, 0],
                 cuboids: [
                   { u: 112, v: 136, x: 0, y: -2, z: -2, dx: 56, dy: 4, dz: 4, mirror: true },
-                  { u: -56, v: 144, x: 0, y: 0, z: 2, dx: 56, dy: 0, dz: 56 },
+                  { u: -56, v: 144, x: 0, y: 0, z: 2, dx: 56, dy: 0, dz: 56, mirror: true },
                 ],
                 children: {},
               },
