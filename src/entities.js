@@ -12,6 +12,7 @@
 
 import * as THREE from 'three'
 import { BlockModelResolver } from './blocks.js'
+import { bakeModel } from './modelBaker.js'
 
 // Minecraft Direction 枚举：Facing 字节 -> 方向向量
 const FACING_DIRS = {
@@ -245,9 +246,32 @@ async function buildFrameItem(item, resolver, assets) {
   return null
 }
 
+// 盔甲架的一个立方体部件：按原版 ModelPart.Cuboid 的 auto-UV 布局生成各面贴图。
+// from/to 用「模型像素」坐标（1 像素 = 1/16 方块，世界 Y 向上，脚底 y=0）；
+// texU/texV 为该部件在 64×64 贴图里的 UV 原点。原版实体模型 Y 轴向下，
+// 故 up/down 面的 UV 互换（世界 up = 实体 down）。
+function cuboidElement(from, to, texU, texV) {
+  const dx = to[0] - from[0]
+  const dy = to[1] - from[1]
+  const dz = to[2] - from[2]
+  const f = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#all' })
+  return {
+    from,
+    to,
+    faces: {
+      up: f(texU + dz + dx, texV, texU + dz, texV + dz), // 实体 down
+      down: f(texU + dz + dx, texV + dz, texU + dz + 2 * dx, texV), // 实体 up
+      west: f(texU + dz, texV + dz + dy, texU, texV + dz),
+      north: f(texU + dz + dx, texV + dz + dy, texU + dz, texV + dz),
+      east: f(texU + dz + dx + dz, texV + dz + dy, texU + dz + dx, texV + dz),
+      south: f(texU + dz + dx + dz + dx, texV + dz + dy, texU + dz + dx + dz, texV + dz),
+    },
+  }
+}
+
 // 盔甲架：无 JSON 模型（Java 硬编码），按原版 ArmorStandEntityModel.getTexturedModelData
-// 的盒体尺寸/位置用硬编码盒体近似。模型 Y 轴向下，这里换算成世界坐标（脚底 y=0），
-// 1 模型单位 = 1/16 方块。支持 ShowArms（双臂）、Small（缩小）、NoBasePlate（去底板）。
+// 的盒体尺寸/位置/UV 复现，用 bakeModel 烘焙 + entity/armorstand/wood.png 贴图。
+// 支持 ShowArms（双臂）、Small（缩小）、NoBasePlate（去底板）。
 async function buildArmorStand(entity, assets) {
   const group = new THREE.Group()
   const [x, y, z] = entity.pos
@@ -257,43 +281,27 @@ async function buildArmorStand(entity, assets) {
   const showArms = Number(nbt.ShowArms) === 1
   const showBase = Number(nbt.NoBasePlate) !== 1
 
-  // 木头贴图 entity/armorstand/wood.png（64×64，含各部件 UV）。这里统一取左上角 16×16
-  // 的木头纹理铺满各盒体（原版各部件用不同 UV 区域，但木纹基本一致，近似即可）。
-  const woodTex = await assets.getTexture('entity/armorstand/wood')
-  let woodMat
-  if (woodTex) {
-    const tex = woodTex.clone()
-    tex.repeat.set(0.25, 0.25)
-    tex.offset.set(0, 0)
-    tex.needsUpdate = true
-    woodMat = new THREE.MeshLambertMaterial({ map: tex })
-  } else {
-    woodMat = new THREE.MeshLambertMaterial({ color: 0x9c7a4d })
-  }
-  const add = (cx, cy, cz, w, h, d) => {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), woodMat)
-    m.position.set(cx, cy, cz)
-    group.add(m)
+  // 各部件（模型像素坐标，世界 Y 向上，脚底 y=0）：
+  const elements = []
+  if (showBase) elements.push(cuboidElement([-6, 0, -6], [6, 1, 6], 0, 32)) // 底板 12×1×12
+  elements.push(cuboidElement([-2.9, 1, -1], [-0.9, 12, 1], 8, 0)) // 右腿 2×11×2
+  elements.push(cuboidElement([0.9, 1, -1], [2.9, 12, 1], 40, 16)) // 左腿
+  elements.push(cuboidElement([-3, 14, -1], [-1, 21, 1], 16, 0)) // 右躯干竖条 2×7×2
+  elements.push(cuboidElement([1, 14, -1], [3, 21, 1], 48, 16)) // 左躯干竖条
+  elements.push(cuboidElement([-4, 12, -1], [4, 14, 1], 0, 48)) // 肩横条 8×2×2
+  elements.push(cuboidElement([-6, 21, -1.5], [6, 24, 1.5], 0, 26)) // 躯干 12×3×3
+  elements.push(cuboidElement([-1, 23, -1], [1, 30, 1], 0, 0)) // 头 2×7×2
+  if (showArms) {
+    elements.push(cuboidElement([-7, 12, -1], [-5, 24, 1], 24, 0)) // 右臂 2×12×2
+    elements.push(cuboidElement([5, 12, -1], [7, 24, 1], 32, 16)) // 左臂
   }
 
-  // 底板（12×1×12）
-  if (showBase) add(0, 0.03125, 0, 0.75, 0.0625, 0.75)
-  // 双腿（2×11×2，x=±1.9）
-  add(-0.11875, 0.40625, 0, 0.125, 0.6875, 0.125)
-  add(0.11875, 0.40625, 0, 0.125, 0.6875, 0.125)
-  // 躯干连接：左右竖条（2×7×2，x=±2）+ 肩横条（8×2×2）
-  add(-0.125, 1.09375, 0, 0.125, 0.4375, 0.125)
-  add(0.125, 1.09375, 0, 0.125, 0.4375, 0.125)
-  add(0, 0.8125, 0, 0.5, 0.125, 0.125)
-  // 躯干（12×3×3）
-  add(0, 1.40625, 0, 0.75, 0.1875, 0.1875)
-  // 头（2×7×2）
-  add(0, 1.65625, 0, 0.125, 0.4375, 0.125)
-  // 双臂（可选，2×12×2，x=±6）
-  if (showArms) {
-    add(-0.375, 1.125, 0, 0.125, 0.75, 0.125)
-    add(0.375, 1.125, 0, 0.125, 0.75, 0.125)
-  }
+  const baked = bakeModel({ textures: { all: 'entity/armorstand/wood' }, elements }, {}, 64)
+  const tex = await assets.getTexture('entity/armorstand/wood')
+  const mat = tex
+    ? new THREE.MeshLambertMaterial({ map: tex })
+    : new THREE.MeshLambertMaterial({ color: 0x9c7a4d })
+  group.add(quadsToMesh(baked.quads, [0, 0, 0], () => mat))
 
   if (small) group.scale.setScalar(0.5)
 
