@@ -9,6 +9,9 @@ import { buildEntityMesh } from './entities.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
 
+// 墙上告示牌的 facing -> 方向向量（文字朝向）
+const SIGN_FACING = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0] }
+
 // 红石粉按信号强度染色（复刻原版 RedstoneWireBlock 的渐变：越高越亮，越低越深）
 function redstoneTint(power) {
   const f = Math.min(15, Math.max(0, power)) / 15
@@ -206,42 +209,34 @@ export class Renderer {
     this.scene.background = new THREE.Color(color)
   }
 
-  // 渲染告示牌（方块实体）：木柱 + 面板 + 面板正面文字
-  // signs: [{x, y, z, rotation, lines: [4 行文字]}]
+  // 渲染告示牌文字：告示牌本身（柱/板）已由方块模型渲染，这里只在板面上加文字。
+  // signs: [{x, y, z, rotation?, facing?, lines: [4 行文字]}]
+  //   - 立地告示牌用 rotation(0-15)，墙上告示牌用 facing(north/south/east/west)
   async renderSigns(signs, assets) {
     this.clearSigns()
     if (!signs.length) return
 
-    const plankTex = await assets.getTexture('block/oak_planks')
-    const plankMat = new THREE.MeshLambertMaterial({ map: plankTex || null })
-
     for (const sign of signs) {
-      const rotation = Number(sign.rotation) || 0
-      // 朝向：rotation 0 = 南(+z)，每 +1 顺时针转 22.5°
-      const angle = (-rotation * 22.5 * Math.PI) / 180
-      const front = new THREE.Vector3(Math.sin(angle), 0, Math.cos(angle))
+      let front, boardCenter
+      if (sign.facing) {
+        // 墙上告示牌：板贴在 facing 反方向的墙上，文字朝 facing
+        const d = SIGN_FACING[sign.facing] || [0, 0, 1]
+        front = new THREE.Vector3(d[0], 0, d[2])
+        boardCenter = new THREE.Vector3(sign.x + 0.5 - d[0] * 0.44, sign.y + 0.52, sign.z + 0.5 - d[2] * 0.44)
+      } else {
+        // 立地告示牌：rotation 0=南(+z)，每 +1 顺时针 22.5°；
+        // 面板正面法线在模型里是 +z，经 rot(0..-67.5°)+variant y(0/90/180/270) 旋转，
+        // 与方块渲染同一条旋转公式，文字正好落在方块模型的面板正面。
+        const rotation = Number(sign.rotation) || 0
+        const a = ((-22.5 * (rotation % 4) - 90 * Math.floor(rotation / 4)) * Math.PI) / 180
+        front = new THREE.Vector3(Math.sin(a), 0, Math.cos(a))
+        boardCenter = new THREE.Vector3(sign.x + 0.5, sign.y + 0.83, sign.z + 0.5)
+      }
+
       const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), front)
-
-      const px = sign.x + 0.5
-      const pz = sign.z + 0.5
-
-      // 木柱
-      const post = new THREE.Mesh(new THREE.BoxGeometry(2 / 16, 11 / 16, 2 / 16), plankMat)
-      post.position.set(px, sign.y + 11 / 32, pz)
-      this.signsGroup.add(post)
-
-      // 面板（宽 14/16、高 4/16、厚 2/16，中心在 y=13/16）
-      const boardCenter = new THREE.Vector3(px, sign.y + 13 / 16, pz)
-      const board = new THREE.Mesh(new THREE.BoxGeometry(14 / 16, 4 / 16, 2 / 16), plankMat)
-      board.position.copy(boardCenter)
-      board.setRotationFromQuaternion(quat)
-      this.signsGroup.add(board)
-
-      // 文字平面（面板正面，略向前偏移避免与面板重叠闪烁）：深色文字、透明背景，
-      // 直接显示在木板上（复刻原版告示牌——文字是画在板上的深色字，不是白字深色底）。
-      const textMat = new THREE.MeshBasicMaterial({ map: this._makeSignTexture(sign.lines), transparent: true })
-      const textPlane = new THREE.Mesh(new THREE.PlaneGeometry(13 / 16, 3 / 16), textMat)
-      textPlane.position.copy(boardCenter).addScaledVector(front, 1 / 16 + 0.006)
+      const textMat = new THREE.MeshBasicMaterial({ map: this._makeSignTexture(sign.lines), transparent: true, side: THREE.DoubleSide })
+      const textPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.4), textMat)
+      textPlane.position.copy(boardCenter).addScaledVector(front, 0.05)
       textPlane.setRotationFromQuaternion(quat)
       this.signsGroup.add(textPlane)
     }

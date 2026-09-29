@@ -162,9 +162,10 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
       isSkip[i] = SKIP_NAMES.has((paletteList[i].Name || '').replace(/^minecraft:/, '')) ? 1 : 0
     }
 
+    // 方块实体（告示牌等）：坐标同样是相对区域原点的，需加上区域 Position 偏移。
     if (Array.isArray(region.TileEntities)) {
       for (const te of region.TileEntities) {
-        tileEntities.push({ id: te.id, x: te.x, y: te.y, z: te.z, nbt: te })
+        tileEntities.push({ id: te.id, x: te.x + pos.x, y: te.y + pos.y, z: te.z + pos.z, nbt: te })
       }
     }
 

@@ -216,8 +216,9 @@ function extractSigns(data) {
     if (lines.every((l) => !l)) continue
     const b = data.bounds
     const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
-    const rotation = gi !== undefined ? data.palette[gi].properties?.rotation : 0
-    signs.push({ x: te.x, y: te.y, z: te.z, rotation: Number(rotation) || 0, lines })
+    const props = gi !== undefined ? data.palette[gi].properties || {} : {}
+    // 立地告示牌用 rotation，墙上告示牌用 facing
+    signs.push({ x: te.x, y: te.y, z: te.z, rotation: Number(props.rotation) || 0, facing: props.facing, lines })
   }
   return signs
 }
