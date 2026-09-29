@@ -487,9 +487,9 @@ export class Renderer {
       const group = new THREE.Group()
       group.add(mesh)
       if (b.facing) {
-        // 墙上旗帜：旗面贴在 facing 反方向的墙上，从横木杆处垂下
+        // 墙上旗帜：旗面贴在 facing 反方向的墙上，从竖杆顶端垂下
         const d = BANNER_FACING_DIRS[b.facing] || [0, 0, 1]
-        group.position.set(b.x + 0.5 - d[0] * 0.44, b.y + 0.1, b.z + 0.5 - d[2] * 0.44)
+        group.position.set(b.x + 0.5 - d[0] * 0.44, b.y + 0.375, b.z + 0.5 - d[2] * 0.44)
         group.rotation.y = ((BANNER_FACING_Y[b.facing] ?? 0) * Math.PI) / 180
       } else {
         // 立地旗帜：旗面绕杆旋转（与告示牌同一条 rotation 公式，顺时针 22.5°/级）
@@ -533,7 +533,8 @@ export class Renderer {
     const drawTinted = (image, hex) => {
       tctx.clearRect(0, 0, 64, 64)
       tctx.drawImage(image, 0, 0, 64, 64)
-      tctx.globalCompositeOperation = 'source-atop'
+      // 图案/底色贴图是灰度图（+alpha），用 multiply 保留灰度（原版 BannerRenderer 也是乘色）
+      tctx.globalCompositeOperation = 'multiply'
       tctx.fillStyle = hex
       tctx.fillRect(0, 0, 64, 64)
       tctx.globalCompositeOperation = 'source-over'

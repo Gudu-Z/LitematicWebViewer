@@ -223,7 +223,20 @@ async function buildFrameItem(item, resolver, assets) {
     }
   }
 
-  // 方块物品：3D 方块模型，统一缩放 0.25（4px）
+  // 铜傀儡雕像：无 JSON 模型，用实体模型渲染（缩放到适合展示框）
+  if (name.endsWith('_copper_golem_statue')) {
+    const tex = await assets.getTexture('entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : ''))
+    if (tex) {
+      const golem = buildCopperGolemStatueMesh(tex)
+      if (golem) {
+        golem.scale.setScalar(0.33) // 约 0.5 格高，适配展示框
+        holder.add(golem)
+        return holder
+      }
+    }
+  }
+
+  // 方块物品：3D 方块模型，统一缩放 0.5（8px，与原版物品展示框一致）
   const props = await defaultItemProps(name, assets)
   const baked = await resolver.resolve('minecraft:' + name, props)
   if (baked && baked.quads && baked.quads.length) {
@@ -237,7 +250,7 @@ async function buildFrameItem(item, resolver, assets) {
       }),
     )
     holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
-    holder.scale.setScalar(0.25)
+    holder.scale.setScalar(0.5)
     return holder
   }
 
