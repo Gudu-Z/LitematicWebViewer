@@ -294,14 +294,22 @@ async function renderCurrentPlayerHeads() {
 // 渲染当前结构里的旗帜（底色 + 图案）
 async function renderCurrentBanners() {
   if (!currentData || !renderer) return
-  const tes = filterByRegion(currentData.tileEntities || [])
-  await renderer.renderBanners(extractBanners(tes, currentData), assets)
+  try {
+    const tes = filterByRegion(currentData.tileEntities || [])
+    await renderer.renderBanners(extractBanners(tes, currentData), assets)
+  } catch (e) {
+    console.error('旗帜渲染失败', e)
+  }
 }
 
 // 渲染当前结构里的铜傀儡雕像
 async function renderCurrentStatues() {
   if (!currentData || !renderer) return
-  await renderer.renderStatues(extractStatues(currentData), assets)
+  try {
+    await renderer.renderStatues(extractStatues(currentData), assets)
+  } catch (e) {
+    console.error('铜傀儡雕像渲染失败', e)
+  }
 }
 
 // 区域是否可见（visibleRegions 为 null 表示全部可见）
