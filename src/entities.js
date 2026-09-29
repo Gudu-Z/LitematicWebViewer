@@ -180,11 +180,29 @@ async function buildItemFrame(entity, id, assets) {
 }
 
 // 方块物品解析用的默认属性。
-// 普通（variants）方块传 axis:y（轴类方块正立）；multipart 方块（墙/栅栏/玻璃板/铁栏杆等）
-// 需还原其「默认状态」——即核心立柱可见、四周无连接，否则没有任何部件匹配（得到空模型）。
+// 原版方块物品按 Block.getDefaultState() 渲染：普通（variants）方块要还原其默认状态——
+// 朝向类方块默认 facing=north（观察者 observer 例外为 south）、轴类 axis=y、楼梯 half=bottom/shape=straight 等；
+// 之前这里统一传 axis:y，导致活塞/观察者/发射器等朝向类方块在展示框里朝向不对。
+// multipart 方块（墙/栅栏/玻璃板/铁栏杆等）需还原「孤立默认状态」——核心立柱可见、四周无连接。
 async function defaultItemProps(name, assets) {
   const bs = await assets.getJSON('blockstates/' + name + '.json')
-  if (!bs || !bs.multipart) return { axis: 'y' }
+  if (!bs) return {}
+  if (!bs.multipart) {
+    const firstKey = Object.keys(bs.variants || {})[0] || ''
+    const props = {}
+    for (const kv of firstKey.split(',')) {
+      const [k, v] = kv.split('=')
+      if (!k) continue
+      if (k === 'facing') props[k] = name === 'observer' ? 'south' : 'north'
+      else if (k === 'axis') props[k] = 'y'
+      else if (k === 'half') props[k] = 'bottom'
+      else if (k === 'shape') props[k] = 'straight'
+      else if (k === 'type') props[k] = 'bottom'
+      else if (k === 'waterlogged' || k === 'powered' || k === 'lit' || k === 'open' || k === 'locked' || k === 'inverted') props[k] = 'false'
+      else props[k] = v || 'false'
+    }
+    return props
+  }
   const props = {}
   for (const part of bs.multipart) {
     const when = part.when
@@ -223,14 +241,17 @@ async function buildFrameItem(item, resolver, assets) {
     }
   }
 
-  // 铜傀儡雕像：无 JSON 模型，用实体模型渲染（缩放到适合展示框）
+  // 铜傀儡雕像：无 JSON 模型，用实体模型渲染。原版 item 模型 template_copper_golem_statue 的
+  // fixed 显示变换是 translation[0,3,0]（=3/16=0.1875 上移）+ scale 0.5。方块模型居中（-0.5）后
+  // 雕像脚底在 -0.5，上移 0.1875 → -0.3125；再乘展示框 0.5 缩放。实体模型本身已缩 0.6（BER）。
   if (name.endsWith('_copper_golem_statue')) {
     const tex = await assets.getTexture('entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : ''))
     if (tex) {
       const golem = buildCopperGolemStatueMesh(tex)
       if (golem) {
-        golem.scale.setScalar(0.33) // 约 0.5 格高，适配展示框
+        golem.position.y = -0.3125
         holder.add(golem)
+        holder.scale.setScalar(0.5)
         return holder
       }
     }

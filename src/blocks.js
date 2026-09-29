@@ -255,8 +255,9 @@ function wallBannerModel() {
   return {
     textures: { plank: 'block/oak_planks' },
     elements: [
-      // 墙上旗帜的竖木杆（贴在墙上，旗面从顶端垂下）
-      { from: [7, 10, 15], to: [9, 26, 16], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
+      // 墙上旗帜：旗面顶端的横木杆（原版 BannerModel 的 wall bar：addBox(-10,-44,-1,20,2,2)，
+      // 20×2×2，横跨旗面宽度、旗面从它垂下）。这里的 y=24..26 对应旗面顶端。
+      { from: [-2, 24, 7], to: [18, 26, 9], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
     ],
   }
 }

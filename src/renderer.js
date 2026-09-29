@@ -23,19 +23,21 @@ const DYE_COLORS = {
 
 // 墙上旗帜 facing -> 旗面朝向角（three.js 的 rotation.y，逆时针为正）
 const BANNER_FACING_Y = { north: 180, south: 0, east: 90, west: -90 }
-// 墙上旗帜 facing -> 方向向量（旗面贴在 facing 反方向的墙上）
-const BANNER_FACING_DIRS = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0] }
 
-// 旗帜旗面几何（20×40 px = 1.25×2.5 格），UV v=0 在上（MC 约定，配合 flipY=false 贴图）
+// 旗帜旗面几何（20×40 px = 1.25×2.5 格），UV v=0 在上（MC 约定，配合 flipY=false 贴图）。
+// 原版 BannerFlagModel 的旗面 cuboid 是 20×40×1、texOffs(0,0)、贴图 64×64，即只采样
+// 贴图左上角 u=0..20、v=0..40 的旗面区域（贴图右侧 22px 是旗面侧边的阴影，不属于正面）。
 function bannerFlagGeometry() {
   const geo = new THREE.BufferGeometry()
   const hw = 0.625
   const hh = 1.25
+  const U = 20 / 64
+  const V = 40 / 64
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
     -hw, hh, 0, hw, hh, 0, -hw, -hh, 0, hw, -hh, 0,
   ]), 3))
   geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([
-    0, 0, 1, 0, 0, 1, 1, 1,
+    0, 0, U, 0, 0, V, U, V,
   ]), 2))
   geo.setIndex([0, 2, 1, 1, 2, 3]) // 法线 +z
   return geo
@@ -487,9 +489,8 @@ export class Renderer {
       const group = new THREE.Group()
       group.add(mesh)
       if (b.facing) {
-        // 墙上旗帜：旗面贴在 facing 反方向的墙上，从竖杆顶端垂下
-        const d = BANNER_FACING_DIRS[b.facing] || [0, 0, 1]
-        group.position.set(b.x + 0.5 - d[0] * 0.44, b.y + 0.375, b.z + 0.5 - d[2] * 0.44)
+        // 墙上旗帜：旗面朝向 facing（远离墙），旗面在杆前方（mesh.position.z 已前移）
+        group.position.set(b.x + 0.5, b.y + 0.375, b.z + 0.5)
         group.rotation.y = ((BANNER_FACING_Y[b.facing] ?? 0) * Math.PI) / 180
       } else {
         // 立地旗帜：旗面绕杆旋转（与告示牌同一条 rotation 公式，顺时针 22.5°/级）
@@ -533,10 +534,14 @@ export class Renderer {
     const drawTinted = (image, hex) => {
       tctx.clearRect(0, 0, 64, 64)
       tctx.drawImage(image, 0, 0, 64, 64)
-      // 图案/底色贴图是灰度图（+alpha），用 multiply 保留灰度（原版 BannerRenderer 也是乘色）
+      // 原版 BannerRenderer.submitPatternLayer：最终色 = 贴图 × DyeColor.getTextureDiffuseColor()。
+      // 图案贴图是灰度（RGB=亮度）+ alpha（掩码）。canvas 的 multiply 会把透明区也填成染料色，
+      // 所以乘完再用 destination-in 按原贴图的 alpha 把透明区盖回去（保留灰度明暗 + 掩码）。
       tctx.globalCompositeOperation = 'multiply'
       tctx.fillStyle = hex
       tctx.fillRect(0, 0, 64, 64)
+      tctx.globalCompositeOperation = 'destination-in'
+      tctx.drawImage(image, 0, 0, 64, 64)
       tctx.globalCompositeOperation = 'source-over'
       ctx.drawImage(tint, 0, 0, 64, 64)
     }
