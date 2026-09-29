@@ -653,7 +653,7 @@ export class Renderer {
     const d = bounds.depth
     const radius = Math.max(1, Math.sqrt(w * w + h * h + d * d) / 2)
     this.controls.target.set(cx, cy, cz)
-    const dist = radius * 2.6
+    const dist = radius * 1.7
     this.camera.position.set(cx + dist * 0.8, cy + dist * 0.55, cz + dist * 0.8)
     this.camera.near = Math.max(0.05, radius / 2000)
     this.camera.far = Math.max(200, radius * 200)
