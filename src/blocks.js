@@ -241,12 +241,14 @@ for (const [name, base] of Object.entries(COPPER_CHEST_TEX)) {
 
 // 旗帜：杆 / 墙架（旗面含底色+图案是每个旗帜实例独有的，由 renderer.renderBanners 单独绘制）。
 // 木板是 16×16，这里按 texSize=64 归一化（贴图采样时会各自映射到整张）。
+// 注意原版 BannerRenderer 对杆/旗面统一应用 MODEL_SCALE=(2/3,−2/3,−2/3)，这里按 2/3 后的
+// 尺寸/位置定义：立地杆 2×42×2 → 1.33×28×1.33，y 从方块中心(8)到 36（即地面往上 0.5..2.25 格）。
 function bannerModel() {
   const plank = { uv: [0, 0, 64, 64], texture: '#plank' }
   return {
     textures: { plank: 'block/oak_planks' },
     elements: [
-      { from: [7, 0, 7], to: [9, 26, 9], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
+      { from: [7, 8, 7], to: [9, 36, 9], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
     ],
   }
 }
@@ -256,8 +258,8 @@ function wallBannerModel() {
     textures: { plank: 'block/oak_planks' },
     elements: [
       // 墙上旗帜：旗面顶端的横木杆（原版 BannerModel 的 wall bar：addBox(-10,-44,-1,20,2,2)，
-      // 20×2×2，横跨旗面宽度、旗面从它垂下）。这里的 y=24..26 对应旗面顶端。
-      { from: [-2, 24, 7], to: [18, 26, 9], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
+      // 20×2×2，横跨旗面宽度、旗面从它垂下；2/3 后约 13.3×1.33×1.33）。y=36..37.5 对应旗面顶端。
+      { from: [1.5, 36, 7.5], to: [14.5, 37.5, 8.5], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
     ],
   }
 }

@@ -24,13 +24,15 @@ const DYE_COLORS = {
 // 墙上旗帜 facing -> 旗面朝向角（three.js 的 rotation.y，逆时针为正）
 const BANNER_FACING_Y = { north: 180, south: 0, east: 90, west: -90 }
 
-// 旗帜旗面几何（20×40 px = 1.25×2.5 格），UV v=0 在上（MC 约定，配合 flipY=false 贴图）。
+// 旗帜旗面几何，UV v=0 在上（MC 约定，配合 flipY=false 贴图）。
 // 原版 BannerFlagModel 的旗面 cuboid 是 20×40×1、texOffs(0,0)、贴图 64×64，即只采样
 // 贴图左上角 u=0..20、v=0..40 的旗面区域（贴图右侧 22px 是旗面侧边的阴影，不属于正面）。
+// 尺寸上原版 BannerRenderer 有 MODEL_SCALE=(2/3,−2/3,−2/3)：20×40 模型单位 ×2/3 ÷16
+// = 20/24 × 40/24 格 ≈ 0.833×1.667 格（不是 1.25×2.5）。
 function bannerFlagGeometry() {
   const geo = new THREE.BufferGeometry()
-  const hw = 0.625
-  const hh = 1.25
+  const hw = 5 / 12 // 20/24 的一半
+  const hh = 5 / 6 // 40/24 的一半
   const U = 20 / 64
   const V = 40 / 64
   geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
@@ -485,18 +487,18 @@ export class Renderer {
       if (!tex) continue
       const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
       const mesh = new THREE.Mesh(BANNER_FLAG_GEO, mat)
-      mesh.position.z = 0.12 // 旗面在杆/墙架的前方
+      mesh.position.z = 0.0625 // 旗面在杆/墙架前方约 1 单位（原版旗面 cuboid z=-2..-1 居中即 1 单位）
       const group = new THREE.Group()
       group.add(mesh)
       if (b.facing) {
-        // 墙上旗帜：旗面朝向 facing（远离墙），旗面在杆前方（mesh.position.z 已前移）
-        group.position.set(b.x + 0.5, b.y + 0.375, b.z + 0.5)
+        // 墙上旗帜：旗面朝向 facing（远离墙），中心在方块上方 1.5 格
+        group.position.set(b.x + 0.5, b.y + 1.5, b.z + 0.5)
         group.rotation.y = ((BANNER_FACING_Y[b.facing] ?? 0) * Math.PI) / 180
       } else {
-        // 立地旗帜：旗面绕杆旋转（与告示牌同一条 rotation 公式，顺时针 22.5°/级）
+        // 立地旗帜：旗面绕杆旋转（与告示牌同一条 rotation 公式，顺时针 22.5°/级），中心在方块上方 0.52 格
         const rot = Number(b.rotation) || 0
         const a = -22.5 * (rot % 4) - 90 * Math.floor(rot / 4)
-        group.position.set(b.x + 0.5, b.y + 0.375, b.z + 0.5)
+        group.position.set(b.x + 0.5, b.y + 0.52, b.z + 0.5)
         group.rotation.y = (a * Math.PI) / 180
       }
       this.bannersGroup.add(group)
