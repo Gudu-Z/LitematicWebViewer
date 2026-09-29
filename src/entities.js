@@ -184,8 +184,8 @@ async function buildItemFrame(entity, id, assets) {
 
 // 方块物品解析用的默认属性。
 // 原版方块物品按 Block.getDefaultState() 渲染：普通（variants）方块要还原其默认状态——
-// 朝向类方块在 item 帧里正面朝观察者（+z），故取 facing=south；例外：观察者 observer=south、
-// 避雷针/末地烛=up、漏斗=down、楼梯=west。轴类 axis=y、楼梯 half=bottom/shape=straight 等。
+// 朝向类方块默认 facing=north（观察者 observer 例外为 south、避雷针/末地烛/木桶=up、漏斗=down、
+// 楼梯=west）、合成器用 orientation=north_up；轴类 axis=y、楼梯 half=bottom/shape=straight 等。
 // 之前这里统一传 axis:y，导致活塞/观察者/发射器等朝向类方块在展示框里朝向不对。
 // multipart 方块（墙/栅栏/玻璃板/铁栏杆等）需还原「孤立默认状态」——核心立柱可见、四周无连接。
 async function defaultItemProps(name, assets) {
@@ -203,15 +203,16 @@ async function defaultItemProps(name, assets) {
     for (const kv of firstKey.split(',')) {
       const [k, v] = kv.split('=')
       if (!k) continue
-      // 方块物品按 Block.getDefaultState() 渲染：观察者默认 south、避雷针/末地烛默认 up、
-      // 漏斗默认 down、楼梯默认 west；其余朝向类方块（熔炉/发射器/活塞等）正面朝 +z，
-      // 在 item 帧里即朝向观察者（配合下方 buildFrameItem 的 180° Y 翻转）。
+      // 方块物品按 Block.getDefaultState() 渲染：观察者默认 south、避雷针/末地烛/木桶默认 up、
+      // 漏斗默认 down、楼梯默认 west（展示框里侧面朝相机）；其余朝向类方块（熔炉/发射器/活塞等）
+      // 默认 north（正面朝 −z，展示框里即背面朝观察者）。
       if (k === 'facing') props[k] =
         name === 'observer' ? 'south' :
-        name.endsWith('lightning_rod') || name === 'end_rod' ? 'up' :
+        name.endsWith('lightning_rod') || name === 'end_rod' || name === 'barrel' ? 'up' :
         name === 'hopper' ? 'down' :
         name.endsWith('_stairs') ? 'west' :
-        'south'
+        'north'
+      else if (k === 'orientation') props[k] = 'north_up' // 合成器（1.21 新 orientation 属性）默认 north_up
       else if (k === 'axis') props[k] = 'y'
       else if (k === 'half') props[k] = 'bottom'
       else if (k === 'shape') props[k] = 'straight'
