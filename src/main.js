@@ -113,10 +113,14 @@ if (renderer) {
   // 左侧：上/下一层
   document.getElementById('layerUpBtn').addEventListener('click', () => changeLayer(1))
   document.getElementById('layerDownBtn').addEventListener('click', () => changeLayer(-1))
-  // 左侧：定位到当前层
-  document.getElementById('locateBtn').addEventListener('click', () => {
+  // 左侧：定位到此处——把当前层设为摄像机所在高度
+  document.getElementById('locateBtn').addEventListener('click', async () => {
     if (!currentData) return
-    renderer.focusLayer(view.layerY)
+    const b = currentData.bounds
+    const camY = Math.floor(renderer.camera.position.y)
+    view.layerY = Math.max(b.minY, Math.min(b.maxY, camY))
+    ui.setLayerLabel(view.layerY)
+    if (view.renderMode !== 'all') await reRenderBlocks()
   })
 
   // 设置：显示实体 / 区域线框 / 尺寸

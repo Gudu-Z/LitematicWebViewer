@@ -433,22 +433,6 @@ export class Renderer {
     this.onSensitivityChange?.(this.lookSensitivity)
   }
 
-  // 定位到当前层：把相机目标移到该层中心高度，相机保持与目标的相对位置（距离/水平框选不变）。
-  // 环绕模式下 controls.update() 会自动 lookAt；飞行模式下手动重算朝向。
-  focusLayer(y) {
-    const targetY = Number(y) + 0.5
-    const delta = targetY - this.controls.target.y
-    this.controls.target.y = targetY
-    this.camera.position.y += delta
-    if (this.moveMode === 'fly') {
-      this.camera.lookAt(this.controls.target)
-      const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ')
-      this._yaw = e.y
-      this._pitch = e.x
-      this._applyFlyRotation()
-    }
-  }
-
   // —— 显示开关 ——
   setEntitiesVisible(v) { this.entitiesGroup.visible = !!v }
   setWireframesVisible(v) { this.regionGroup.visible = !!v }
