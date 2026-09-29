@@ -283,6 +283,27 @@ function potModel() {
 }
 SPECIAL_MODELS.decorated_pot = (p) => ({ model: potModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 16 })
 
+// 潮涌核心（BER，无 JSON 几何）：简化为满立方体贴 conduit 眼纹理（原版是笼 + 中央眼，
+// 这里近似成眼立方体）。展示框里以方块形式出现。
+function conduitModel() {
+  const side = { uv: [0, 0, 16, 16], texture: '#all' }
+  return {
+    textures: { all: 'block/conduit' },
+    elements: [{ from: [0, 0, 0], to: [16, 16, 16], faces: { up: side, down: side, north: side, south: side, west: side, east: side } }],
+  }
+}
+SPECIAL_MODELS.conduit = () => ({ model: conduitModel(), variant: {}, texSize: 16 })
+
+// 盾牌（BER）：简化为薄板贴无图案木盾（64×64 贴图整体贴到正面）。展示框里 fixed 旋转 [0,180,0]。
+function shieldModel() {
+  const tex = { uv: [0, 0, 64, 64], texture: '#all' }
+  return {
+    textures: { all: 'entity/shield/shield_base_nopattern' },
+    elements: [{ from: [2, 2, 7.5], to: [14, 14, 8.5], faces: { up: tex, down: tex, north: tex, south: tex, west: tex, east: tex } }],
+  }
+}
+SPECIAL_MODELS.shield = () => ({ model: shieldModel(), variant: {}, texSize: 64 })
+
 // 铜傀儡雕像：无 JSON 模型（BER 绘制），由 renderer.renderStatues 用实体模型逐块绘制
 
 export class BlockModelResolver {

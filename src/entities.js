@@ -47,6 +47,38 @@ function fixedRotQuaternion(rot) {
 // 2D 物品/头颅/时钟等 item 模型 fixed 显示旋转均为 [0,180,0]
 const Q_FLIP = fixedRotQuaternion([0, 180, 0])
 
+// 把 items/NAME.json 的 model 定义解析成「fixed 展示（默认）状态」的模型列表。
+// 返回 [{ path: "block/xxx"|"item/xxx", transform: {translation,scale,...}|null }]。
+// 各类解析为默认分支：composite 拆成多个（如床的 head+foot）；condition 取 on_false；
+// range_dispatch 取 fallback；select 取 fixed/gui/ground 的 case，否则 fallback；
+// special（箱子/头颅/旗帜等）返回空，交由 SPECIAL_MODELS 处理。
+// 注意 composite 的 transformation.translation 单位是「方块」（床 foot 偏移 [0,0,1] 即 1 格），
+// 与 display 变换的 translation（单位像素 1/16）不同。
+function resolveItemModelDef(def, out = []) {
+  if (!def || typeof def !== 'object') return out
+  const t = def.type
+  if (t === 'minecraft:model') {
+    if (typeof def.model === 'string') out.push({ path: def.model.replace(/^minecraft:/, ''), transform: def.transformation || null })
+    return out
+  }
+  if (t === 'minecraft:composite') {
+    for (const m of def.models || []) resolveItemModelDef(m, out)
+    return out
+  }
+  if (t === 'minecraft:condition') return resolveItemModelDef(def.on_false, out)
+  if (t === 'minecraft:range_dispatch') return resolveItemModelDef(def.fallback, out)
+  if (t === 'minecraft:select') {
+    const cases = def.cases || []
+    for (const c of cases) {
+      const w = c.when
+      const list = Array.isArray(w) ? w : [w]
+      if (list.includes('fixed') || list.includes('gui') || list.includes('ground')) return resolveItemModelDef(c.model, out)
+    }
+    return resolveItemModelDef(def.fallback, out)
+  }
+  return out
+}
+
 // 把实体转成网格；不支持的实体返回 null
 export async function buildEntityMesh(entity, assets, data) {
   const id = shortName(entity.id)
@@ -177,9 +209,9 @@ async function buildItemFrame(entity, id, assets) {
 
   // 内部物品：框口 0.4375 处，绕框法线按 ItemRotation × 45° 旋转。
   // 框模型（template_item_frame）正面是 −z（+z 贴墙）。物品模型的 display.fixed 显示旋转
-  // （2D 物品/头颅 [0,180,0]，方块多为 [0,0,0]，铁砧 [0,90,0]）在框旋转之后、绕法线旋转之前
-  // 应用，故 quaternion = q · fixedRot · qz。每个 itemMesh 在 buildFrameItem 里把其模型
-  // display.fixed 旋转存进 userData.fixedRot。
+  // （2D 物品/头颅 [0,180,0]，方块多为 [0,0,0]，铁砧 [0,90,0]，床 [270,180,0]）在框旋转之后、
+  // 绕法线旋转之前应用，故 quaternion = q · fixedRot · qz；display.fixed 平移（单位方块，如床
+  // [0,4,-2]px）加在框口偏移上再随框旋转。buildFrameItem 把这两者存进 userData.fixedRot/fixedTrans。
   const item = entity.nbt?.Item
   if (item && item.id) {
     const itemMesh = await buildFrameItem(item, resolver, assets)
@@ -187,8 +219,10 @@ async function buildItemFrame(entity, id, assets) {
       const rot = Number(entity.nbt?.ItemRotation) || 0
       const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rot * 45 * DEG)
       const fixedRot = itemMesh.userData.fixedRot || null
-      const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q)
-      itemMesh.position.copy(anchor).addScaledVector(forward, 0.4375)
+      const fixedTrans = itemMesh.userData.fixedTrans || null
+      const local = new THREE.Vector3(0, 0, 0.4375)
+      if (fixedTrans) local.add(new THREE.Vector3(fixedTrans[0], fixedTrans[1], fixedTrans[2]))
+      itemMesh.position.copy(anchor).add(local.applyQuaternion(q))
       itemMesh.quaternion.copy(q)
       if (fixedRot) itemMesh.quaternion.multiply(fixedRot)
       itemMesh.quaternion.multiply(qz)
@@ -316,26 +350,51 @@ async function buildFrameItem(item, resolver, assets) {
   }
 
   // 方块物品：3D 方块模型（原版展示框 scale 0.5 = 8px，方块是 3D 立方体显得偏大，这里用 0.4 略缩）。
-  // 26.3 的物品模型定义在 items/NAME.json，指向一个具体的方块模型（如 block/piston_inventory、
+  // 26.3 的物品模型定义在 items/NAME.json，指向具体的方块模型（如 block/piston_inventory、
   // block/anvil），其几何朝向与 display.fixed 变换是烘焙好的——和 blockstate 的 registerDefaultState
-  // 无关（这正是「源码默认 north 但游戏里活塞头朝上 / 铁砧侧面」的根源）。这里直接解析该模型并
-  // 应用它的 display.fixed 旋转，得到与原版展示框完全一致的朝向。
+  // 无关。这里直接解析该模型并应用 display.fixed（旋转+平移）；composite（床=头+脚）拆成多个
+  // 子模型分别烘焙后按子模型 translation 偏移合并、整体居中。
   const itemDef = await assets.getJSON('items/' + name + '.json')
-  const modelRef = itemDef?.model?.model
+  const modelDefs = resolveItemModelDef(itemDef?.model)
   let baked = null
   let fixedRot = null
-  if (typeof modelRef === 'string') {
-    const model = await resolver.loadModel(modelRef.replace(/^minecraft:/, ''))
-    if (model && model.elements) {
-      baked = bakeModel(model, { x: 0, y: 0 })
-      fixedRot = fixedRotQuaternion(model.display?.fixed?.rotation)
+  let fixedTrans = null
+  if (modelDefs.length) {
+    const parts = []
+    let fixed = null
+    for (const md of modelDefs) {
+      const model = await resolver.loadModel(md.path)
+      if (model && model.elements) {
+        const b = bakeModel(model, { x: 0, y: 0 })
+        if (b && b.quads && b.quads.length) {
+          const tr = md.transform?.translation || [0, 0, 0]
+          parts.push({ quads: b.quads, ox: Number(tr[0]) || 0, oy: Number(tr[1]) || 0, oz: Number(tr[2]) || 0 })
+          if (!fixed && model.display?.fixed) fixed = model.display.fixed
+        }
+      }
+    }
+    if (parts.length) {
+      const quads = []
+      for (const p of parts) for (const q of p.quads) quads.push({ ...q, verts: q.verts.map((v) => [v[0] + p.ox, v[1] + p.oy, v[2] + p.oz]) })
+      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
+      for (const q of quads) for (const v of q.verts) {
+        if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0]
+        if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1]
+        if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2]
+      }
+      baked = { quads, center: [-(minX + maxX) / 2, -(minY + maxY) / 2, -(minZ + maxZ) / 2] }
+      if (fixed) {
+        fixedRot = fixedRotQuaternion(fixed.rotation)
+        const t = fixed.translation || [0, 0, 0]
+        fixedTrans = [Number(t[0]) / 16, Number(t[1]) / 16, Number(t[2]) / 16]
+      }
     }
   }
   if (!baked || !baked.quads || !baked.quads.length) {
     // 特殊方块（箱子/头颅/旗帜/潜影盒/装饰罐等 BER，无 JSON 几何）走 SPECIAL_MODELS
     const props = await defaultItemProps(name, assets)
     baked = await resolver.resolve('minecraft:' + name, props)
-    fixedRot = name.endsWith('_head') || name.endsWith('_skull') ? Q_FLIP : null
+    fixedRot = name.endsWith('_head') || name.endsWith('_skull') || name === 'shield' || name === 'conduit' ? Q_FLIP : null
   }
   if (baked && baked.quads && baked.quads.length) {
     const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
@@ -347,9 +406,11 @@ async function buildFrameItem(item, resolver, assets) {
         if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true }))
       }),
     )
-    holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
+    const center = baked.center || [-0.5, -0.5, -0.5]
+    holder.add(quadsToMesh(baked.quads, center, (tk) => mats.get(tk)))
     holder.scale.setScalar(0.4)
     holder.userData.fixedRot = fixedRot
+    holder.userData.fixedTrans = fixedTrans || null
     return holder
   }
 
