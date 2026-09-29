@@ -169,10 +169,11 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
       isSkip[i] = SKIP_NAMES.has((paletteList[i].Name || '').replace(/^minecraft:/, '')) ? 1 : 0
     }
 
-    // 方块实体（告示牌等）：坐标同样是相对区域原点的，需加上区域 Position 偏移。
+    // 方块实体（告示牌/旗帜等）：坐标与方块网格一致，都相对区域「最小角」wx0（Size 为负时
+    // Position 是最大角，不能直接加 Position）。实体（Pos）才是相对 Position 的。
     if (Array.isArray(region.TileEntities)) {
       for (const te of region.TileEntities) {
-        tileEntities.push({ id: te.id, x: te.x + pos.x, y: te.y + pos.y, z: te.z + pos.z, nbt: te, region: name })
+        tileEntities.push({ id: te.id, x: te.x + wx0, y: te.y + wy0, z: te.z + wz0, nbt: te, region: name })
       }
     }
 

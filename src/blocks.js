@@ -239,31 +239,29 @@ for (const [name, base] of Object.entries(COPPER_CHEST_TEX)) {
   })
 }
 
-// 旗帜：杆 + 旗面（白色 base 贴图，不渲染图案；彩色旗帜暂统一白色显示）。
-// base 是 64×64、木板是 16×16，这里都按 texSize=64 归一化（贴图采样时会各自映射到整张）。
+// 旗帜：杆 / 墙架（旗面含底色+图案是每个旗帜实例独有的，由 renderer.renderBanners 单独绘制）。
+// 木板是 16×16，这里按 texSize=64 归一化（贴图采样时会各自映射到整张）。
 function bannerModel() {
   const plank = { uv: [0, 0, 64, 64], texture: '#plank' }
-  const flag = { uv: [0, 0, 64, 64], texture: '#flag' }
   return {
-    textures: { plank: 'block/oak_planks', flag: 'entity/banner/base' },
+    textures: { plank: 'block/oak_planks' },
     elements: [
       { from: [7, 0, 7], to: [9, 26, 9], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
-      { from: [-2, 6, 9], to: [18, 26, 10], faces: { north: flag, south: flag, up: flag, down: flag, east: flag, west: flag } },
     ],
   }
 }
 function wallBannerModel() {
-  const flag = { uv: [0, 0, 64, 64], texture: '#flag' }
+  const plank = { uv: [0, 0, 64, 64], texture: '#plank' }
   return {
-    textures: { flag: 'entity/banner/base' },
+    textures: { plank: 'block/oak_planks' },
     elements: [
-      { from: [2, 2, 15], to: [14, 22, 16], faces: { north: flag, south: flag, up: flag, down: flag, east: flag, west: flag } },
+      { from: [6, 19, 15], to: [10, 23, 16], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
     ],
   }
 }
 const BANNER_COLORS = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black']
 for (const c of BANNER_COLORS) {
-  SPECIAL_MODELS[c + '_banner'] = (p) => ({ model: bannerModel(), variant: { y: (Number(p.rotation) || 0) * 22.5 }, texSize: 64 })
+  SPECIAL_MODELS[c + '_banner'] = (p) => ({ model: bannerModel(), variant: {}, texSize: 64 })
   SPECIAL_MODELS[c + '_wall_banner'] = (p) => ({ model: wallBannerModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 64 })
 }
 

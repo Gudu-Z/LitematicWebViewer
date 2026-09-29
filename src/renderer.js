@@ -13,13 +13,32 @@ const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftR
 // 墙上告示牌的 facing -> 方向向量（文字朝向）
 const SIGN_FACING = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0] }
 
-// 告示牌文字颜色（DyeColor -> 十六进制，原版发光文字用亮色）
-const SIGN_COLORS = {
+// 染料颜色（DyeColor -> 十六进制）：告示牌文字、旗帜底色/图案共用
+const DYE_COLORS = {
   white: '#ffffff', orange: '#ff681f', magenta: '#c74ebd', light_blue: '#3ab3da',
   yellow: '#fed83d', lime: '#80c71f', pink: '#f38baa', gray: '#474f52',
   light_gray: '#9d9d97', cyan: '#169c9c', purple: '#8932b8', blue: '#3c44aa',
   brown: '#835432', green: '#5e7c16', red: '#b02e26', black: '#000000',
 }
+
+// 墙上旗帜 facing -> 旗面朝向角（度）
+const BANNER_FACING_Y = { north: 180, south: 0, east: -90, west: 90 }
+
+// 旗帜旗面几何（20×40 px = 1.25×2.5 格），UV v=0 在上（MC 约定，配合 flipY=false 贴图）
+function bannerFlagGeometry() {
+  const geo = new THREE.BufferGeometry()
+  const hw = 0.625
+  const hh = 1.25
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array([
+    -hw, hh, 0, hw, hh, 0, -hw, -hh, 0, hw, -hh, 0,
+  ]), 3))
+  geo.setAttribute('uv', new THREE.BufferAttribute(new Float32Array([
+    0, 0, 1, 0, 0, 1, 1, 1,
+  ]), 2))
+  geo.setIndex([0, 2, 1, 1, 2, 3]) // 法线 +z
+  return geo
+}
+const BANNER_FLAG_GEO = bannerFlagGeometry()
 
 // 玩家头颅模型（皮肤 64×64 布局）。与 vanilla HeadModel 一致：底层头 + 帽子层
 // （第二层，UV 在皮肤头部区域的第二列 +32，比底层稍大 0.25 像素）。帽子层透明处
@@ -154,6 +173,9 @@ export class Renderer {
 
     this.headsGroup = new THREE.Group() // 玩家头颅（用玩家皮肤）
     this.scene.add(this.headsGroup)
+
+    this.bannersGroup = new THREE.Group() // 旗帜旗面（底色 + 图案，每个实例单独绘制）
+    this.scene.add(this.bannersGroup)
 
     this.entitiesGroup = new THREE.Group() // 实体（矿车、物品展示框等）
     this.scene.add(this.entitiesGroup)
@@ -328,6 +350,7 @@ export class Renderer {
     this.clearBlocks()
     this.clearSigns()
     this.clearHeads()
+    this.clearBanners()
     this.clearEntities()
   }
 
@@ -360,6 +383,21 @@ export class Renderer {
       mats.forEach((m) => {
         m.map?.dispose()
         m.dispose()
+      })
+    }
+  }
+
+  clearBanners() {
+    while (this.bannersGroup.children.length) {
+      const child = this.bannersGroup.children.pop()
+      child.traverse((o) => {
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        mats.forEach((m) => {
+          if (m) {
+            m.map?.dispose()
+            m.dispose()
+          }
+        })
       })
     }
   }
@@ -406,6 +444,67 @@ export class Renderer {
       mesh.position.set(head.x, head.y, head.z)
       this.headsGroup.add(mesh)
     }
+  }
+
+  // 渲染旗帜旗面（底色 + 图案，每个实例单独绘制）。
+  // banners: [{x, y, z, rotation?, facing?, baseColor, patterns: [{pattern, color}]}]
+  async renderBanners(banners, assets) {
+    this.clearBanners()
+    if (!banners || !banners.length) return
+    for (const b of banners) {
+      const tex = await this._makeBannerTexture(b.baseColor, b.patterns, assets)
+      if (!tex) continue
+      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
+      const mesh = new THREE.Mesh(BANNER_FLAG_GEO, mat)
+      mesh.position.z = 0.12 // 旗面在杆/墙架的前方
+      const group = new THREE.Group()
+      group.add(mesh)
+      group.position.set(b.x + 0.5, b.y + 0.4, b.z + 0.5)
+      if (b.facing) group.rotation.y = ((BANNER_FACING_Y[b.facing] ?? 0) * Math.PI) / 180
+      else group.rotation.y = ((Number(b.rotation) || 0) * 22.5 * Math.PI) / 180
+      this.bannersGroup.add(group)
+    }
+  }
+
+  // 把旗帜底色 + 图案合成到一张 64×64 贴图（底色/图案都用 DyeColor 染色）
+  async _makeBannerTexture(baseColor, patterns, assets) {
+    const baseTex = await assets.getTexture('entity/banner/base')
+    if (!baseTex || !baseTex.image) return null
+    const canvas = document.createElement('canvas')
+    canvas.width = 64
+    canvas.height = 64
+    const ctx = canvas.getContext('2d')
+    const tint = document.createElement('canvas')
+    tint.width = 64
+    tint.height = 64
+    const tctx = tint.getContext('2d')
+
+    const drawTinted = (image, hex) => {
+      tctx.clearRect(0, 0, 64, 64)
+      tctx.drawImage(image, 0, 0, 64, 64)
+      tctx.globalCompositeOperation = 'source-atop'
+      tctx.fillStyle = hex
+      tctx.fillRect(0, 0, 64, 64)
+      tctx.globalCompositeOperation = 'source-over'
+      ctx.drawImage(tint, 0, 0, 64, 64)
+    }
+
+    drawTinted(baseTex.image, DYE_COLORS[baseColor] || '#ffffff')
+    for (const p of patterns || []) {
+      const name = (p.pattern || '').replace(/^minecraft:/, '')
+      const tex = await assets.getTexture('entity/banner/' + name)
+      if (!tex || !tex.image) continue
+      drawTinted(tex.image, DYE_COLORS[p.color] || '#ffffff')
+    }
+
+    const tex = new THREE.CanvasTexture(canvas)
+    tex.colorSpace = THREE.SRGBColorSpace
+    tex.magFilter = THREE.NearestFilter
+    tex.minFilter = THREE.NearestFilter
+    tex.generateMipmaps = false
+    tex.flipY = false
+    tex.needsUpdate = true
+    return tex
   }
 
   // 动态设置背景色
@@ -486,7 +585,7 @@ export class Renderer {
     canvas.height = 128
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, 512, 128) // 透明背景，让木板透出来
-    ctx.fillStyle = SIGN_COLORS[color] || '#1a1a1a' // 默认近黑色；指定 dye 颜色时用对应色
+    ctx.fillStyle = DYE_COLORS[color] || '#1a1a1a' // 默认近黑色；指定 dye 颜色时用对应色
     ctx.font = '30px "PixelFont", "Microsoft YaHei", sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'

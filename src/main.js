@@ -223,6 +223,7 @@ async function openFile(file) {
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
     await renderCurrentSigns()
     await renderCurrentPlayerHeads()
+    await renderCurrentBanners()
     await renderCurrentEntities()
     ui.showMetadata(data.metadata)
     updateRegionUI()
@@ -263,6 +264,7 @@ async function reRenderCurrent() {
   await renderer.render(currentData, assets, (p) => ui.setProgress(p), makeBlockFilter())
   await renderCurrentSigns()
   await renderCurrentPlayerHeads()
+  await renderCurrentBanners()
   await renderCurrentEntities()
 }
 
@@ -285,6 +287,13 @@ async function renderCurrentPlayerHeads() {
   if (!currentData || !renderer) return
   const tes = filterByRegion(currentData.tileEntities || [])
   await renderer.renderPlayerHeads(extractPlayerHeads(tes, currentData), assets)
+}
+
+// 渲染当前结构里的旗帜（底色 + 图案）
+async function renderCurrentBanners() {
+  if (!currentData || !renderer) return
+  const tes = filterByRegion(currentData.tileEntities || [])
+  await renderer.renderBanners(extractBanners(tes, currentData), assets)
 }
 
 // 区域是否可见（visibleRegions 为 null 表示全部可见）
@@ -346,6 +355,7 @@ async function toggleRegion(name) {
   await reRenderBlocks()
   await renderCurrentSigns()
   await renderCurrentPlayerHeads()
+  await renderCurrentBanners()
   await renderCurrentEntities()
 }
 
@@ -460,6 +470,30 @@ function extractSigns(tileEntities, data) {
     })
   }
   return signs
+}
+
+// 从方块实体中提取旗帜：{x, y, z, rotation?, facing?, baseColor, patterns: [{pattern, color}]}
+function extractBanners(tileEntities, data) {
+  const banners = []
+  const b = data.bounds
+  for (const te of tileEntities || []) {
+    if (te.id !== 'minecraft:banner') continue
+    const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
+    if (gi === undefined) continue
+    const p = data.palette[gi]
+    const name = (p.name || '').replace(/^minecraft:/, '')
+    // 底色从方块名推断（red_banner / blue_wall_banner）
+    const baseColor = name.replace(/_wall_banner$/, '').replace(/_banner$/, '')
+    const patterns = (te.nbt?.patterns || []).map((pt) => ({ pattern: pt.pattern, color: pt.color }))
+    banners.push({
+      x: te.x, y: te.y, z: te.z,
+      rotation: p.properties?.rotation,
+      facing: p.properties?.facing,
+      baseColor,
+      patterns,
+    })
+  }
+  return banners
 }
 
 // 把 JSON 文本组件转成纯文本（简化处理）
