@@ -262,7 +262,8 @@ export class Renderer {
     const dt = Math.min((now - this._lastTime) / 1000, 0.1)
     this._lastTime = now
     this._applyMovement(dt)
-    this.controls.update()
+    // 飞行模式下不跑 OrbitControls.update()——它会 lookAt(target) 覆盖掉原地转头的旋转
+    if (this.moveMode === 'orbit') this.controls.update()
     this.renderer.render(this.scene, this.camera)
   }
 
