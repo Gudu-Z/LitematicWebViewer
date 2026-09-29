@@ -71,7 +71,13 @@ export class AssetProvider {
     }
     const resp = await fetch(this.baseUrl + path)
     if (!resp.ok) return null
-    return resp.json()
+    // dev 服务器下，缺失文件会返回 SPA 回退的 index.html（text/html），json() 会抛错
+    if ((resp.headers.get('content-type') || '').includes('text/html')) return null
+    try {
+      return await resp.json()
+    } catch {
+      return null
+    }
   }
 
   // 加载贴图。texKey 形如 "block/stone"（已归一化，不含 minecraft: 前缀和 textures/ 前缀）。
@@ -118,6 +124,8 @@ export class AssetProvider {
     if (!blob) {
       const resp = await fetch(this.baseUrl + rel)
       if (!resp.ok) return null
+      // dev 服务器下，缺失文件会返回 SPA 回退的 index.html（text/html），避免把它当图片加载
+      if ((resp.headers.get('content-type') || '').includes('text/html')) return null
       blob = await resp.blob()
     }
     const animated = await this._isAnimated(texKey)
