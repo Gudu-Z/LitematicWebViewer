@@ -162,19 +162,16 @@ async function buildItemFrame(entity, id, assets) {
     group.add(frame)
   }
 
-  // 内部物品：框口 0.4375 处，缩放 0.5（8px），绕框法线按 ItemRotation × 45° 旋转。
-  // 物品模型正面是 +z，而框模型的 +z 是背板（指向墙）；这里额外绕 Y 转 180°，让物品
-  // 正面朝向观众（+facing），否则物品会背对观众（左右镜像）。
+  // 内部物品：框口 0.4375 处，缩放 0.5（8px），绕框法线按 ItemRotation × 45° 旋转
   const item = entity.nbt?.Item
   if (item && item.id) {
     const itemMesh = await buildFrameItem(item, resolver, assets)
     if (itemMesh) {
       const rot = Number(entity.nbt?.ItemRotation) || 0
       const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rot * 45 * DEG)
-      const flip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q)
       itemMesh.position.copy(anchor).addScaledVector(forward, 0.4375)
-      itemMesh.quaternion.copy(q).multiply(flip).multiply(qz)
+      itemMesh.quaternion.copy(q).multiply(qz)
       group.add(itemMesh)
     }
   }
