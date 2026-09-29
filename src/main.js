@@ -351,10 +351,10 @@ async function changeLayer(delta) {
     setRenderModeControl(view.renderMode)
     view.layerY = delta > 0 ? b.minY : b.maxY
   } else if (
-    (view.renderMode === 'below' && delta < 0 && view.layerY <= b.minY) ||
-    (view.renderMode === 'above' && delta > 0 && view.layerY >= b.maxY)
+    (view.renderMode === 'below' && delta > 0 && view.layerY >= b.maxY) ||
+    (view.renderMode === 'above' && delta < 0 && view.layerY <= b.minY)
   ) {
-    // 「下方/上方」达到最小/最大层时，自动还原为「全部渲染」
+    // 「下方/上方」达到最大/最小层时，自动还原为「全部渲染」
     view.renderMode = 'all'
     setRenderModeControl('all')
   } else {
