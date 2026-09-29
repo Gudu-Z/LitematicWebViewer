@@ -225,7 +225,15 @@ function extractSigns(data) {
 // 把 JSON 文本组件转成纯文本（简化处理）
 function textComponentToString(c) {
   if (c == null) return ''
-  if (typeof c === 'string') return c
+  if (typeof c === 'string') {
+    // litematic 常把文本组件 JSON 序列化后存进 NBT 字符串：
+    //   "所有发射器预填1空盒"（带引号的裸字符串）或 {"text":"...","extra":[...]}
+    const s = c.trim()
+    if (s.startsWith('"') || s.startsWith('{')) {
+      try { return textComponentToString(JSON.parse(s)) } catch { return c }
+    }
+    return c
+  }
   if (typeof c === 'object') {
     if (typeof c.text === 'string') return c.text
     if (Array.isArray(c.extra)) return c.extra.map(textComponentToString).join('')

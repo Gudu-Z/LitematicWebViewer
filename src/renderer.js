@@ -237,8 +237,9 @@ export class Renderer {
       board.setRotationFromQuaternion(quat)
       this.signsGroup.add(board)
 
-      // 文字平面（面板正面，略向前偏移避免与面板重叠闪烁）
-      const textMat = new THREE.MeshBasicMaterial({ map: this._makeSignTexture(sign.lines) })
+      // 文字平面（面板正面，略向前偏移避免与面板重叠闪烁）：深色文字、透明背景，
+      // 直接显示在木板上（复刻原版告示牌——文字是画在板上的深色字，不是白字深色底）。
+      const textMat = new THREE.MeshBasicMaterial({ map: this._makeSignTexture(sign.lines), transparent: true })
       const textPlane = new THREE.Mesh(new THREE.PlaneGeometry(13 / 16, 3 / 16), textMat)
       textPlane.position.copy(boardCenter).addScaledVector(front, 1 / 16 + 0.006)
       textPlane.setRotationFromQuaternion(quat)
@@ -251,17 +252,13 @@ export class Renderer {
     canvas.width = 512
     canvas.height = 128
     const ctx = canvas.getContext('2d')
-    ctx.fillStyle = '#5a3a1e' // 深棕色木板
-    ctx.fillRect(0, 0, 512, 128)
-    ctx.strokeStyle = '#38220f'
-    ctx.lineWidth = 4
-    ctx.strokeRect(2, 2, 508, 124) // 边框
-    ctx.fillStyle = '#ffffff'
-    ctx.font = '24px "PixelFont", "Microsoft YaHei", sans-serif'
+    ctx.clearRect(0, 0, 512, 128) // 透明背景，让木板透出来
+    ctx.fillStyle = '#1a1a1a' // 近黑色文字（原版告示牌默认黑字）
+    ctx.font = '30px "PixelFont", "Microsoft YaHei", sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'
     for (let i = 0; i < 4; i++) {
-      ctx.fillText(String(lines[i] || ''), 256, 18 + i * 31)
+      ctx.fillText(String(lines[i] || ''), 256, 16 + i * 32)
     }
     const tex = new THREE.CanvasTexture(canvas)
     tex.colorSpace = THREE.SRGBColorSpace
