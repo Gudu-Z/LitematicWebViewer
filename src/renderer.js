@@ -442,7 +442,14 @@ export class Renderer {
   async renderEntities(entities, assets, data) {
     this.clearEntities()
     if (!entities || !entities.length) return
-    const meshes = await Promise.all(entities.map((e) => buildEntityMesh(e, assets, data).catch(() => null)))
+    const meshes = await Promise.all(
+      entities.map((e) =>
+        buildEntityMesh(e, assets, data).catch((err) => {
+          console.error('实体渲染失败:', e.id, err)
+          return null
+        }),
+      ),
+    )
     for (const m of meshes) if (m) this.entitiesGroup.add(m)
   }
 
@@ -480,15 +487,15 @@ export class Renderer {
       const group = new THREE.Group()
       group.add(mesh)
       if (b.facing) {
-        // 墙上旗帜：旗面贴在 facing 反方向的墙上（与告示牌文字同一条偏移）
+        // 墙上旗帜：旗面贴在 facing 反方向的墙上，从横木杆处垂下
         const d = BANNER_FACING_DIRS[b.facing] || [0, 0, 1]
-        group.position.set(b.x + 0.5 - d[0] * 0.44, b.y + 0.4, b.z + 0.5 - d[2] * 0.44)
+        group.position.set(b.x + 0.5 - d[0] * 0.44, b.y + 0.1, b.z + 0.5 - d[2] * 0.44)
         group.rotation.y = ((BANNER_FACING_Y[b.facing] ?? 0) * Math.PI) / 180
       } else {
         // 立地旗帜：旗面绕杆旋转（与告示牌同一条 rotation 公式，顺时针 22.5°/级）
         const rot = Number(b.rotation) || 0
         const a = -22.5 * (rot % 4) - 90 * Math.floor(rot / 4)
-        group.position.set(b.x + 0.5, b.y + 0.4, b.z + 0.5)
+        group.position.set(b.x + 0.5, b.y + 0.375, b.z + 0.5)
         group.rotation.y = (a * Math.PI) / 180
       }
       this.bannersGroup.add(group)

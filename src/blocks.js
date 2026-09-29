@@ -255,7 +255,8 @@ function wallBannerModel() {
   return {
     textures: { plank: 'block/oak_planks' },
     elements: [
-      { from: [6, 19, 15], to: [10, 23, 16], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
+      // 墙上旗帜的横木杆（旗面从这里垂下）
+      { from: [3, 20, 15], to: [13, 22, 16], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
     ],
   }
 }
