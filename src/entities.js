@@ -163,18 +163,19 @@ async function buildItemFrame(entity, id, assets) {
   }
 
   // 内部物品：框口 0.4375 处，缩放 0.5（8px），绕框法线按 ItemRotation × 45° 旋转。
-  // 框模型（template_item_frame）的正面是 −z（+z 贴墙），而物品模型正面是 +z，两者相反，
-  // 直接用框的四元数会让物品正面朝墙、观众看到镜像背面；额外绕 Y 转 180° 把正面翻向玩家。
+  // 框模型（template_item_frame）的正面是 −z（+z 贴墙），而物品模型正面是 +z，两者相反。
+  // 用绕 Y 转 180° 会让物品左右镜像（文字/楼梯方向反），这里改用「z 轴反射」（scale.z=-1）：
+  // 只翻转正反面，不镜像左右，物品正面 −z 与框正面一致，经框四元数映射后正对玩家。
   const item = entity.nbt?.Item
   if (item && item.id) {
     const itemMesh = await buildFrameItem(item, resolver, assets)
     if (itemMesh) {
       const rot = Number(entity.nbt?.ItemRotation) || 0
       const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rot * 45 * DEG)
-      const qflip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q)
       itemMesh.position.copy(anchor).addScaledVector(forward, 0.4375)
-      itemMesh.quaternion.copy(q).multiply(qflip).multiply(qz)
+      itemMesh.quaternion.copy(q).multiply(qz)
+      itemMesh.scale.z *= -1
       group.add(itemMesh)
     }
   }
@@ -185,7 +186,7 @@ async function buildItemFrame(entity, id, assets) {
 // 方块物品解析用的默认属性。
 // 原版方块物品按 Block.getDefaultState() 渲染：普通（variants）方块要还原其默认状态——
 // 朝向类方块默认 facing=north（观察者 observer 例外为 south、避雷针/末地烛/木桶=up、漏斗=down、
-// 楼梯=west）、合成器用 orientation=north_up；轴类 axis=y、楼梯 half=bottom/shape=straight 等。
+// 楼梯=east）、合成器用 orientation=north_up；轴类 axis=y、楼梯 half=bottom/shape=straight 等。
 // 之前这里统一传 axis:y，导致活塞/观察者/发射器等朝向类方块在展示框里朝向不对。
 // multipart 方块（墙/栅栏/玻璃板/铁栏杆等）需还原「孤立默认状态」——核心立柱可见、四周无连接。
 async function defaultItemProps(name, assets) {
@@ -204,13 +205,13 @@ async function defaultItemProps(name, assets) {
       const [k, v] = kv.split('=')
       if (!k) continue
       // 方块物品按 Block.getDefaultState() 渲染：观察者默认 south、避雷针/末地烛/木桶默认 up、
-      // 漏斗默认 down、楼梯默认 west（展示框里侧面朝相机）；其余朝向类方块（熔炉/发射器/活塞等）
+      // 漏斗默认 down、楼梯默认 east（侧面朝相机）；其余朝向类方块（熔炉/发射器/活塞等）
       // 默认 north（正面朝 −z，展示框里即背面朝观察者）。
       if (k === 'facing') props[k] =
         name === 'observer' ? 'south' :
         name.endsWith('lightning_rod') || name === 'end_rod' || name === 'barrel' ? 'up' :
         name === 'hopper' ? 'down' :
-        name.endsWith('_stairs') ? 'west' :
+        name.endsWith('_stairs') ? 'east' :
         'north'
       else if (k === 'orientation') props[k] = 'north_up' // 合成器（1.21 新 orientation 属性）默认 north_up
       else if (k === 'axis') props[k] = 'y'
