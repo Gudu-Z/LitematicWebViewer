@@ -425,6 +425,16 @@ button.primary:hover {
   font-size: 12px;
 }
 
+.control-row select {
+  flex: 1;
+  background: #2a303c;
+  color: #e8eaed;
+  border: 1px solid #3a4150;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 .control-row button#layerUpBtn,
 .control-row button#layerDownBtn {
   width: 28px;

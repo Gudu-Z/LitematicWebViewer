@@ -36,6 +36,15 @@
             <span id="speedValue" class="control-value">1.0×</span>
           </div>
           <div class="control-row">
+            <label class="control-label" for="renderMode">渲染</label>
+            <select id="renderMode">
+              <option value="all" selected>全部渲染</option>
+              <option value="below">层级下方</option>
+              <option value="above">层级上方</option>
+              <option value="single">单层渲染</option>
+            </select>
+          </div>
+          <div class="control-row">
             <span class="control-label">层级</span>
             <button id="layerDownBtn" title="下一层 (Q)">↓</button>
             <span id="layerValue" class="control-value">层 -</span>
@@ -109,16 +118,6 @@
           <div class="setting-row">
             <label for="showDimensions">显示尺寸</label>
             <input type="checkbox" id="showDimensions" checked />
-          </div>
-
-          <div class="setting-row">
-            <label for="renderMode">渲染模式</label>
-            <select id="renderMode">
-              <option value="all" selected>全部渲染</option>
-              <option value="below">层级下方</option>
-              <option value="above">层级上方</option>
-              <option value="single">单层渲染</option>
-            </select>
           </div>
 
           <div class="settings-section-title">操作</div>
