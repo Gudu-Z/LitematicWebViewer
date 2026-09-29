@@ -162,10 +162,10 @@ async function buildItemFrame(entity, id, assets) {
     group.add(frame)
   }
 
-  // 内部物品：框口 0.4375 处，缩放 0.5（8px），绕框法线按 ItemRotation × 45° 旋转。
-  // 框模型（template_item_frame）的正面是 −z（+z 贴墙），而物品模型正面是 +z，两者相反，
-  // 直接用框四元数会让物品正面朝墙、观众看到背面；额外绕 Y 转 180° 把正面翻向玩家。
-  // 这是纯旋转（行列式 +1），不会左右镜像——之前误改成 z 反射（行列式 −1）反而镜像了物品。
+  // 内部物品：框口 0.4375 处，绕框法线按 ItemRotation × 45° 旋转。
+  // 框模型（template_item_frame）正面是 −z（+z 贴墙）。原版里 2D 物品/头颅的 item 模型
+  // fixed 显示旋转是 [0,180,0]（正面 +z 转 180° 后经框旋转正对玩家），方块物品则是 [0,0,0]
+  // （facing=north 正面已在 −z，经框旋转直接正对玩家）。这里按 userData.flip 区分两类。
   const item = entity.nbt?.Item
   if (item && item.id) {
     const itemMesh = await buildFrameItem(item, resolver, assets)
@@ -175,7 +175,8 @@ async function buildItemFrame(entity, id, assets) {
       const qflip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q)
       itemMesh.position.copy(anchor).addScaledVector(forward, 0.4375)
-      itemMesh.quaternion.copy(q).multiply(qflip).multiply(qz)
+      if (itemMesh.userData.flip) itemMesh.quaternion.copy(q).multiply(qflip).multiply(qz)
+      else itemMesh.quaternion.copy(q).multiply(qz)
       group.add(itemMesh)
     }
   }
@@ -184,19 +185,11 @@ async function buildItemFrame(entity, id, assets) {
 }
 
 // 方块物品解析用的默认属性。
-// 原版方块物品按 Block.getDefaultState() 渲染：普通（variants）方块要还原其默认状态——
-// 朝向类方块默认 facing=north；例外：观察者/投掷器/发射器=south（脸朝外）、避雷针/末地烛/木桶=up、
-// 漏斗=down、楼梯/活塞/铁砧=west（侧面朝相机）；合成器用 orientation=south_up（开口朝外）。
-// 轴类 axis=y、楼梯 half=bottom/shape=straight 等。
-// 之前这里统一传 axis:y，导致活塞/观察者/发射器等朝向类方块在展示框里朝向不对。
+// 原版方块物品按 Block.getDefaultState() 渲染（已反汇编 26.3 客户端确认）：
+// facing 类默认 north（熔炉/发射器/投掷器/活塞/铁砧/木桶/楼梯/箱子等），例外：观察者=south、
+// 避雷针/末地烛=up、漏斗=down；合成器用 orientation=north_up。轴类 axis=y、楼梯 half=bottom/shape=straight 等。
 // multipart 方块（墙/栅栏/玻璃板/铁栏杆等）需还原「孤立默认状态」——核心立柱可见、四周无连接。
 async function defaultItemProps(name, assets) {
-  // 箱子是方块实体渲染器（BER）：blockstates 里没有 facing 变体，走不到下面的 facing 分支。
-  // 这里直接给 single + facing=south，让锁扣（模型 +z 面）朝向观察者——等效原版 item 模型
-  // template_chest 的 fixed 旋转 [0,180,0]（默认 facing=north 正面 −z 再转 180° 到 +z）。
-  if (name === 'chest' || name.endsWith('_chest')) {
-    return { type: 'single', facing: 'south' }
-  }
   const bs = await assets.getJSON('blockstates/' + name + '.json')
   if (!bs) return {}
   if (!bs.multipart) {
@@ -205,17 +198,12 @@ async function defaultItemProps(name, assets) {
     for (const kv of firstKey.split(',')) {
       const [k, v] = kv.split('=')
       if (!k) continue
-      // 方块物品按 Block.getDefaultState() 渲染，但展示框里要「脸朝外」：
-      // 观察者/投掷器/发射器默认 south（正面朝观察者）、避雷针/末地烛/木桶默认 up、
-      // 漏斗默认 down；楼梯/活塞/铁砧这类「侧面才有辨识度」的方块默认 west（侧面朝相机）；
-      // 其余朝向类方块（熔炉等）默认 north（正面朝 −z，展示框里即背面朝观察者）。
       if (k === 'facing') props[k] =
-        name === 'observer' || name === 'dropper' || name === 'dispenser' ? 'south' :
-        name.endsWith('lightning_rod') || name === 'end_rod' || name === 'barrel' ? 'up' :
+        name === 'observer' ? 'south' :
+        name.endsWith('lightning_rod') || name === 'end_rod' ? 'up' :
         name === 'hopper' ? 'down' :
-        name.endsWith('_stairs') || name === 'piston' || name === 'sticky_piston' || name === 'anvil' ? 'west' :
         'north'
-      else if (k === 'orientation') props[k] = 'south_up' // 合成器（1.21 orientation 属性）开口朝观察者
+      else if (k === 'orientation') props[k] = 'north_up' // 合成器（1.21 orientation 属性）默认 north_up
       else if (k === 'axis') props[k] = 'y'
       else if (k === 'half') props[k] = 'bottom'
       else if (k === 'shape') props[k] = 'straight'
@@ -276,6 +264,7 @@ async function buildFrameItem(item, resolver, assets) {
         }
       }
       holder.scale.setScalar(0.5)
+      holder.userData.flip = true
       return holder
     }
   }
@@ -288,6 +277,7 @@ async function buildFrameItem(item, resolver, assets) {
       const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
       holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
       holder.scale.setScalar(0.5)
+      holder.userData.flip = true
       return holder
     }
   }
@@ -303,6 +293,7 @@ async function buildFrameItem(item, resolver, assets) {
         golem.position.y = -0.3125
         holder.add(golem)
         holder.scale.setScalar(0.5)
+        holder.userData.flip = true
         return holder
       }
     }
@@ -323,6 +314,8 @@ async function buildFrameItem(item, resolver, assets) {
     )
     holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
     holder.scale.setScalar(0.4)
+    // 头颅（headModel 正面在 +z，像 2D 物品）需要翻转；其余方块（facing=north 正面 −z）不需要
+    holder.userData.flip = name.endsWith('_head') || name.endsWith('_skull')
     return holder
   }
 
@@ -335,6 +328,7 @@ async function buildFrameItem(item, resolver, assets) {
     const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
     holder.scale.setScalar(0.5)
+    holder.userData.flip = true
     return holder
   }
   return null
