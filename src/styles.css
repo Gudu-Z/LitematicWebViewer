@@ -340,6 +340,11 @@ button.primary:hover {
   cursor: pointer;
 }
 
+.setting-row input[type='range'] {
+  flex: 1;
+  accent-color: #3b6fd4;
+}
+
 .settings-section-title {
   font-size: 13px;
   color: #aab;

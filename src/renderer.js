@@ -159,7 +159,7 @@ export class Renderer {
     // 移动双模式：orbit（环绕结构中心）/ fly（第一人称飞行）
     this.moveMode = 'orbit'
     this.moveSpeed = 1.0
-    this.lookSensitivity = 0.015 // 飞行模式转头灵敏度（rad/px）
+    this.lookSensitivity = 0.007 // 飞行模式转头灵敏度（rad/px）
     this._yaw = 0
     this._pitch = 0
     this.camera.rotation.order = 'YXZ'
@@ -429,7 +429,7 @@ export class Renderer {
   }
 
   setLookSensitivity(v) {
-    this.lookSensitivity = Math.min(0.05, Math.max(0.005, Number(v) || 0.015))
+    this.lookSensitivity = Math.min(0.05, Math.max(0.005, Number(v) || 0.007))
     this.onSensitivityChange?.(this.lookSensitivity)
   }
 
