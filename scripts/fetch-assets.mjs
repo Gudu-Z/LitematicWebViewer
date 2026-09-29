@@ -26,6 +26,7 @@ const PREFIXES = [
   'assets/minecraft/blockstates/',
   'assets/minecraft/models/block/',
   'assets/minecraft/models/item/', // 物品模型（区分 2D 物品贴图与 3D 方块图标）
+  'assets/minecraft/items/', // 物品模型定义（26.3 起：方块物品 → 具体 block 模型 / display.fixed 朝向）
   'assets/minecraft/textures/entity/', // 实体贴图（矿车等）
   'assets/minecraft/textures/item/', // 物品贴图（物品展示框内容）
 ]

@@ -34,6 +34,19 @@ function shortName(id) {
   return (id || '').replace(/^minecraft:/, '')
 }
 
+// display.fixed 旋转 [x,y,z]（度）→ 四元数。Minecraft 的显示变换按 X→Y→Z 依次左乘，
+// 即先绕 Z 再绕 Y 再绕 X；这里 q = Qx·Qy·Qz 复现之（对仅单轴的 [0,90,0]/[0,180,0] 无歧义）。
+function fixedRotQuaternion(rot) {
+  const [x, y, z] = (rot || [0, 0, 0]).map((d) => (Number(d) || 0) * DEG)
+  const q = new THREE.Quaternion()
+  if (x) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), x))
+  if (y) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), y))
+  if (z) q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), z))
+  return q
+}
+// 2D 物品/头颅/时钟等 item 模型 fixed 显示旋转均为 [0,180,0]
+const Q_FLIP = fixedRotQuaternion([0, 180, 0])
+
 // 把实体转成网格；不支持的实体返回 null
 export async function buildEntityMesh(entity, assets, data) {
   const id = shortName(entity.id)
@@ -163,20 +176,22 @@ async function buildItemFrame(entity, id, assets) {
   }
 
   // 内部物品：框口 0.4375 处，绕框法线按 ItemRotation × 45° 旋转。
-  // 框模型（template_item_frame）正面是 −z（+z 贴墙）。原版里 2D 物品/头颅的 item 模型
-  // fixed 显示旋转是 [0,180,0]（正面 +z 转 180° 后经框旋转正对玩家），方块物品则是 [0,0,0]
-  // （facing=north 正面已在 −z，经框旋转直接正对玩家）。这里按 userData.flip 区分两类。
+  // 框模型（template_item_frame）正面是 −z（+z 贴墙）。物品模型的 display.fixed 显示旋转
+  // （2D 物品/头颅 [0,180,0]，方块多为 [0,0,0]，铁砧 [0,90,0]）在框旋转之后、绕法线旋转之前
+  // 应用，故 quaternion = q · fixedRot · qz。每个 itemMesh 在 buildFrameItem 里把其模型
+  // display.fixed 旋转存进 userData.fixedRot。
   const item = entity.nbt?.Item
   if (item && item.id) {
     const itemMesh = await buildFrameItem(item, resolver, assets)
     if (itemMesh) {
       const rot = Number(entity.nbt?.ItemRotation) || 0
       const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rot * 45 * DEG)
-      const qflip = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), Math.PI)
+      const fixedRot = itemMesh.userData.fixedRot || null
       const forward = new THREE.Vector3(0, 0, 1).applyQuaternion(q)
       itemMesh.position.copy(anchor).addScaledVector(forward, 0.4375)
-      if (itemMesh.userData.flip) itemMesh.quaternion.copy(q).multiply(qflip).multiply(qz)
-      else itemMesh.quaternion.copy(q).multiply(qz)
+      itemMesh.quaternion.copy(q)
+      if (fixedRot) itemMesh.quaternion.multiply(fixedRot)
+      itemMesh.quaternion.multiply(qz)
       group.add(itemMesh)
     }
   }
@@ -265,7 +280,7 @@ async function buildFrameItem(item, resolver, assets) {
         }
       }
       holder.scale.setScalar(0.5)
-      holder.userData.flip = true
+      holder.userData.fixedRot = Q_FLIP
       return holder
     }
   }
@@ -278,7 +293,7 @@ async function buildFrameItem(item, resolver, assets) {
       const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
       holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
       holder.scale.setScalar(0.5)
-      holder.userData.flip = true
+      holder.userData.fixedRot = Q_FLIP
       return holder
     }
   }
@@ -294,15 +309,34 @@ async function buildFrameItem(item, resolver, assets) {
         golem.position.y = -0.3125
         holder.add(golem)
         holder.scale.setScalar(0.5)
-        holder.userData.flip = true
+        holder.userData.fixedRot = Q_FLIP
         return holder
       }
     }
   }
 
-  // 方块物品：3D 方块模型（原版展示框 scale 0.5 = 8px，方块是 3D 立方体显得偏大，这里用 0.4 略缩）
-  const props = await defaultItemProps(name, assets)
-  const baked = await resolver.resolve('minecraft:' + name, props)
+  // 方块物品：3D 方块模型（原版展示框 scale 0.5 = 8px，方块是 3D 立方体显得偏大，这里用 0.4 略缩）。
+  // 26.3 的物品模型定义在 items/NAME.json，指向一个具体的方块模型（如 block/piston_inventory、
+  // block/anvil），其几何朝向与 display.fixed 变换是烘焙好的——和 blockstate 的 registerDefaultState
+  // 无关（这正是「源码默认 north 但游戏里活塞头朝上 / 铁砧侧面」的根源）。这里直接解析该模型并
+  // 应用它的 display.fixed 旋转，得到与原版展示框完全一致的朝向。
+  const itemDef = await assets.getJSON('items/' + name + '.json')
+  const modelRef = itemDef?.model?.model
+  let baked = null
+  let fixedRot = null
+  if (typeof modelRef === 'string') {
+    const model = await resolver.loadModel(modelRef.replace(/^minecraft:/, ''))
+    if (model && model.elements) {
+      baked = bakeModel(model, { x: 0, y: 0 })
+      fixedRot = fixedRotQuaternion(model.display?.fixed?.rotation)
+    }
+  }
+  if (!baked || !baked.quads || !baked.quads.length) {
+    // 特殊方块（箱子/头颅/旗帜/潜影盒/装饰罐等 BER，无 JSON 几何）走 SPECIAL_MODELS
+    const props = await defaultItemProps(name, assets)
+    baked = await resolver.resolve('minecraft:' + name, props)
+    fixedRot = name.endsWith('_head') || name.endsWith('_skull') ? Q_FLIP : null
+  }
   if (baked && baked.quads && baked.quads.length) {
     const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
     const mats = new Map()
@@ -315,8 +349,7 @@ async function buildFrameItem(item, resolver, assets) {
     )
     holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
     holder.scale.setScalar(0.4)
-    // 头颅（headModel 正面在 +z，像 2D 物品）需要翻转；其余方块（facing=north 正面 −z）不需要
-    holder.userData.flip = name.endsWith('_head') || name.endsWith('_skull')
+    holder.userData.fixedRot = fixedRot
     return holder
   }
 
@@ -329,7 +362,7 @@ async function buildFrameItem(item, resolver, assets) {
     const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
     holder.scale.setScalar(0.5)
-    holder.userData.flip = true
+    holder.userData.fixedRot = Q_FLIP
     return holder
   }
   return null

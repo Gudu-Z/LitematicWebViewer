@@ -358,6 +358,7 @@ export class BlockModelResolver {
           ...json,
           textures: { ...(parent.textures || {}), ...(json.textures || {}) },
           elements: json.elements || parent.elements,
+          display: { ...(parent.display || {}), ...(json.display || {}) },
           parent: parent.parent,
         }
       }
