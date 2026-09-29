@@ -67,13 +67,15 @@ function yieldThread() {
 // 该面不可见。此外「同类互隐」（原版 isSideInvisible）只有玻璃、树叶这类方块才有：
 // 楼梯等方块即使邻居状态相同也不能剔面，否则楼梯之间会出现错误的镂空面。
 // 邻居越界视为空气（不剔除）。
-function faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid) {
+function faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible) {
   if (!q.cullface) return false
   const cf = q.cullface
   const nx = lx + cf[0]
   const ny = ly + cf[1]
   const nz = lz + cf[2]
   if (nx < 0 || nx >= grid.W || ny < 0 || ny >= grid.H || nz < 0 || nz >= grid.D) return false
+  // 被层级/区域过滤掉的邻居按空气处理，不遮挡当前面（否则切片边界会错误剔面）
+  if (visible && !visible(nx, ny, nz)) return false
   const ngi = blocks.get(nx + nz * grid.W + ny * grid.strideY)
   return ngi !== undefined && (occludes[ngi] || (ngi === gi && hideSame[ngi]))
 }
@@ -123,7 +125,7 @@ function fullFaceMask(quads) {
 // 只统计同种流体邻居（空气/异种流体不贡献水平流速），因此：
 //   - 流动水/岩浆：流向更低处；
 //   - 水源方块：在「喂给旁边流动水」时也有流向，静止水体则无流向。
-function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind) {
+function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible) {
   const selfH = fluidHeight(fluidOf[gi].level)
   let vx = 0
   let vz = 0
@@ -131,6 +133,7 @@ function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind) {
     const nx = lx + dx
     const nz = lz + dz
     if (nx < 0 || nx >= grid.W || nz < 0 || nz >= grid.D) return undefined
+    if (visible && !visible(nx, ly, nz)) return undefined
     return blocks.get(nx + nz * grid.W + ly * grid.strideY)
   }
   for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
@@ -177,19 +180,20 @@ function bubbleScatter(lx, ly, lz) {
 //     任一相邻高度 ≥ 1 时角点直接取 1。
 //     相邻方块计算同一世界坐标角点时的数值集合相同，因此表面连续，不会出现台阶。
 // selfMask：含水方块自身「满覆盖」面的位掩码，用于剔除被自身实体面挡住的水面。
-function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMask, record) {
+function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMask, visible, record) {
   const info = fluidOf[gi]
   const kind = info.kind
   const isLava = kind === 'lava'
   const stillTex = isLava ? 'block/lava_still' : 'block/water_still'
   const flowTex = isLava ? 'block/lava_flow' : 'block/water_flow'
 
-  // 越界安全的邻居读取
+  // 越界安全的邻居读取（被层级/区域过滤掉的邻居按空气处理）
   const get = (dx, dy, dz) => {
     const nx = lx + dx
     const ny = ly + dy
     const nz = lz + dz
     if (nx < 0 || nx >= grid.W || ny < 0 || ny >= grid.H || nz < 0 || nz >= grid.D) return undefined
+    if (visible && !visible(nx, ny, nz)) return undefined
     return blocks.get(nx + nz * grid.W + ny * grid.strideY)
   }
   const giName = (gi2) => (gi2 === undefined ? '' : shortName(palette[gi2].name))
@@ -273,7 +277,7 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
   if (topShown) {
     // 顶面：有水平流速时用 flow 贴图并按流向旋转（水源、流动水、岩浆都适用）；
     // 无流速（静止水体）用 still 贴图。原版正是按 getVelocity 的 x/z 分量是否为零来切换。
-    const angle = flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind)
+    const angle = flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible)
     let topTex = stillTex
     let topUVs = [[0, 1], [1, 1], [0, 0], [1, 0]]
     if (angle !== null) {
@@ -366,6 +370,10 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
   const minY = bounds.minY
   const minZ = bounds.minZ
 
+  // 邻居可见性：被层级/区域过滤掉的方块按空气处理（用于剔面/流体判断）。
+  // 传入的是局部坐标，转成世界坐标再交给 filter（filter 的签名是 (x,y,z,ly)）。
+  const visible = filter ? (lx, ly, lz) => filter(lx + minX, ly + minY, lz + minZ, ly) : null
+
   const renderable = new Uint8Array(palette.length)
   const occludes = new Uint8Array(palette.length)
   const hideSame = new Uint8Array(palette.length)
@@ -423,7 +431,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     const finfo = fluidOf[gi]
     if (finfo) {
       // 流体（水/岩浆/气泡柱/含水方块的内部水体）
-      emitted += emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], (texKey) => {
+      emitted += emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], visible, (texKey) => {
         counts.set(texKey, (counts.get(texKey) || 0) + 1)
       })
       if (!finfo.waterlogged) continue // 纯流体：不再渲染方块自身
@@ -431,7 +439,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     }
     if (!renderable[gi]) continue
     for (const q of quadsByPalette[gi]) {
-      if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid)) continue
+      if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
       const gKey = faceKey(palette, gi, q)
       counts.set(gKey, (counts.get(gKey) || 0) + 1)
       emitted++
@@ -469,7 +477,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     if (filter && !filter(x, y, z, ly)) continue
     const finfo = fluidOf[gi]
     if (finfo) {
-      emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], (texKey, pos, uvs) => {
+      emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], visible, (texKey, pos, uvs) => {
         const g = groups.get(texKey)
         if (texKey === 'particle/bubble') {
           g.positions[g.v] = pos[0]
@@ -484,7 +492,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     }
     if (!renderable[gi]) continue
     for (const q of quadsByPalette[gi]) {
-      if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid)) continue
+      if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
       const gKey = faceKey(palette, gi, q)
       writeFace(groups.get(gKey), q.verts, q.uvs, x, y, z)
     }
