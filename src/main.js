@@ -343,6 +343,11 @@ async function toggleRegion(name) {
 // 调整当前层（delta = ±1）
 async function changeLayer(delta) {
   if (!currentData) return
+  // 在「全部渲染」模式下按上/下一层，自动切到「下方/上方」模式
+  if (view.renderMode === 'all') {
+    view.renderMode = delta > 0 ? 'below' : 'above'
+    setRenderModeControl(view.renderMode)
+  }
   const b = currentData.bounds
   view.layerY = Math.max(b.minY, Math.min(b.maxY, view.layerY + delta))
   ui.setLayerLabel(view.layerY)
