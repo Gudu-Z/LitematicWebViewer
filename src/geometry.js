@@ -25,10 +25,13 @@ export function isSkipBlock(name) {
 
 // 透明方块：不遮挡邻居，但仍以 alphaTest 方式渲染出边框/树叶。
 // 格栅（铜格栅）、铁栏杆、锁链等是 TransparentBlock（cutout 纹理有洞），同样不遮挡。
+// 红树根/泥泞红树根（_roots）是「满覆盖 cutout」方块：六个面都是满 16×16 但纹理有洞，
+// 含水时水要透出来，不能被 fullFaceMask 当实心面整体剔除（否则含水红树根完全不显示水）。
 export function isTransparent(name) {
   const n = shortName(name)
   return n.endsWith('_leaves') || n.includes('glass') || n === 'ice' || n === 'water' || n === 'lava' || n === 'bubble_column'
     || n.endsWith('_grate') || n.endsWith('_bars') || n === 'chain' || n.endsWith('_chain') || n === 'tripwire'
+    || n.endsWith('_roots')
 }
 
 // 红石粉的线/点贴图需要按信号强度分别染色
