@@ -441,6 +441,12 @@ button.primary:hover {
   padding: 4px 0;
 }
 
+.control-row button#locateBtn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 4px 8px;
+}
+
 #speedSlider {
   flex: 1;
   accent-color: #3b6fd4;

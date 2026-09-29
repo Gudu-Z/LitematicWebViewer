@@ -113,6 +113,11 @@ if (renderer) {
   // 左侧：上/下一层
   document.getElementById('layerUpBtn').addEventListener('click', () => changeLayer(1))
   document.getElementById('layerDownBtn').addEventListener('click', () => changeLayer(-1))
+  // 左侧：定位到当前层
+  document.getElementById('locateBtn').addEventListener('click', () => {
+    if (!currentData) return
+    renderer.focusLayer(view.layerY)
+  })
 
   // 设置：显示实体 / 区域线框 / 尺寸
   document.getElementById('showEntities').addEventListener('change', (e) => {
