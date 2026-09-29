@@ -5,7 +5,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildFaceGroups } from './geometry.js'
-import { buildEntityMesh } from './entities.js'
+import { buildEntityMesh, buildCopperGolemStatueMesh } from './entities.js'
 import { bakeModel } from './modelBaker.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
@@ -21,8 +21,10 @@ const DYE_COLORS = {
   brown: '#835432', green: '#5e7c16', red: '#b02e26', black: '#000000',
 }
 
-// 墙上旗帜 facing -> 旗面朝向角（度）
-const BANNER_FACING_Y = { north: 180, south: 0, east: -90, west: 90 }
+// 墙上旗帜 facing -> 旗面朝向角（three.js 的 rotation.y，逆时针为正）
+const BANNER_FACING_Y = { north: 180, south: 0, east: 90, west: -90 }
+// 墙上旗帜 facing -> 方向向量（旗面贴在 facing 反方向的墙上）
+const BANNER_FACING_DIRS = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0] }
 
 // 旗帜旗面几何（20×40 px = 1.25×2.5 格），UV v=0 在上（MC 约定，配合 flipY=false 贴图）
 function bannerFlagGeometry() {
@@ -176,6 +178,9 @@ export class Renderer {
 
     this.bannersGroup = new THREE.Group() // 旗帜旗面（底色 + 图案，每个实例单独绘制）
     this.scene.add(this.bannersGroup)
+
+    this.statuesGroup = new THREE.Group() // 铜傀儡雕像（BER 绘制）
+    this.scene.add(this.statuesGroup)
 
     this.entitiesGroup = new THREE.Group() // 实体（矿车、物品展示框等）
     this.scene.add(this.entitiesGroup)
@@ -351,6 +356,7 @@ export class Renderer {
     this.clearSigns()
     this.clearHeads()
     this.clearBanners()
+    this.clearStatues()
     this.clearEntities()
   }
 
@@ -398,6 +404,20 @@ export class Renderer {
             m.dispose()
           }
         })
+      })
+    }
+  }
+
+  clearStatues() {
+    while (this.statuesGroup.children.length) {
+      const child = this.statuesGroup.children.pop()
+      child.geometry?.dispose()
+      const mats = Array.isArray(child.material) ? child.material : [child.material]
+      mats.forEach((m) => {
+        if (m) {
+          m.map?.dispose()
+          m.dispose()
+        }
       })
     }
   }
@@ -459,10 +479,34 @@ export class Renderer {
       mesh.position.z = 0.12 // 旗面在杆/墙架的前方
       const group = new THREE.Group()
       group.add(mesh)
-      group.position.set(b.x + 0.5, b.y + 0.4, b.z + 0.5)
-      if (b.facing) group.rotation.y = ((BANNER_FACING_Y[b.facing] ?? 0) * Math.PI) / 180
-      else group.rotation.y = ((Number(b.rotation) || 0) * 22.5 * Math.PI) / 180
+      if (b.facing) {
+        // 墙上旗帜：旗面贴在 facing 反方向的墙上（与告示牌文字同一条偏移）
+        const d = BANNER_FACING_DIRS[b.facing] || [0, 0, 1]
+        group.position.set(b.x + 0.5 - d[0] * 0.44, b.y + 0.4, b.z + 0.5 - d[2] * 0.44)
+        group.rotation.y = ((BANNER_FACING_Y[b.facing] ?? 0) * Math.PI) / 180
+      } else {
+        // 立地旗帜：旗面绕杆旋转（与告示牌同一条 rotation 公式，顺时针 22.5°/级）
+        const rot = Number(b.rotation) || 0
+        const a = -22.5 * (rot % 4) - 90 * Math.floor(rot / 4)
+        group.position.set(b.x + 0.5, b.y + 0.4, b.z + 0.5)
+        group.rotation.y = (a * Math.PI) / 180
+      }
       this.bannersGroup.add(group)
+    }
+  }
+
+  // 渲染铜傀儡雕像（BER 绘制，无 JSON 模型）。statues: [{x, y, z, facing, texKey}]
+  async renderStatues(statues, assets) {
+    this.clearStatues()
+    if (!statues || !statues.length) return
+    for (const s of statues) {
+      const tex = await assets.getTexture(s.texKey)
+      if (!tex) continue
+      const mesh = buildCopperGolemStatueMesh(tex)
+      if (!mesh) continue
+      mesh.position.set(s.x + 0.5, s.y + 0.05, s.z + 0.5)
+      mesh.rotation.y = ((BANNER_FACING_Y[s.facing] ?? 0) * Math.PI) / 180
+      this.statuesGroup.add(mesh)
     }
   }
 

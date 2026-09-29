@@ -224,6 +224,7 @@ async function openFile(file) {
     await renderCurrentSigns()
     await renderCurrentPlayerHeads()
     await renderCurrentBanners()
+    await renderCurrentStatues()
     await renderCurrentEntities()
     ui.showMetadata(data.metadata)
     updateRegionUI()
@@ -265,6 +266,7 @@ async function reRenderCurrent() {
   await renderCurrentSigns()
   await renderCurrentPlayerHeads()
   await renderCurrentBanners()
+  await renderCurrentStatues()
   await renderCurrentEntities()
 }
 
@@ -294,6 +296,12 @@ async function renderCurrentBanners() {
   if (!currentData || !renderer) return
   const tes = filterByRegion(currentData.tileEntities || [])
   await renderer.renderBanners(extractBanners(tes, currentData), assets)
+}
+
+// 渲染当前结构里的铜傀儡雕像
+async function renderCurrentStatues() {
+  if (!currentData || !renderer) return
+  await renderer.renderStatues(extractStatues(currentData), assets)
 }
 
 // 区域是否可见（visibleRegions 为 null 表示全部可见）
@@ -356,6 +364,7 @@ async function toggleRegion(name) {
   await renderCurrentSigns()
   await renderCurrentPlayerHeads()
   await renderCurrentBanners()
+  await renderCurrentStatues()
   await renderCurrentEntities()
 }
 
@@ -494,6 +503,25 @@ function extractBanners(tileEntities, data) {
     })
   }
   return banners
+}
+
+// 从方块中提取铜傀儡雕像：{x, y, z, facing, texKey}
+function extractStatues(data) {
+  const statues = []
+  const b = data.bounds
+  const W = b.width
+  const strideY = W * b.depth
+  for (const [key, gi] of data.blocks) {
+    const p = data.palette[gi]
+    const name = (p.name || '').replace(/^minecraft:/, '')
+    if (!name.endsWith('_copper_golem_statue')) continue
+    const lx = key % W
+    const lz = Math.floor(key / W) % b.depth
+    const ly = Math.floor(key / strideY)
+    const tex = 'entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : '')
+    statues.push({ x: lx + b.minX, y: ly + b.minY, z: lz + b.minZ, facing: p.properties?.facing, texKey: tex })
+  }
+  return statues
 }
 
 // 把 JSON 文本组件转成纯文本（简化处理）

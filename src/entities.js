@@ -489,7 +489,7 @@ function rotPoint(pt, rot) {
 const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 
 // 编译实体模型为 world 坐标 quad 列表（Y 向上、脚底 y=0、前向 +z）
-function compileModel(model) {
+export function compileModel(model) {
   const { w, h, parts } = model
   const quads = []
   const walk = (node, toModel, toDir) => {
@@ -514,7 +514,7 @@ function compileModel(model) {
 }
 
 // quads -> 单一材质网格
-function quadsToEntityMesh(quads, mat) {
+export function quadsToEntityMesh(quads, mat) {
   const n = quads.length
   const positions = new Float32Array(n * 12)
   const uvs = new Float32Array(n * 8)
@@ -544,6 +544,18 @@ function quadsToEntityMesh(quads, mat) {
   geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
   geo.setIndex(new THREE.BufferAttribute(indices, 1))
   return new THREE.Mesh(geo, mat)
+}
+
+// 铜傀儡雕像：BER 绘制（无 JSON 模型），用铜傀儡实体模型渲染成缩小雕像。
+// 实体模型约 1.5 格高，缩到 0.6 倍后脚底贴方块底部。返回的 mesh 前向为 +z。
+export function buildCopperGolemStatueMesh(tex) {
+  const model = EXTRA_MODELS.CopperGolemEntityModel
+  if (!model || !tex) return null
+  const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
+  const mesh = quadsToEntityMesh(compileModel(model), mat)
+  mesh.scale.setScalar(0.6)
+  mesh.position.y = 0.05
+  return mesh
 }
 
 // 生物实体 id -> [模型键, 贴图键]

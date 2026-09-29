@@ -277,22 +277,7 @@ function potModel() {
 }
 SPECIAL_MODELS.decorated_pot = (p) => ({ model: potModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 16 })
 
-// 铜傀儡雕像：简化为「身体 + 头」两段立方体（用对应氧化的铜傀儡贴图）
-function golemStatueModel(texKey) {
-  const f = { uv: [0, 0, 64, 64], texture: '#all' }
-  return {
-    textures: { all: texKey },
-    elements: [
-      { from: [3, 4, 3], to: [13, 15, 13], faces: { up: f, down: f, north: f, south: f, west: f, east: f } },
-      { from: [4, 15, 4], to: [12, 23, 12], faces: { up: f, down: f, north: f, south: f, west: f, east: f } },
-    ],
-  }
-}
-const GOLEM_STATUES = ['copper_golem_statue', 'exposed_copper_golem_statue', 'weathered_copper_golem_statue', 'oxidized_copper_golem_statue', 'waxed_copper_golem_statue', 'waxed_exposed_copper_golem_statue', 'waxed_weathered_copper_golem_statue', 'waxed_oxidized_copper_golem_statue']
-for (const name of GOLEM_STATUES) {
-  const tex = 'entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : '')
-  SPECIAL_MODELS[name] = (p) => ({ model: golemStatueModel(tex), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 64 })
-}
+// 铜傀儡雕像：无 JSON 模型（BER 绘制），由 renderer.renderStatues 用实体模型逐块绘制
 
 export class BlockModelResolver {
   constructor(assets) {
