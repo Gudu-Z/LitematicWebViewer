@@ -13,20 +13,35 @@ const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftR
 // 墙上告示牌的 facing -> 方向向量（文字朝向）
 const SIGN_FACING = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0] }
 
-// 玩家头颅模型（8×8×8 立方，皮肤 64×64 布局），与 blocks.js 的 headModel 一致
+// 玩家头颅模型（皮肤 64×64 布局）。与 vanilla HeadModel 一致：底层头 + 帽子层
+// （第二层，UV 在皮肤头部区域的第二列 +32，比底层稍大 0.25 像素）。帽子层透明处
+// 由 alphaTest 裁掉，无帽子的皮肤自然只显示底层。
 const HEAD_MODEL = {
   textures: { all: 'head' },
-  elements: [{
-    from: [4, 4, 4], to: [12, 12, 12],
-    faces: {
-      up: { uv: [8, 0, 16, 8], texture: '#all' },
-      down: { uv: [16, 0, 24, 8], texture: '#all' },
-      east: { uv: [0, 8, 8, 16], texture: '#all' },
-      south: { uv: [8, 8, 16, 16], texture: '#all' },
-      west: { uv: [16, 8, 24, 16], texture: '#all' },
-      north: { uv: [24, 8, 32, 16], texture: '#all' },
+  elements: [
+    { // 底层头
+      from: [4, 4, 4], to: [12, 12, 12],
+      faces: {
+        up: { uv: [8, 0, 16, 8], texture: '#all' },
+        down: { uv: [16, 0, 24, 8], texture: '#all' },
+        east: { uv: [0, 8, 8, 16], texture: '#all' },
+        south: { uv: [8, 8, 16, 16], texture: '#all' },
+        west: { uv: [16, 8, 24, 16], texture: '#all' },
+        north: { uv: [24, 8, 32, 16], texture: '#all' },
+      },
     },
-  }],
+    { // 帽子层（第二层，稍大 0.25）
+      from: [3.75, 3.75, 3.75], to: [12.25, 12.25, 12.25],
+      faces: {
+        up: { uv: [40, 0, 48, 8], texture: '#all' },
+        down: { uv: [48, 0, 56, 8], texture: '#all' },
+        east: { uv: [32, 8, 40, 16], texture: '#all' },
+        south: { uv: [40, 8, 48, 16], texture: '#all' },
+        west: { uv: [48, 8, 56, 16], texture: '#all' },
+        north: { uv: [56, 8, 64, 16], texture: '#all' },
+      },
+    },
+  ],
 }
 const HEAD_FACING_Y = { north: 180, south: 0, east: -90, west: 90 }
 
