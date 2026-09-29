@@ -343,13 +343,16 @@ async function toggleRegion(name) {
 // 调整当前层（delta = ±1）
 async function changeLayer(delta) {
   if (!currentData) return
-  // 在「全部渲染」模式下按上/下一层，自动切到「上方/下方」模式
+  const b = currentData.bounds
   if (view.renderMode === 'all') {
+    // 在「全部渲染」模式下按上/下一层，自动切到「上方/下方」模式，
+    // 并从结构最远端开始：上方→最底层，下方→最高层（首次显示全貌）
     view.renderMode = delta > 0 ? 'above' : 'below'
     setRenderModeControl(view.renderMode)
+    view.layerY = delta > 0 ? b.minY : b.maxY
+  } else {
+    view.layerY = Math.max(b.minY, Math.min(b.maxY, view.layerY + delta))
   }
-  const b = currentData.bounds
-  view.layerY = Math.max(b.minY, Math.min(b.maxY, view.layerY + delta))
   ui.setLayerLabel(view.layerY)
   await reRenderBlocks()
 }
