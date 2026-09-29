@@ -359,6 +359,7 @@ async function buildFrameItem(item, resolver, assets) {
   let baked = null
   let fixedRot = null
   let fixedTrans = null
+  let fixedScale = null
   if (modelDefs.length) {
     const parts = []
     let fixed = null
@@ -387,6 +388,7 @@ async function buildFrameItem(item, resolver, assets) {
         fixedRot = fixedRotQuaternion(fixed.rotation)
         const t = fixed.translation || [0, 0, 0]
         fixedTrans = [Number(t[0]) / 16, Number(t[1]) / 16, Number(t[2]) / 16]
+        fixedScale = fixed.scale || null
       }
     }
   }
@@ -408,7 +410,11 @@ async function buildFrameItem(item, resolver, assets) {
     )
     const center = baked.center || [-0.5, -0.5, -0.5]
     holder.add(quadsToMesh(baked.quads, center, (tk) => mats.get(tk)))
-    holder.scale.setScalar(0.4)
+    // 展示框物品总缩放 = 框体 0.5 × 模型 display.fixed 缩放（方块/床/铁砧等 0.5 → 0.25；头颅/盾牌等 1 → 0.5）。
+    // 特殊 BER 方块（SPECIAL_MODELS）几何已按原版外观手工定死，fixedScale 为 null 时保持 0.4 略缩。
+    const fs = fixedScale || [1, 1, 1]
+    const base = fixedScale ? 0.5 : 0.4
+    holder.scale.set((Number(fs[0]) || 1) * base, (Number(fs[1]) || 1) * base, (Number(fs[2]) || 1) * base)
     holder.userData.fixedRot = fixedRot
     holder.userData.fixedTrans = fixedTrans || null
     return holder

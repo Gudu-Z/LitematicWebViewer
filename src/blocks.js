@@ -284,23 +284,28 @@ function potModel() {
 SPECIAL_MODELS.decorated_pot = (p) => ({ model: potModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 16 })
 
 // 潮涌核心（BER，无 JSON 几何）：原版 ConduitRenderer 用 entity/conduit/base(32×16 壳)、
-// cage(32×16 笼)、closed_eye(16×16 眼)。这里简化为满立方体贴壳纹理（取 32×16 的左半 16×16）。
-// 展示框里以方块形式出现。
+// cage(32×16 笼)、closed_eye(16×16 眼)。这里简化为满立方体贴壳纹理 + 中央眼立方体。
+// 壳用 32×16 左半（u0..16 圆顶/环带），眼用整张 16×16（uv 写 32×16 使归一化到 [0,1]）。
 function conduitModel() {
   const shell = { uv: [0, 0, 16, 16], texture: '#shell' }
+  const eye = { uv: [0, 0, 32, 16], texture: '#eye' }
   return {
-    textures: { shell: 'entity/conduit/base' },
-    elements: [{ from: [0, 0, 0], to: [16, 16, 16], faces: { up: shell, down: shell, north: shell, south: shell, west: shell, east: shell } }],
+    textures: { shell: 'entity/conduit/base', eye: 'entity/conduit/closed_eye' },
+    elements: [
+      { from: [0, 0, 0], to: [16, 16, 16], faces: { up: shell, down: shell, north: shell, south: shell, west: shell, east: shell } },
+      { from: [6, 6, 6], to: [10, 10, 10], faces: { up: eye, down: eye, north: eye, south: eye, west: eye, east: eye } },
+    ],
   }
 }
 SPECIAL_MODELS.conduit = () => ({ model: conduitModel(), variant: {}, texSize: [32, 16] })
 
-// 盾牌（BER）：简化为薄板贴无图案木盾（64×64 贴图整体贴到正面）。展示框里 fixed 旋转 [0,180,0]。
+// 盾牌（BER）：简化为竖长的薄板（约 12×16）贴无图案木盾（64×64 贴图整体贴到正反面）。
+// 展示框里 fixed 旋转 [0,180,0]。
 function shieldModel() {
   const tex = { uv: [0, 0, 64, 64], texture: '#all' }
   return {
     textures: { all: 'entity/shield/shield_base_nopattern' },
-    elements: [{ from: [2, 2, 7.5], to: [14, 14, 8.5], faces: { up: tex, down: tex, north: tex, south: tex, west: tex, east: tex } }],
+    elements: [{ from: [2, 0, 7.5], to: [14, 16, 8.5], faces: { up: tex, down: tex, north: tex, south: tex, west: tex, east: tex } }],
   }
 }
 SPECIAL_MODELS.shield = () => ({ model: shieldModel(), variant: {}, texSize: 64 })
