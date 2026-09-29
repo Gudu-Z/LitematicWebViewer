@@ -12,6 +12,8 @@ export class UI {
     this.moveModeBtn = root.querySelector('#moveModeBtn')
     this.speedSlider = root.querySelector('#speedSlider')
     this.speedValue = root.querySelector('#speedValue')
+    this.sensitivitySlider = root.querySelector('#sensitivitySlider')
+    this.sensitivityValue = root.querySelector('#sensitivityValue')
     this.layerValue = root.querySelector('#layerValue')
     this.regionListEl = root.querySelector('#regionList')
     this.regionListBody = root.querySelector('#regionListBody')
@@ -78,6 +80,13 @@ export class UI {
     const v = Math.round(Number(value) * 100) / 100
     if (this.speedSlider) this.speedSlider.value = String(v)
     if (this.speedValue) this.speedValue.textContent = v.toFixed(1) + '×'
+  }
+
+  // 同步灵敏度滑块与数值显示
+  setSensitivity(value) {
+    const v = Math.round(Number(value) * 1000) / 1000
+    if (this.sensitivitySlider) this.sensitivitySlider.value = String(v)
+    if (this.sensitivityValue) this.sensitivityValue.textContent = String(v)
   }
 
   // 更新当前层显示

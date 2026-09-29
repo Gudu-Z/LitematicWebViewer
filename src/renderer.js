@@ -159,11 +159,13 @@ export class Renderer {
     // 移动双模式：orbit（环绕结构中心）/ fly（第一人称飞行）
     this.moveMode = 'orbit'
     this.moveSpeed = 1.0
+    this.lookSensitivity = 0.015 // 飞行模式转头灵敏度（rad/px）
     this._yaw = 0
     this._pitch = 0
     this.camera.rotation.order = 'YXZ'
     this.onMoveModeChange = null // 由 main.js 设置，用于同步左侧 UI
     this.onSpeedChange = null
+    this.onSensitivityChange = null
     this.onFirstMoveKey = null // WASD 首次按下时回调，切到飞行模式
 
     // WASD 移动
@@ -202,8 +204,8 @@ export class Renderer {
       const dy = e.clientY - this._flyLast.y
       this._flyLast = { x: e.clientX, y: e.clientY }
       if (this._flyDragging === 'look') {
-        this._yaw -= dx * 0.01
-        this._pitch -= dy * 0.01
+        this._yaw -= dx * this.lookSensitivity
+        this._pitch -= dy * this.lookSensitivity
         const max = Math.PI / 2 - 0.001
         this._pitch = Math.max(-max, Math.min(max, this._pitch))
         this._applyFlyRotation()
@@ -424,6 +426,11 @@ export class Renderer {
   setMoveSpeed(speed) {
     this.moveSpeed = Math.min(10, Math.max(0.1, Number(speed) || 1))
     this.onSpeedChange?.(this.moveSpeed)
+  }
+
+  setLookSensitivity(v) {
+    this.lookSensitivity = Math.min(0.05, Math.max(0.005, Number(v) || 0.015))
+    this.onSensitivityChange?.(this.lookSensitivity)
   }
 
   // —— 显示开关 ——

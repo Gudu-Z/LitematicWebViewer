@@ -94,6 +94,7 @@ document.getElementById('bgColor').addEventListener('input', (e) => {
 if (renderer) {
   renderer.onMoveModeChange = (mode) => ui.setMoveModeLabel(mode)
   renderer.onSpeedChange = (speed) => ui.setSpeed(speed)
+  renderer.onSensitivityChange = (v) => ui.setSensitivity(v)
   // 首次按 WASD 自动切到飞行模式
   renderer.onFirstMoveKey = () => renderer.setMoveMode('fly')
 
@@ -104,6 +105,10 @@ if (renderer) {
   // 左侧：速度滑块
   document.getElementById('speedSlider').addEventListener('input', (e) => {
     renderer.setMoveSpeed(Number(e.target.value))
+  })
+  // 左侧：灵敏度滑块
+  document.getElementById('sensitivitySlider').addEventListener('input', (e) => {
+    renderer.setLookSensitivity(Number(e.target.value))
   })
   // 左侧：上/下一层
   document.getElementById('layerUpBtn').addEventListener('click', () => changeLayer(1))
