@@ -184,10 +184,17 @@ async function buildItemFrame(entity, id, assets) {
 
 // 方块物品解析用的默认属性。
 // 原版方块物品按 Block.getDefaultState() 渲染：普通（variants）方块要还原其默认状态——
-// 朝向类方块默认 facing=north（观察者 observer 例外为 south）、轴类 axis=y、楼梯 half=bottom/shape=straight 等；
+// 朝向类方块在 item 帧里正面朝观察者（+z），故取 facing=south；例外：观察者 observer=south、
+// 避雷针/末地烛=up、漏斗=down、楼梯=east。轴类 axis=y、楼梯 half=bottom/shape=straight 等。
 // 之前这里统一传 axis:y，导致活塞/观察者/发射器等朝向类方块在展示框里朝向不对。
 // multipart 方块（墙/栅栏/玻璃板/铁栏杆等）需还原「孤立默认状态」——核心立柱可见、四周无连接。
 async function defaultItemProps(name, assets) {
+  // 箱子是方块实体渲染器（BER）：blockstates 里没有 facing 变体，走不到下面的 facing 分支。
+  // 这里直接给 single + facing=south，让锁扣（模型 +z 面）朝向观察者——等效原版 item 模型
+  // template_chest 的 fixed 旋转 [0,180,0]（默认 facing=north 正面 −z 再转 180° 到 +z）。
+  if (name === 'chest' || name.endsWith('_chest')) {
+    return { type: 'single', facing: 'south' }
+  }
   const bs = await assets.getJSON('blockstates/' + name + '.json')
   if (!bs) return {}
   if (!bs.multipart) {
@@ -196,7 +203,15 @@ async function defaultItemProps(name, assets) {
     for (const kv of firstKey.split(',')) {
       const [k, v] = kv.split('=')
       if (!k) continue
-      if (k === 'facing') props[k] = name === 'observer' ? 'south' : name === 'lightning_rod' ? 'up' : 'north'
+      // 方块物品按 Block.getDefaultState() 渲染：观察者默认 south、避雷针/末地烛默认 up、
+      // 漏斗默认 down、楼梯默认 east；其余朝向类方块（熔炉/发射器/活塞等）正面朝 +z，
+      // 在 item 帧里即朝向观察者（配合下方 buildFrameItem 的 180° Y 翻转）。
+      if (k === 'facing') props[k] =
+        name === 'observer' ? 'south' :
+        name.endsWith('lightning_rod') || name === 'end_rod' ? 'up' :
+        name === 'hopper' ? 'down' :
+        name.endsWith('_stairs') ? 'east' :
+        'south'
       else if (k === 'axis') props[k] = 'y'
       else if (k === 'half') props[k] = 'bottom'
       else if (k === 'shape') props[k] = 'straight'
@@ -244,9 +259,9 @@ async function buildFrameItem(item, resolver, assets) {
     }
   }
 
-  // 时钟/指南针：特殊物品（无 JSON 模型，纹理是逐帧的 clock_00..63 / compass_00..31）。
-  // 静态预览里渲染第一帧（时钟 00=正午、指南针 00=朝北）。
-  if (name === 'clock' || name === 'compass') {
+  // 时钟/指南针/追溯指针：特殊物品（无 JSON 模型，纹理是逐帧的 *_00..NN）。
+  // 静态预览里渲染第一帧（时钟 00=正午、指南针/追溯指针 00=初始朝向）。
+  if (name === 'clock' || name === 'compass' || name === 'recovery_compass') {
     const tex = await assets.getTexture('item/' + name + '_00')
     if (tex) {
       const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
