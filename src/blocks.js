@@ -133,6 +133,23 @@ function headModel(texKey, scale) {
   }
 }
 
+// 猪灵头：原版 PiglinModel.addHead 的头是 10×8×8（比标准 8×8×8 宽），并带左右尖耳。
+// 头 UV 同标准玩家头（脸 u8..16/v8..16），耳在皮肤 u40..48/v0..8。这里简化：10×8×8 头 + 两只尖耳。
+function piglinHeadModel() {
+  const f = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#all' })
+  const ear = (x0, x1) => ({ from: [x0, 10, 4], to: [x1, 14, 6], faces: { up: f(40, 0, 48, 8), down: f(40, 0, 48, 8), north: f(40, 0, 48, 8), south: f(40, 0, 48, 8), west: f(40, 0, 48, 8), east: f(40, 0, 48, 8) } })
+  return {
+    textures: { all: 'entity/piglin/piglin' },
+    elements: [
+      { from: [3, 4, 4], to: [13, 12, 12], faces: {
+          up: f(8, 0, 16, 8), down: f(16, 0, 24, 8),
+          east: f(0, 8, 8, 16), south: f(8, 8, 16, 16), west: f(16, 8, 24, 16), north: f(24, 8, 32, 16),
+      } },
+      ear(3, 6), ear(10, 13),
+    ],
+  }
+}
+
 // 流体（水/岩浆）：level 决定水面高度。0=满格；1-7 每级下降 2px；8+（下落）近似薄层。
 function fluidModel(texKey, level) {
   const lvl = Number(level) || 0
@@ -221,6 +238,9 @@ for (const [name, info] of Object.entries(HEAD_TYPES)) {
   SPECIAL_MODELS[name] = (p) => ({ model: headModel(info.tex, info.scale), variant: headVariant(p, false), texSize: info.texSize })
   SPECIAL_MODELS[info.wall] = (p) => ({ model: headModel(info.tex, info.scale), variant: headVariant(p, true), texSize: info.texSize })
 }
+// 猪灵头有左右耳，用专门模型覆盖
+SPECIAL_MODELS.piglin_head = (p) => ({ model: piglinHeadModel(), variant: headVariant(p, false), texSize: 64 })
+SPECIAL_MODELS.piglin_wall_head = (p) => ({ model: piglinHeadModel(), variant: headVariant(p, true), texSize: 64 })
 
 // —— 26.x 起改为「方块实体渲染器」的方块：JSON 模型为空（仅 particle），这里手工构造几何 ——
 
@@ -252,7 +272,7 @@ function bannerModel() {
     textures: { plank: 'block/oak_planks', flag: 'entity/banner/base' },
     elements: [
       { from: [7, 8, 7], to: [9, 36, 9], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
-      { from: [9, 8, 7.25], to: [22.33, 36, 8.75], faces: { north: flag, south: flag, up: flag, down: flag, west: flag, east: flag } },
+      { from: [9, 8, 6], to: [22.33, 36, 7], faces: { north: flag, south: flag, up: flag, down: flag, west: flag, east: flag } },
     ],
   }
 }
@@ -288,28 +308,29 @@ function potModel() {
 SPECIAL_MODELS.decorated_pot = (p) => ({ model: potModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 16 })
 
 // 潮涌核心（BER，无 JSON 几何）：原版 ConduitRenderer 用 entity/conduit/base(32×16 壳)、
-// cage(32×16 笼)、closed_eye(16×16 眼)。这里简化为满立方体贴壳纹理 + 中央眼立方体。
-// 壳用 32×16 左半（u0..16 圆顶/环带），眼用整张 16×16（uv 写 32×16 使归一化到 [0,1]）。
+// cage(32×16 笼)、closed_eye(16×16 眼)。壳贴图 32×16 分上下两段：u6..18/v0..6 是圆顶（顶/底），
+// u0..32/v6..12 是环带（侧面）。这里简化：满立方体顶底贴圆顶、侧面贴环带，中央眼立方体贴整张眼。
 function conduitModel() {
-  const shell = { uv: [0, 0, 16, 16], texture: '#shell' }
+  const dome = { uv: [6, 0, 18, 6], texture: '#shell' }
+  const band = { uv: [0, 6, 32, 12], texture: '#shell' }
   const eye = { uv: [0, 0, 32, 16], texture: '#eye' }
   return {
     textures: { shell: 'entity/conduit/base', eye: 'entity/conduit/closed_eye' },
     elements: [
-      { from: [0, 0, 0], to: [16, 16, 16], faces: { up: shell, down: shell, north: shell, south: shell, west: shell, east: shell } },
+      { from: [0, 0, 0], to: [16, 16, 16], faces: { up: dome, down: dome, north: band, south: band, west: band, east: band } },
       { from: [6, 6, 6], to: [10, 10, 10], faces: { up: eye, down: eye, north: eye, south: eye, west: eye, east: eye } },
     ],
   }
 }
 SPECIAL_MODELS.conduit = () => ({ model: conduitModel(), variant: {}, texSize: [32, 16] })
 
-// 盾牌（BER）：简化为竖长的薄板（约 12×16）贴无图案木盾（64×64 贴图整体贴到正反面）。
-// 展示框里 fixed 旋转 [0,180,0]。
+// 盾牌（BER）：原版 ShieldModel 的 plate 是 12×22×1（texOffs 0,0）。这里简化成 12×22 薄板，
+// 整张 64×64 无图案木盾贴到正反面。展示框里 fixed 旋转 [0,180,0]。
 function shieldModel() {
   const tex = { uv: [0, 0, 64, 64], texture: '#all' }
   return {
     textures: { all: 'entity/shield/shield_base_nopattern' },
-    elements: [{ from: [2, 0, 7.5], to: [14, 16, 8.5], faces: { up: tex, down: tex, north: tex, south: tex, west: tex, east: tex } }],
+    elements: [{ from: [2, -3, 7.5], to: [14, 19, 8.5], faces: { up: tex, down: tex, north: tex, south: tex, west: tex, east: tex } }],
   }
 }
 SPECIAL_MODELS.shield = () => ({ model: shieldModel(), variant: {}, texSize: 64 })

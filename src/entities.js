@@ -385,13 +385,16 @@ async function buildFrameItem(item, resolver, assets) {
     if (parts.length) {
       const quads = []
       for (const p of parts) for (const q of p.quads) quads.push({ ...q, verts: q.verts.map((v) => [v[0] + p.ox, v[1] + p.oy, v[2] + p.oz]) })
-      let minX = Infinity, minY = Infinity, minZ = Infinity, maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
-      for (const q of quads) for (const v of q.verts) {
-        if (v[0] < minX) minX = v[0]; if (v[0] > maxX) maxX = v[0]
-        if (v[1] < minY) minY = v[1]; if (v[1] > maxY) maxY = v[1]
-        if (v[2] < minZ) minZ = v[2]; if (v[2] > maxZ) maxZ = v[2]
+      // 居中：按整方块（每个子模型 1×1×1）而非几何包围盒。床/台阶等非整方块几何若按几何包围盒
+      // 居中，几何中心会高于方块中心（床几何只占 y 0..9/16），导致整体偏高。原版
+      // CuboidItemModelWrapper 按整方块居中。
+      let minBX = Infinity, minBY = Infinity, minBZ = Infinity, maxBX = -Infinity, maxBY = -Infinity, maxBZ = -Infinity
+      for (const p of parts) {
+        if (p.ox < minBX) minBX = p.ox; if (p.ox + 1 > maxBX) maxBX = p.ox + 1
+        if (p.oy < minBY) minBY = p.oy; if (p.oy + 1 > maxBY) maxBY = p.oy + 1
+        if (p.oz < minBZ) minBZ = p.oz; if (p.oz + 1 > maxBZ) maxBZ = p.oz + 1
       }
-      baked = { quads, center: [-(minX + maxX) / 2, -(minY + maxY) / 2, -(minZ + maxZ) / 2] }
+      baked = { quads, center: [-(minBX + maxBX) / 2, -(minBY + maxBY) / 2, -(minBZ + maxBZ) / 2] }
       if (fixed) {
         fixedRot = fixedRotQuaternion(fixed.rotation)
         const t = fixed.translation || [0, 0, 0]
