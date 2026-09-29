@@ -228,12 +228,19 @@ async function buildItemFrame(entity, id, assets) {
       const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rot * 45 * DEG)
       const fixedRot = itemMesh.userData.fixedRot || null
       const fixedTrans = itemMesh.userData.fixedTrans || null
+      // 原版 ItemFrameRenderer 顺序：T(0,0,0.4375) → Rz(itemRot) → S(0.5) → display 变换
+      // （T(trans/16) → R(displayRot) → S(displayScale)）→ T(-0.5) 居中。框体缩放 0.5 会把 display
+      // 平移一起缩 0.5（S(0.5)·T(t)=T(0.5t)·S(0.5)），故 display 平移在框局部系里是 0.5·trans，
+      // 再被 Rz(itemRot) 旋转；旋转顺序是 Rz(itemRot)·R(displayRot)，不是 displayRot·Rz。
       const local = new THREE.Vector3(0, 0, 0.4375)
-      if (fixedTrans) local.add(new THREE.Vector3(fixedTrans[0], fixedTrans[1], fixedTrans[2]))
+      if (fixedTrans) {
+        const t = new THREE.Vector3(fixedTrans[0], fixedTrans[1], fixedTrans[2]).multiplyScalar(0.5)
+        local.add(t.applyQuaternion(qz))
+      }
       itemMesh.position.copy(anchor).add(local.applyQuaternion(q))
       itemMesh.quaternion.copy(q)
-      if (fixedRot) itemMesh.quaternion.multiply(fixedRot)
       itemMesh.quaternion.multiply(qz)
+      if (fixedRot) itemMesh.quaternion.multiply(fixedRot)
       group.add(itemMesh)
     }
   }
@@ -384,17 +391,13 @@ async function buildFrameItem(item, resolver, assets) {
     }
     if (parts.length) {
       const quads = []
-      for (const p of parts) for (const q of p.quads) quads.push({ ...q, verts: q.verts.map((v) => [v[0] + p.ox, v[1] + p.oy, v[2] + p.oz]) })
-      // 居中：按整方块（每个子模型 1×1×1）而非几何包围盒。床/台阶等非整方块几何若按几何包围盒
-      // 居中，几何中心会高于方块中心（床几何只占 y 0..9/16），导致整体偏高。原版
-      // CuboidItemModelWrapper 按整方块居中。
-      let minBX = Infinity, minBY = Infinity, minBZ = Infinity, maxBX = -Infinity, maxBY = -Infinity, maxBZ = -Infinity
-      for (const p of parts) {
-        if (p.ox < minBX) minBX = p.ox; if (p.ox + 1 > maxBX) maxBX = p.ox + 1
-        if (p.oy < minBY) minBY = p.oy; if (p.oy + 1 > maxBY) maxBY = p.oy + 1
-        if (p.oz < minBZ) minBZ = p.oz; if (p.oz + 1 > maxBZ) maxBZ = p.oz + 1
-      }
-      baked = { quads, center: [-(minBX + maxBX) / 2, -(minBY + maxBY) / 2, -(minBZ + maxBZ) / 2] }
+      // 原版 ItemTransform.apply 对每个子模型（composite 里的每个 minecraft:model）都独立做
+      // translate(-0.5,-0.5,-0.5) 整方块居中，再叠加 composite 的 transformation.translation（床 foot 的
+      // [0,0,1]）。因此床是 head 居中在原点、foot 再 +1z（整体中心在 z=+0.5），而不是把 head+foot
+      // 合并成一个包围盒后整体居中（那会把床往 head 方向错移半格）。这里逐子模型：
+      // offset = 复合平移 + (-0.5,-0.5,-0.5)，不再二次居中。
+      for (const p of parts) for (const q of p.quads) quads.push({ ...q, verts: q.verts.map((v) => [v[0] + p.ox - 0.5, v[1] + p.oy - 0.5, v[2] + p.oz - 0.5]) })
+      baked = { quads, center: [0, 0, 0] }
       if (fixed) {
         fixedRot = fixedRotQuaternion(fixed.rotation)
         const t = fixed.translation || [0, 0, 0]
