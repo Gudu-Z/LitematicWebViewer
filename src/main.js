@@ -522,7 +522,7 @@ function extractStatues(data) {
   for (const [key, gi] of data.blocks) {
     const p = data.palette[gi]
     const name = (p.name || '').replace(/^minecraft:/, '')
-    if (!name.endsWith('_copper_golem_statue')) continue
+    if (!name.endsWith('copper_golem_statue')) continue
     const lx = key % W
     const lz = Math.floor(key / W) % b.depth
     const ly = Math.floor(key / strideY)

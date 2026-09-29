@@ -491,14 +491,14 @@ export class Renderer {
       const group = new THREE.Group()
       group.add(mesh)
       if (b.facing) {
-        // 墙上旗帜：旗面朝向 facing（远离墙），中心在方块上方 1.5 格
-        group.position.set(b.x + 0.5, b.y + 1.5, b.z + 0.5)
+        // 墙上旗帜：旗面朝向 facing（远离墙）
+        group.position.set(b.x + 0.5, b.y + 0.375, b.z + 0.5)
         group.rotation.y = ((BANNER_FACING_Y[b.facing] ?? 0) * Math.PI) / 180
       } else {
-        // 立地旗帜：旗面绕杆旋转（与告示牌同一条 rotation 公式，顺时针 22.5°/级），中心在方块上方 0.52 格
+        // 立地旗帜：旗面绕杆旋转（与告示牌同一条 rotation 公式，顺时针 22.5°/级）
         const rot = Number(b.rotation) || 0
         const a = -22.5 * (rot % 4) - 90 * Math.floor(rot / 4)
-        group.position.set(b.x + 0.5, b.y + 0.52, b.z + 0.5)
+        group.position.set(b.x + 0.5, b.y + 0.375, b.z + 0.5)
         group.rotation.y = (a * Math.PI) / 180
       }
       this.bannersGroup.add(group)

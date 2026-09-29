@@ -196,7 +196,7 @@ async function defaultItemProps(name, assets) {
     for (const kv of firstKey.split(',')) {
       const [k, v] = kv.split('=')
       if (!k) continue
-      if (k === 'facing') props[k] = name === 'observer' ? 'south' : 'north'
+      if (k === 'facing') props[k] = name === 'observer' ? 'south' : name === 'lightning_rod' ? 'up' : 'north'
       else if (k === 'axis') props[k] = 'y'
       else if (k === 'half') props[k] = 'bottom'
       else if (k === 'shape') props[k] = 'straight'
@@ -244,10 +244,22 @@ async function buildFrameItem(item, resolver, assets) {
     }
   }
 
+  // 时钟/指南针：特殊物品（无 JSON 模型，纹理是逐帧的 clock_00..63 / compass_00..31）。
+  // 静态预览里渲染第一帧（时钟 00=正午、指南针 00=朝北）。
+  if (name === 'clock' || name === 'compass') {
+    const tex = await assets.getTexture('item/' + name + '_00')
+    if (tex) {
+      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
+      holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
+      holder.scale.setScalar(0.5)
+      return holder
+    }
+  }
+
   // 铜傀儡雕像：无 JSON 模型，用实体模型渲染。原版 item 模型 template_copper_golem_statue 的
   // fixed 显示变换是 translation[0,3,0]（=3/16=0.1875 上移）+ scale 0.5。方块模型居中（-0.5）后
   // 雕像脚底在 -0.5，上移 0.1875 → -0.3125；再乘展示框 0.5 缩放。实体模型本身已缩 0.6（BER）。
-  if (name.endsWith('_copper_golem_statue')) {
+  if (name.endsWith('copper_golem_statue')) {
     const tex = await assets.getTexture('entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : ''))
     if (tex) {
       const golem = buildCopperGolemStatueMesh(tex)
@@ -260,7 +272,7 @@ async function buildFrameItem(item, resolver, assets) {
     }
   }
 
-  // 方块物品：3D 方块模型，统一缩放 0.5（8px，与原版物品展示框一致）
+  // 方块物品：3D 方块模型（原版展示框 scale 0.5 = 8px，方块是 3D 立方体显得偏大，这里用 0.4 略缩）
   const props = await defaultItemProps(name, assets)
   const baked = await resolver.resolve('minecraft:' + name, props)
   if (baked && baked.quads && baked.quads.length) {
@@ -274,7 +286,7 @@ async function buildFrameItem(item, resolver, assets) {
       }),
     )
     holder.add(quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk)))
-    holder.scale.setScalar(0.5)
+    holder.scale.setScalar(0.4)
     return holder
   }
 
