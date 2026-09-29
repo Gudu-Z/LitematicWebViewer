@@ -94,11 +94,12 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     throw new Error('文件中没有 Regions 数据')
   }
 
-  // 第一遍：统计总方块数 + 全局边界（都由区域 Position/Size 直接得出，无需解码）
+  // 第一遍：统计总方块数 + 全局边界 + 收集每个区域的名称与边界（区域名是 Regions 对象的键）
   let totalBlocks = 0
   let minX = Infinity, minY = Infinity, minZ = Infinity
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
-  for (const region of Object.values(regions)) {
+  const regionList = []
+  for (const [name, region] of Object.entries(regions)) {
     const pos = vec(region.Position)
     const size = vec(region.Size)
     const dx = Math.abs(size.x)
@@ -115,6 +116,12 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     maxY = Math.max(maxY, wy0 + dy - 1)
     minZ = Math.min(minZ, wz0)
     maxZ = Math.max(maxZ, wz0 + dz - 1)
+    regionList.push({
+      name,
+      minX: wx0, minY: wy0, minZ: wz0,
+      maxX: wx0 + dx - 1, maxY: wy0 + dy - 1, maxZ: wz0 + dz - 1,
+      width: dx, height: dy, depth: dz,
+    })
   }
   const W = maxX - minX + 1
   const D = maxZ - minZ + 1
@@ -141,7 +148,7 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
   let doneBlocks = 0
 
   // 第二遍：解码并建立整数 key 的方块映射
-  for (const region of Object.values(regions)) {
+  for (const [name, region] of Object.entries(regions)) {
     const pos = vec(region.Position)
     const size = vec(region.Size)
 
@@ -165,7 +172,7 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     // 方块实体（告示牌等）：坐标同样是相对区域原点的，需加上区域 Position 偏移。
     if (Array.isArray(region.TileEntities)) {
       for (const te of region.TileEntities) {
-        tileEntities.push({ id: te.id, x: te.x + pos.x, y: te.y + pos.y, z: te.z + pos.z, nbt: te })
+        tileEntities.push({ id: te.id, x: te.x + pos.x, y: te.y + pos.y, z: te.z + pos.z, nbt: te, region: name })
       }
     }
 
@@ -180,6 +187,7 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
           pos: [Number(epos[0]) + pos.x, Number(epos[1]) + pos.y, Number(epos[2]) + pos.z],
           rotation: [Number(rot[0]) || 0, Number(rot[1]) || 0],
           nbt: e,
+          region: name,
         })
       }
     }
@@ -218,7 +226,7 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     depth: D,
   }
 
-  return { metadata, palette, blocks, bounds, tileEntities, entities }
+  return { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList }
 }
 
 export async function parseLitematica(buffer, onProgress) {

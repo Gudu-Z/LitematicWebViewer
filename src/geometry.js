@@ -355,7 +355,7 @@ function writeFace(g, verts, uvs, ox, oy, oz) {
 // 内存减半且无扩容峰值，超大投影（上千万面）也不会撑爆内存。
 // 法线不存（每个面的 4 个顶点本就同法线，渲染用 flatShading 即可得到相同光照）。
 // 返回 { groups: Map<texKey, {positions,uvs,indices}>, emitted: 面数 }
-export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
+export async function buildFaceGroups(palette, blocks, bounds, onProgress, filter) {
   const grid = {
     W: bounds.width,
     D: bounds.depth,
@@ -419,6 +419,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
     const x = lx + minX
     const y = ly + minY
     const z = lz + minZ
+    if (filter && !filter(x, y, z, ly)) continue
     const finfo = fluidOf[gi]
     if (finfo) {
       // 流体（水/岩浆/气泡柱/含水方块的内部水体）
@@ -465,6 +466,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
     const x = lx + minX
     const y = ly + minY
     const z = lz + minZ
+    if (filter && !filter(x, y, z, ly)) continue
     const finfo = fluidOf[gi]
     if (finfo) {
       emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], (texKey, pos, uvs) => {

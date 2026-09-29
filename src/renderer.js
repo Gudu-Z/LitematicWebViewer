@@ -153,6 +153,19 @@ export class Renderer {
     this.overlay = new THREE.Group() // 坐标轴 + 尺寸标注
     this.scene.add(this.overlay)
 
+    this.regionGroup = new THREE.Group() // 区域线框
+    this.scene.add(this.regionGroup)
+
+    // 移动双模式：orbit（环绕结构中心）/ fly（第一人称飞行）
+    this.moveMode = 'orbit'
+    this.moveSpeed = 1.0
+    this._yaw = 0
+    this._pitch = 0
+    this.camera.rotation.order = 'YXZ'
+    this.onMoveModeChange = null // 由 main.js 设置，用于同步左侧 UI
+    this.onSpeedChange = null
+    this.onFirstMoveKey = null // WASD 首次按下时回调，切到飞行模式
+
     // WASD 移动
     this.keys = new Set()
     this._lastTime = performance.now()
@@ -161,17 +174,77 @@ export class Renderer {
     window.addEventListener('keydown', this._onKeyDown)
     window.addEventListener('keyup', this._onKeyUp)
 
+    this._initFlyControls()
+
     this._onResize = () => this._resize()
     window.addEventListener('resize', this._onResize)
     this._resize()
     this._animate()
   }
 
+  // 飞行模式的鼠标/滚轮控制（原地转头、右键平移、滚轮调速）
+  _initFlyControls() {
+    const el = this.renderer.domElement
+    this._flyDragging = null // null | 'look' | 'pan'
+    this._flyLast = { x: 0, y: 0 }
+
+    el.addEventListener('pointerdown', (e) => {
+      if (this.moveMode !== 'fly') return
+      if (e.button === 0) this._flyDragging = 'look'
+      else if (e.button === 2) this._flyDragging = 'pan'
+      else return
+      this._flyLast = { x: e.clientX, y: e.clientY }
+      el.setPointerCapture(e.pointerId)
+    })
+    el.addEventListener('pointermove', (e) => {
+      if (this.moveMode !== 'fly' || !this._flyDragging) return
+      const dx = e.clientX - this._flyLast.x
+      const dy = e.clientY - this._flyLast.y
+      this._flyLast = { x: e.clientX, y: e.clientY }
+      if (this._flyDragging === 'look') {
+        this._yaw -= dx * 0.003
+        this._pitch -= dy * 0.003
+        const max = Math.PI / 2 - 0.001
+        this._pitch = Math.max(-max, Math.min(max, this._pitch))
+        this._applyFlyRotation()
+      } else if (this._flyDragging === 'pan') {
+        // 屏幕空间平移：相机与 target 同向平移
+        const dist = this.camera.position.distanceTo(this.controls.target)
+        const s = dist * 0.0016
+        const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 0)
+        const up = new THREE.Vector3().setFromMatrixColumn(this.camera.matrix, 1)
+        const offset = new THREE.Vector3().addScaledVector(right, -dx * s).addScaledVector(up, dy * s)
+        this.camera.position.add(offset)
+        this.controls.target.add(offset)
+      }
+    })
+    const endDrag = () => { this._flyDragging = null }
+    el.addEventListener('pointerup', endDrag)
+    el.addEventListener('pointercancel', endDrag)
+
+    el.addEventListener('wheel', (e) => {
+      if (this.moveMode !== 'fly') return
+      e.preventDefault()
+      const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
+      this.moveSpeed = Math.min(10, Math.max(0.1, this.moveSpeed * factor))
+      this.onSpeedChange?.(this.moveSpeed)
+    }, { passive: false })
+  }
+
+  _applyFlyRotation() {
+    this.camera.rotation.set(this._pitch, this._yaw, 0)
+  }
+
   _key(e, down) {
     if (MOVE_KEYS.includes(e.code)) {
       e.preventDefault()
-      if (down) this.keys.add(e.code)
-      else this.keys.delete(e.code)
+      if (down) {
+        this.keys.add(e.code)
+        // 第一次按 WASD 时自动从环绕切到飞行模式（main.js 里更新左侧 UI）
+        if (this.moveMode === 'orbit') this.onFirstMoveKey?.()
+      } else {
+        this.keys.delete(e.code)
+      }
     }
   }
 
@@ -198,12 +271,24 @@ export class Renderer {
     const cam = this.camera.position
     const target = this.controls.target
     const dist = cam.distanceTo(target)
-    const step = dist * 1.0 * dt // 每秒移动约一个视距
 
-    const forward = new THREE.Vector3().subVectors(target, cam)
-    forward.y = 0
-    if (forward.lengthSq() < 1e-8) return
-    forward.normalize()
+    // 飞行模式：沿视线方向移动（固定世界速度 × 倍率）；环绕模式：沿「相机→目标」方向移动（速度随距离）。
+    let forward
+    let step
+    if (this.moveMode === 'fly') {
+      forward = new THREE.Vector3()
+      this.camera.getWorldDirection(forward)
+      forward.y = 0
+      if (forward.lengthSq() < 1e-8) return
+      forward.normalize()
+      step = 8 * this.moveSpeed * dt // 每秒约 8 格 × 倍率
+    } else {
+      forward = new THREE.Vector3().subVectors(target, cam)
+      forward.y = 0
+      if (forward.lengthSq() < 1e-8) return
+      forward.normalize()
+      step = dist * this.moveSpeed * dt
+    }
     const right = new THREE.Vector3().crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize()
 
     const move = new THREE.Vector3()
@@ -229,15 +314,19 @@ export class Renderer {
   }
 
   clear() {
+    this.clearBlocks()
+    this.clearSigns()
+    this.clearHeads()
+    this.clearEntities()
+  }
+
+  clearBlocks() {
     while (this.group.children.length) {
       const child = this.group.children.pop()
       child.geometry?.dispose()
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       mats.forEach((m) => m?.dispose())
     }
-    this.clearSigns()
-    this.clearHeads()
-    this.clearEntities()
   }
 
   clearHeads() {
@@ -313,6 +402,34 @@ export class Renderer {
     this.scene.background = new THREE.Color(color)
   }
 
+  // —— 移动模式 ——
+  setMoveMode(mode) {
+    if (mode !== 'orbit' && mode !== 'fly') return
+    this.moveMode = mode
+    this.controls.enabled = mode === 'orbit'
+    if (mode === 'fly') {
+      // 进入飞行模式：从当前相机朝向初始化 yaw/pitch
+      const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ')
+      this._yaw = e.y
+      this._pitch = e.x
+    }
+    this.onMoveModeChange?.(mode)
+  }
+
+  getMoveMode() {
+    return this.moveMode
+  }
+
+  setMoveSpeed(speed) {
+    this.moveSpeed = Math.min(10, Math.max(0.1, Number(speed) || 1))
+    this.onSpeedChange?.(this.moveSpeed)
+  }
+
+  // —— 显示开关 ——
+  setEntitiesVisible(v) { this.entitiesGroup.visible = !!v }
+  setWireframesVisible(v) { this.regionGroup.visible = !!v }
+  setDimensionsVisible(v) { this.overlay.visible = !!v }
+
   // 渲染告示牌文字：告示牌本身（柱/板）已由方块模型渲染，这里只在板面上加文字。
   // signs: [{x, y, z, rotation?, facing?, lines: [4 行文字]}]
   //   - 立地告示牌用 rotation(0-15)，墙上告示牌用 facing(north/south/east/west)
@@ -368,13 +485,29 @@ export class Renderer {
 
   // data: { palette: [{name, faces}], blocks: Map<"x,y,z" -> paletteIndex>, bounds }
   // 返回 { faces, textures }
-  async render(data, assets, onProgress) {
+  async render(data, assets, onProgress, filter) {
     this.clear()
+    const { bounds } = data
+    const stats = await this._buildBlockMeshes(data, assets, onProgress, filter)
+    this._fit(bounds)
+    this._updateOverlay(bounds)
+    this._updateRegionWireframes(data)
+    onProgress?.(1)
+    return stats
+  }
+
+  // 只重建方块网格（层级/区域变化时调用，不动相机、告示牌、头颅、实体）。
+  async renderBlocks(data, assets, filter) {
+    this.clearBlocks()
+    return this._buildBlockMeshes(data, assets, null, filter)
+  }
+
+  async _buildBlockMeshes(data, assets, onProgress, filter) {
     const { palette, blocks, bounds } = data
 
-    const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45))
+    const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45), filter)
     if (emitted === 0) {
-      throw new Error('没有生成任何可显示的面（方块可能全是空气或贴图解析失败）')
+      return { faces: 0, textures: 0 }
     }
     onProgress?.(0.45)
 
@@ -463,9 +596,6 @@ export class Renderer {
       if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
     }
 
-    this._fit(bounds)
-    this._updateOverlay(bounds)
-    onProgress?.(1)
     return { faces: emitted, textures: materials.size }
   }
 
@@ -547,6 +677,24 @@ export class Renderer {
     this.overlay.add(this._textSprite(`X ${width}`, 0xff5555, o.x + width + pad, o.y, o.z, scale))
     this.overlay.add(this._textSprite(`Y ${height}`, 0x55ff55, o.x, o.y + height + pad, o.z, scale))
     this.overlay.add(this._textSprite(`Z ${depth}`, 0x5599ff, o.x, o.y, o.z + depth + pad, scale))
+  }
+
+  // 区域线框：每个区域画一个淡蓝色包围盒（含边界 [min, max] 即 [min, max+1) 的世界盒）
+  _updateRegionWireframes(data) {
+    while (this.regionGroup.children.length) {
+      const c = this.regionGroup.children.pop()
+      c.geometry?.dispose()
+      const mats = Array.isArray(c.material) ? c.material : [c.material]
+      mats.forEach((m) => m?.dispose())
+    }
+    const regions = data.regions || []
+    for (const r of regions) {
+      const box = new THREE.Box3(
+        new THREE.Vector3(r.minX, r.minY, r.minZ),
+        new THREE.Vector3(r.maxX + 1, r.maxY + 1, r.maxZ + 1),
+      )
+      this.regionGroup.add(new THREE.Box3Helper(box, 0x6fa8dc))
+    }
   }
 
   _textSprite(text, color, x, y, z, scale) {

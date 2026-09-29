@@ -26,6 +26,16 @@ let currentData = null
 let busy = false
 let packs = [] // 资源包清单 [{name, file}]
 
+// 视图状态：渲染模式 / 当前层 / 可见区域 / 各显示开关
+const view = {
+  renderMode: 'all', // 'all' | 'below' | 'above' | 'single'
+  layerY: 0,
+  visibleRegions: null, // null = 全部显示；否则 Set<regionName>
+  showEntities: true,
+  showWireframes: true,
+  showDimensions: true,
+}
+
 // 全局错误捕获，让任何错误都显示在页面上
 window.addEventListener('error', (e) => {
   ui.showError('脚本错误：' + (e.message || (e.error && e.error.message) || '未知错误'))
@@ -78,6 +88,56 @@ document.getElementById('settingsCloseBtn').addEventListener('click', () => {
 })
 document.getElementById('bgColor').addEventListener('input', (e) => {
   renderer?.setBackgroundColor(e.target.value)
+})
+
+// —— 移动模式 / 速度 / 层级 / 设置项 / 区域 的接线 ——
+if (renderer) {
+  renderer.onMoveModeChange = (mode) => ui.setMoveModeLabel(mode)
+  renderer.onSpeedChange = (speed) => ui.setSpeed(speed)
+  // 首次按 WASD 自动切到飞行模式
+  renderer.onFirstMoveKey = () => renderer.setMoveMode('fly')
+
+  // 左侧：移动模式切换按钮
+  document.getElementById('moveModeBtn').addEventListener('click', () => {
+    renderer.setMoveMode(renderer.getMoveMode() === 'orbit' ? 'fly' : 'orbit')
+  })
+  // 左侧：速度滑块
+  document.getElementById('speedSlider').addEventListener('input', (e) => {
+    renderer.setMoveSpeed(Number(e.target.value))
+  })
+  // 左侧：上/下一层
+  document.getElementById('layerUpBtn').addEventListener('click', () => changeLayer(1))
+  document.getElementById('layerDownBtn').addEventListener('click', () => changeLayer(-1))
+
+  // 设置：显示实体 / 区域线框 / 尺寸
+  document.getElementById('showEntities').addEventListener('change', (e) => {
+    view.showEntities = e.target.checked
+    renderer.setEntitiesVisible(view.showEntities)
+  })
+  document.getElementById('showWireframes').addEventListener('change', (e) => {
+    view.showWireframes = e.target.checked
+    renderer.setWireframesVisible(view.showWireframes)
+  })
+  document.getElementById('showDimensions').addEventListener('change', (e) => {
+    view.showDimensions = e.target.checked
+    renderer.setDimensionsVisible(view.showDimensions)
+  })
+  // 设置：渲染模式
+  document.getElementById('renderMode').addEventListener('change', (e) => {
+    setRenderMode(e.target.value)
+  })
+}
+
+// E / Q 调整渲染层级（E 上一层，Q 下一层；忽略输入框内的按键）
+window.addEventListener('keydown', (e) => {
+  if (isTypingTarget(e)) return
+  if (e.code === 'KeyE') {
+    e.preventDefault()
+    changeLayer(1)
+  } else if (e.code === 'KeyQ') {
+    e.preventDefault()
+    changeLayer(-1)
+  }
 })
 
 fileInput.addEventListener('change', (e) => {
@@ -144,12 +204,14 @@ async function openFile(file) {
     ui.setProgress(0.35)
 
     currentData = data
+    resetViewForData(data)
     ui.setStatus(`正在生成几何体（${data.blocks.size.toLocaleString()} 个方块）…`)
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
     await renderCurrentSigns()
     await renderCurrentPlayerHeads()
     await renderCurrentEntities()
     ui.showMetadata(data.metadata)
+    updateRegionUI()
     const entityNote = data.entities?.length ? `，${data.entities.length} 个实体` : ''
     ui.setStatus(`完成：${stats.faces.toLocaleString()} 个面，${stats.textures} 种贴图${entityNote}`)
     ui.setProgress(1)
@@ -184,7 +246,7 @@ async function reRenderCurrent() {
   palette.forEach((p, i) => {
     p.baked = baked[i]
   })
-  await renderer.render(currentData, assets, (p) => ui.setProgress(p))
+  await renderer.render(currentData, assets, (p) => ui.setProgress(p), makeBlockFilter())
   await renderCurrentSigns()
   await renderCurrentPlayerHeads()
   await renderCurrentEntities()
@@ -193,26 +255,123 @@ async function reRenderCurrent() {
 // 渲染当前结构里的告示牌
 async function renderCurrentSigns() {
   if (!currentData || !renderer) return
-  await renderer.renderSigns(extractSigns(currentData), assets)
+  const tes = filterByRegion(currentData.tileEntities || [])
+  await renderer.renderSigns(extractSigns(tes, currentData), assets)
 }
 
 // 渲染当前结构里的实体
 async function renderCurrentEntities() {
   if (!currentData || !renderer) return
-  await renderer.renderEntities(currentData.entities || [], assets, currentData)
+  const ents = filterByRegion(currentData.entities || [])
+  await renderer.renderEntities(ents, assets, currentData)
 }
 
 // 渲染当前结构里的玩家头颅（用玩家自己的皮肤）
 async function renderCurrentPlayerHeads() {
   if (!currentData || !renderer) return
-  await renderer.renderPlayerHeads(extractPlayerHeads(currentData), assets)
+  const tes = filterByRegion(currentData.tileEntities || [])
+  await renderer.renderPlayerHeads(extractPlayerHeads(tes, currentData), assets)
+}
+
+// 区域是否可见（visibleRegions 为 null 表示全部可见）
+function regionVisible(region) {
+  if (!view.visibleRegions) return true
+  return view.visibleRegions.has(region)
+}
+
+// 按可见区域过滤实体/方块实体列表
+function filterByRegion(list) {
+  if (!view.visibleRegions) return list
+  return (list || []).filter((e) => regionVisible(e.region))
+}
+
+// 构造方块过滤函数（层级 + 区域），返回 null 表示无需过滤
+function makeBlockFilter() {
+  const mode = view.renderMode
+  const layerY = view.layerY
+  const regions = currentData?.regions || []
+  const hidden = view.visibleRegions ? regions.filter((r) => !view.visibleRegions.has(r.name)) : []
+  if (mode === 'all' && hidden.length === 0) return null
+  const inAny = (x, y, z, list) =>
+    list.some((r) => x >= r.minX && x <= r.maxX && y >= r.minY && y <= r.maxY && z >= r.minZ && z <= r.maxZ)
+  return (x, y, z) => {
+    if (mode === 'single' && y !== layerY) return false
+    if (mode === 'below' && y > layerY) return false
+    if (mode === 'above' && y < layerY) return false
+    if (hidden.length && inAny(x, y, z, hidden)) return false
+    return true
+  }
+}
+
+// 仅重渲染方块（层级/区域变化时）
+async function reRenderBlocks() {
+  if (!currentData || !renderer) return
+  await renderer.renderBlocks(currentData, assets, makeBlockFilter())
+}
+
+// 载入新文件时重置视图状态
+function resetViewForData(data) {
+  view.renderMode = 'all'
+  view.layerY = data.bounds.minY
+  view.visibleRegions = null
+  ui.setLayerLabel(view.layerY)
+  setRenderModeControl('all')
+  // 显示左侧控制面板
+  document.getElementById('controlPanel')?.classList.add('loaded')
+}
+
+// 切换某个区域的可见性
+async function toggleRegion(name) {
+  if (!currentData) return
+  if (!view.visibleRegions) {
+    view.visibleRegions = new Set((currentData.regions || []).map((r) => r.name))
+  }
+  if (view.visibleRegions.has(name)) view.visibleRegions.delete(name)
+  else view.visibleRegions.add(name)
+  updateRegionUI()
+  await reRenderBlocks()
+  await renderCurrentSigns()
+  await renderCurrentPlayerHeads()
+  await renderCurrentEntities()
+}
+
+// 调整当前层（delta = ±1）
+async function changeLayer(delta) {
+  if (!currentData) return
+  const b = currentData.bounds
+  view.layerY = Math.max(b.minY, Math.min(b.maxY, view.layerY + delta))
+  ui.setLayerLabel(view.layerY)
+  await reRenderBlocks()
+}
+
+// 渲染模式切换
+async function setRenderMode(mode) {
+  view.renderMode = mode
+  await reRenderBlocks()
+}
+
+// 同步「渲染模式」下拉框（不触发 change）
+function setRenderModeControl(mode) {
+  const sel = document.getElementById('renderMode')
+  if (sel) sel.value = mode
+}
+
+// 更新区域列表 UI
+function updateRegionUI() {
+  ui.renderRegionList(currentData?.regions || [], view.visibleRegions, (name) => toggleRegion(name))
+}
+
+// 是否正在输入框里打字（避免 E/Q 等快捷键误触发）
+function isTypingTarget(e) {
+  const t = e.target
+  return t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')
 }
 
 // 从方块实体中提取玩家头颅：{x, y, z, rotation?, facing?, skinUrl}
-function extractPlayerHeads(data) {
+function extractPlayerHeads(tileEntities, data) {
   const heads = []
   const b = data.bounds
-  for (const te of data.tileEntities || []) {
+  for (const te of tileEntities || []) {
     if (te.id !== 'minecraft:skull') continue
     const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
     if (gi === undefined) continue
@@ -245,9 +404,9 @@ function extractSkinUrl(profile) {
 }
 
 // 从方块实体中提取告示牌：{x, y, z, rotation, lines}
-function extractSigns(data) {
+function extractSigns(tileEntities, data) {
   const signs = []
-  for (const te of data.tileEntities || []) {
+  for (const te of tileEntities || []) {
     if (te.id !== 'minecraft:sign' && te.id !== 'minecraft:hanging_sign') continue
     const lines = []
     const ft = te.nbt && te.nbt.front_text

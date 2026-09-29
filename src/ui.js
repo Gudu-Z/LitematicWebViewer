@@ -9,6 +9,21 @@ export class UI {
     this.errorBanner = root.querySelector('#errorBanner')
     this.loadedPackListEl = root.querySelector('#loadedPackList')
     this.availablePackListEl = root.querySelector('#availablePackList')
+    this.moveModeBtn = root.querySelector('#moveModeBtn')
+    this.speedSlider = root.querySelector('#speedSlider')
+    this.speedValue = root.querySelector('#speedValue')
+    this.layerValue = root.querySelector('#layerValue')
+    this.regionListEl = root.querySelector('#regionList')
+    this.regionListBody = root.querySelector('#regionListBody')
+    this.regionListToggle = root.querySelector('#regionListToggle')
+
+    // 区域列表折叠
+    if (this.regionListToggle) {
+      this.regionListToggle.addEventListener('click', () => {
+        this.regionListBody.classList.toggle('collapsed')
+        this.regionListToggle.classList.toggle('collapsed')
+      })
+    }
   }
 
   showError(msg) {
@@ -50,6 +65,50 @@ export class UI {
 
   showDropOverlay(on) {
     this.dropOverlay.classList.toggle('visible', on)
+  }
+
+  // 更新移动模式按钮文案
+  setMoveModeLabel(mode) {
+    if (!this.moveModeBtn) return
+    this.moveModeBtn.textContent = mode === 'orbit' ? '环绕模式' : '飞行模式'
+  }
+
+  // 同步速度滑块与数值显示
+  setSpeed(value) {
+    const v = Math.round(Number(value) * 100) / 100
+    if (this.speedSlider) this.speedSlider.value = String(v)
+    if (this.speedValue) this.speedValue.textContent = v.toFixed(1) + '×'
+  }
+
+  // 更新当前层显示
+  setLayerLabel(y) {
+    if (this.layerValue) this.layerValue.textContent = '层 ' + y
+  }
+
+  // 渲染区域列表（可折叠，每项带眼睛开关）。visible 为 Set（null=全显示）
+  renderRegionList(regions, visible, onToggle) {
+    if (!this.regionListBody) return
+    if (!regions || !regions.length) {
+      this.regionListBody.innerHTML = '<li class="pack-empty">无区域</li>'
+      return
+    }
+    this.regionListBody.innerHTML = regions
+      .map((r) => {
+        const on = !visible || visible.has(r.name)
+        return `
+        <li data-name="${escapeHtml(r.name)}">
+          <button class="eye-btn" data-action="toggle" title="${on ? '隐藏' : '显示'}">
+            ${on ? '👁' : '🚫'}
+          </button>
+          <span class="region-name">${escapeHtml(r.name)}</span>
+        </li>`
+      })
+      .join('')
+    this.regionListBody.querySelectorAll('button[data-action="toggle"]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        onToggle(btn.closest('li').getAttribute('data-name'))
+      })
+    })
   }
 
   // 渲染资源包两栏：loaded=已加载（按优先级顺序，名字数组），available=可加载 [{name, file}]
