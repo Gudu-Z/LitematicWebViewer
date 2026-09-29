@@ -202,8 +202,8 @@ export class Renderer {
       const dy = e.clientY - this._flyLast.y
       this._flyLast = { x: e.clientX, y: e.clientY }
       if (this._flyDragging === 'look') {
-        this._yaw -= dx * 0.007
-        this._pitch -= dy * 0.007
+        this._yaw -= dx * 0.01
+        this._pitch -= dy * 0.01
         const max = Math.PI / 2 - 0.001
         this._pitch = Math.max(-max, Math.min(max, this._pitch))
         this._applyFlyRotation()
