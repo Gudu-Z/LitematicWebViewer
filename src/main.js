@@ -449,8 +449,15 @@ function extractSigns(tileEntities, data) {
     const b = data.bounds
     const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
     const props = gi !== undefined ? data.palette[gi].properties || {} : {}
-    // 立地告示牌用 rotation，墙上告示牌用 facing
-    signs.push({ x: te.x, y: te.y, z: te.z, rotation: Number(props.rotation) || 0, facing: props.facing, lines })
+    // 立地告示牌用 rotation，墙上告示牌用 facing；挂告示牌单独标记（板在下方）
+    signs.push({
+      x: te.x, y: te.y, z: te.z,
+      rotation: Number(props.rotation) || 0,
+      facing: props.facing,
+      hanging: te.id === 'minecraft:hanging_sign',
+      color: (ft && ft.color) || null,
+      lines,
+    })
   }
   return signs
 }

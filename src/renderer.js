@@ -13,6 +13,14 @@ const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftR
 // 墙上告示牌的 facing -> 方向向量（文字朝向）
 const SIGN_FACING = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0] }
 
+// 告示牌文字颜色（DyeColor -> 十六进制，原版发光文字用亮色）
+const SIGN_COLORS = {
+  white: '#ffffff', orange: '#ff681f', magenta: '#c74ebd', light_blue: '#3ab3da',
+  yellow: '#fed83d', lime: '#80c71f', pink: '#f38baa', gray: '#474f52',
+  light_gray: '#9d9d97', cyan: '#169c9c', purple: '#8932b8', blue: '#3c44aa',
+  brown: '#835432', green: '#5e7c16', red: '#b02e26', black: '#000000',
+}
+
 // 玩家头颅模型（皮肤 64×64 布局）。与 vanilla HeadModel 一致：底层头 + 帽子层
 // （第二层，UV 在皮肤头部区域的第二列 +32，比底层稍大 0.25 像素）。帽子层透明处
 // 由 alphaTest 裁掉，无帽子的皮肤自然只显示底层。
@@ -459,11 +467,12 @@ export class Renderer {
         const rotation = Number(sign.rotation) || 0
         const a = ((-22.5 * (rotation % 4) - 90 * Math.floor(rotation / 4)) * Math.PI) / 180
         front = new THREE.Vector3(Math.sin(a), 0, Math.cos(a))
-        boardCenter = new THREE.Vector3(sign.x + 0.5, sign.y + 0.83, sign.z + 0.5)
+        // 挂告示牌板在方块下方（y≈0.31），立告示牌板在上方（y≈0.83）
+        boardCenter = new THREE.Vector3(sign.x + 0.5, sign.y + (sign.hanging ? 0.31 : 0.83), sign.z + 0.5)
       }
 
       const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), front)
-      const textMat = new THREE.MeshBasicMaterial({ map: this._makeSignTexture(sign.lines), transparent: true, side: THREE.DoubleSide })
+      const textMat = new THREE.MeshBasicMaterial({ map: this._makeSignTexture(sign.lines, sign.color), transparent: true, side: THREE.DoubleSide })
       const textPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.4), textMat)
       textPlane.position.copy(boardCenter).addScaledVector(front, 0.05)
       textPlane.setRotationFromQuaternion(quat)
@@ -471,13 +480,13 @@ export class Renderer {
     }
   }
 
-  _makeSignTexture(lines) {
+  _makeSignTexture(lines, color) {
     const canvas = document.createElement('canvas')
     canvas.width = 512
     canvas.height = 128
     const ctx = canvas.getContext('2d')
     ctx.clearRect(0, 0, 512, 128) // 透明背景，让木板透出来
-    ctx.fillStyle = '#1a1a1a' // 近黑色文字（原版告示牌默认黑字）
+    ctx.fillStyle = SIGN_COLORS[color] || '#1a1a1a' // 默认近黑色；指定 dye 颜色时用对应色
     ctx.font = '30px "PixelFont", "Microsoft YaHei", sans-serif'
     ctx.textAlign = 'center'
     ctx.textBaseline = 'middle'

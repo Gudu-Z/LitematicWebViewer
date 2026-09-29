@@ -203,7 +203,7 @@ const SPECIAL_MODELS = {
   chest: (p) => ({ model: chestModel(chestTex('chest', p.type, p), p.type), variant: chestVariant(p), texSize: 64 }),
   trapped_chest: (p) => ({ model: chestModel(chestTex('trapped_chest', p.type, p), p.type), variant: chestVariant(p), texSize: 64 }),
   ender_chest: (p) => ({ model: chestModel('entity/chest/ender', 'single'), variant: chestVariant(p), texSize: 64 }),
-  copper_chest: (p) => ({ model: chestModel(chestTex('copper_chest', p.type, p), p.type), variant: chestVariant(p), texSize: 64 }),
+  // 铜箱（含 waxed/exposed/weathered/oxidized，氧化程度编码在方块名里）见下方循环
   // 流体
   water: (p) => ({ model: fluidModel('block/water_still', p.level), variant: {} }),
   lava: (p) => ({ model: fluidModel('block/lava_still', p.level), variant: {} }),
@@ -220,6 +220,80 @@ for (const c of SHULKER_COLORS) {
 for (const [name, info] of Object.entries(HEAD_TYPES)) {
   SPECIAL_MODELS[name] = (p) => ({ model: headModel(info.tex, info.scale), variant: headVariant(p, false), texSize: info.texSize })
   SPECIAL_MODELS[info.wall] = (p) => ({ model: headModel(info.tex, info.scale), variant: headVariant(p, true), texSize: info.texSize })
+}
+
+// —— 26.x 起改为「方块实体渲染器」的方块：JSON 模型为空（仅 particle），这里手工构造几何 ——
+
+// 铜箱：氧化/打蜡程度编码在方块名里（waxed_exposed_copper_chest 等）
+const COPPER_CHEST_TEX = {
+  copper_chest: 'copper', exposed_copper_chest: 'copper_exposed',
+  weathered_copper_chest: 'copper_weathered', oxidized_copper_chest: 'copper_oxidized',
+  waxed_copper_chest: 'copper', waxed_exposed_copper_chest: 'copper_exposed',
+  waxed_weathered_copper_chest: 'copper_weathered', waxed_oxidized_copper_chest: 'copper_oxidized',
+}
+for (const [name, base] of Object.entries(COPPER_CHEST_TEX)) {
+  SPECIAL_MODELS[name] = (p) => ({
+    model: chestModel('entity/chest/' + base + (p.type === 'left' ? '_left' : p.type === 'right' ? '_right' : ''), p.type),
+    variant: chestVariant(p),
+    texSize: 64,
+  })
+}
+
+// 旗帜：杆 + 旗面（白色 base 贴图，不渲染图案；彩色旗帜暂统一白色显示）。
+// base 是 64×64、木板是 16×16，这里都按 texSize=64 归一化（贴图采样时会各自映射到整张）。
+function bannerModel() {
+  const plank = { uv: [0, 0, 64, 64], texture: '#plank' }
+  const flag = { uv: [0, 0, 64, 64], texture: '#flag' }
+  return {
+    textures: { plank: 'block/oak_planks', flag: 'entity/banner/base' },
+    elements: [
+      { from: [7, 0, 7], to: [9, 26, 9], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
+      { from: [-2, 6, 9], to: [18, 26, 10], faces: { north: flag, south: flag, up: flag, down: flag, east: flag, west: flag } },
+    ],
+  }
+}
+function wallBannerModel() {
+  const flag = { uv: [0, 0, 64, 64], texture: '#flag' }
+  return {
+    textures: { flag: 'entity/banner/base' },
+    elements: [
+      { from: [2, 2, 15], to: [14, 22, 16], faces: { north: flag, south: flag, up: flag, down: flag, east: flag, west: flag } },
+    ],
+  }
+}
+const BANNER_COLORS = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black']
+for (const c of BANNER_COLORS) {
+  SPECIAL_MODELS[c + '_banner'] = (p) => ({ model: bannerModel(), variant: { y: (Number(p.rotation) || 0) * 22.5 }, texSize: 64 })
+  SPECIAL_MODELS[c + '_wall_banner'] = (p) => ({ model: wallBannerModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 64 })
+}
+
+// 装饰罐：10×15×10 罐体（侧面/顶面都用 side 贴图，不渲染陶片图案）
+function potModel() {
+  const side = { uv: [0, 0, 16, 16], texture: '#all' }
+  return {
+    textures: { all: 'entity/decorated_pot/decorated_pot_side' },
+    elements: [
+      { from: [3, 0, 3], to: [13, 15, 13], faces: { up: side, down: side, north: side, south: side, west: side, east: side } },
+    ],
+  }
+}
+SPECIAL_MODELS.decorated_pot = (p) => ({ model: potModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 16 })
+
+// 铜傀儡雕像：简化为「身体 + 头」两段立方体（用对应氧化的铜傀儡贴图）
+function golemStatueModel(texKey) {
+  const f = { uv: [0, 0, 64, 64], texture: '#all' }
+  return {
+    textures: { all: texKey },
+    elements: [
+      { from: [3, 4, 3], to: [13, 15, 13], faces: { up: f, down: f, north: f, south: f, west: f, east: f } },
+      { from: [4, 15, 4], to: [12, 23, 12], faces: { up: f, down: f, north: f, south: f, west: f, east: f } },
+    ],
+  }
+}
+const GOLEM_STATUES = ['copper_golem_statue', 'exposed_copper_golem_statue', 'weathered_copper_golem_statue', 'oxidized_copper_golem_statue', 'waxed_copper_golem_statue', 'waxed_exposed_copper_golem_statue', 'waxed_weathered_copper_golem_statue', 'waxed_oxidized_copper_golem_statue']
+for (const name of GOLEM_STATUES) {
+  const tex = 'entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : '')
+  SPECIAL_MODELS[name] = (p) => ({ model: golemStatueModel(tex), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 64 })
 }
 
 export class BlockModelResolver {
