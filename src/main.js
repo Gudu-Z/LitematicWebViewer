@@ -147,6 +147,7 @@ async function openFile(file) {
     ui.setStatus(`正在生成几何体（${data.blocks.size.toLocaleString()} 个方块）…`)
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
     await renderCurrentSigns()
+    await renderCurrentPlayerHeads()
     await renderCurrentEntities()
     ui.showMetadata(data.metadata)
     const entityNote = data.entities?.length ? `，${data.entities.length} 个实体` : ''
@@ -185,6 +186,7 @@ async function reRenderCurrent() {
   })
   await renderer.render(currentData, assets, (p) => ui.setProgress(p))
   await renderCurrentSigns()
+  await renderCurrentPlayerHeads()
   await renderCurrentEntities()
 }
 
@@ -198,6 +200,48 @@ async function renderCurrentSigns() {
 async function renderCurrentEntities() {
   if (!currentData || !renderer) return
   await renderer.renderEntities(currentData.entities || [], assets, currentData)
+}
+
+// 渲染当前结构里的玩家头颅（用玩家自己的皮肤）
+async function renderCurrentPlayerHeads() {
+  if (!currentData || !renderer) return
+  await renderer.renderPlayerHeads(extractPlayerHeads(currentData), assets)
+}
+
+// 从方块实体中提取玩家头颅：{x, y, z, rotation?, facing?, skinUrl}
+function extractPlayerHeads(data) {
+  const heads = []
+  const b = data.bounds
+  for (const te of data.tileEntities || []) {
+    if (te.id !== 'minecraft:skull') continue
+    const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
+    if (gi === undefined) continue
+    const p = data.palette[gi]
+    const name = (p.name || '').replace(/^minecraft:/, '')
+    if (name !== 'player_head' && name !== 'player_wall_head') continue
+    const skinUrl = extractSkinUrl(te.nbt?.profile)
+    // skinUrl 为 null 时（占位头颅/无皮肤信息）渲染器回退到默认 Steve 皮肤
+    heads.push({ x: te.x, y: te.y, z: te.z, rotation: p.properties?.rotation, facing: p.properties?.facing, skinUrl })
+  }
+  return heads
+}
+
+// 从头颅 profile 里解出皮肤 URL（properties 里的 textures 项是 base64 编码的 JSON）
+function extractSkinUrl(profile) {
+  if (!profile) return null
+  for (const prop of profile.properties || []) {
+    if (prop.name !== 'textures' || !prop.value) continue
+    try {
+      const binary = atob(prop.value)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
+      const obj = JSON.parse(new TextDecoder().decode(bytes))
+      return obj?.textures?.SKIN?.url || null
+    } catch {
+      return null
+    }
+  }
+  return null
 }
 
 // 从方块实体中提取告示牌：{x, y, z, rotation, lines}

@@ -373,6 +373,13 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
   for (let i = 0; i < palette.length; i++) {
     const name = palette[i].name
     const baked = palette[i].baked
+    const sn = shortName(name)
+    // 玩家头颅单独渲染（用玩家自己的皮肤），不在这里走方块渲染
+    if (sn === 'player_head' || sn === 'player_wall_head') {
+      quadsByPalette[i] = null
+      hideSame[i] = 0
+      continue
+    }
     if (baked && baked.quads && baked.quads.length && !isSkipBlock(name)) {
       renderable[i] = 1
       occludes[i] = baked.fullCube && !isTransparent(name) ? 1 : 0
@@ -381,7 +388,6 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress) {
       quadsByPalette[i] = null
     }
     // 原版 isSideInvisible：玻璃/树叶同类相邻时隐藏共享面
-    const sn = shortName(name)
     hideSame[i] = sn.includes('glass') || sn.endsWith('_leaves') ? 1 : 0
   }
 

@@ -6,11 +6,64 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildFaceGroups } from './geometry.js'
 import { buildEntityMesh } from './entities.js'
+import { bakeModel } from './modelBaker.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
 
 // 墙上告示牌的 facing -> 方向向量（文字朝向）
 const SIGN_FACING = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0] }
+
+// 玩家头颅模型（8×8×8 立方，皮肤 64×64 布局），与 blocks.js 的 headModel 一致
+const HEAD_MODEL = {
+  textures: { all: 'head' },
+  elements: [{
+    from: [4, 4, 4], to: [12, 12, 12],
+    faces: {
+      up: { uv: [8, 0, 16, 8], texture: '#all' },
+      down: { uv: [16, 0, 24, 8], texture: '#all' },
+      east: { uv: [0, 8, 8, 16], texture: '#all' },
+      south: { uv: [8, 8, 16, 16], texture: '#all' },
+      west: { uv: [16, 8, 24, 16], texture: '#all' },
+      north: { uv: [24, 8, 32, 16], texture: '#all' },
+    },
+  }],
+}
+const HEAD_FACING_Y = { north: 180, south: 0, east: -90, west: 90 }
+
+// 把 bakeModel 的一组 quad 转成单一材质 BufferGeometry
+function quadsToHeadGeometry(quads) {
+  const n = quads.length
+  const positions = new Float32Array(n * 12)
+  const uvs = new Float32Array(n * 8)
+  const normals = new Float32Array(n * 12)
+  const indices = new Uint32Array(n * 6)
+  for (let i = 0; i < n; i++) {
+    const q = quads[i]
+    for (let k = 0; k < 4; k++) {
+      positions[i * 12 + k * 3] = q.verts[k][0]
+      positions[i * 12 + k * 3 + 1] = q.verts[k][1]
+      positions[i * 12 + k * 3 + 2] = q.verts[k][2]
+      uvs[i * 8 + k * 2] = q.uvs[k][0]
+      uvs[i * 8 + k * 2 + 1] = q.uvs[k][1]
+      normals[i * 12 + k * 3] = q.normal[0]
+      normals[i * 12 + k * 3 + 1] = q.normal[1]
+      normals[i * 12 + k * 3 + 2] = q.normal[2]
+    }
+    // 与方块渲染（geometry.js writeFace）相同三角化：0,1,2 + 2,1,3
+    indices[i * 6] = i * 4
+    indices[i * 6 + 1] = i * 4 + 1
+    indices[i * 6 + 2] = i * 4 + 2
+    indices[i * 6 + 3] = i * 4 + 2
+    indices[i * 6 + 4] = i * 4 + 1
+    indices[i * 6 + 5] = i * 4 + 3
+  }
+  const geo = new THREE.BufferGeometry()
+  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
+  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+  geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
+  geo.setIndex(new THREE.BufferAttribute(indices, 1))
+  return geo
+}
 
 // 红石粉按信号强度染色（复刻原版 RedstoneWireBlock 的渐变：越高越亮，越低越深）
 function redstoneTint(power) {
@@ -75,6 +128,9 @@ export class Renderer {
 
     this.signsGroup = new THREE.Group() // 告示牌（方块实体）
     this.scene.add(this.signsGroup)
+
+    this.headsGroup = new THREE.Group() // 玩家头颅（用玩家皮肤）
+    this.scene.add(this.headsGroup)
 
     this.entitiesGroup = new THREE.Group() // 实体（矿车、物品展示框等）
     this.scene.add(this.entitiesGroup)
@@ -165,7 +221,20 @@ export class Renderer {
       mats.forEach((m) => m?.dispose())
     }
     this.clearSigns()
+    this.clearHeads()
     this.clearEntities()
+  }
+
+  clearHeads() {
+    while (this.headsGroup.children.length) {
+      const child = this.headsGroup.children.pop()
+      child.geometry?.dispose()
+      const mats = Array.isArray(child.material) ? child.material : [child.material]
+      mats.forEach((m) => {
+        m.map?.dispose()
+        m.dispose()
+      })
+    }
   }
 
   clearSigns() {
@@ -202,6 +271,26 @@ export class Renderer {
     if (!entities || !entities.length) return
     const meshes = await Promise.all(entities.map((e) => buildEntityMesh(e, assets, data).catch(() => null)))
     for (const m of meshes) if (m) this.entitiesGroup.add(m)
+  }
+
+  // 渲染玩家头颅：加载对应玩家的皮肤，画成 8×8×8 头颅。heads: [{x, y, z, rotation?, facing?, skinUrl}]
+  async renderPlayerHeads(heads, assets) {
+    this.clearHeads()
+    if (!heads || !heads.length) return
+    for (const head of heads) {
+      // 有皮肤 URL 就加载玩家皮肤，否则用默认 Steve 皮肤
+      const skinTex = head.skinUrl
+        ? await assets.getExternalTexture(head.skinUrl)
+        : await assets.getTexture('entity/player/wide/steve')
+      if (!skinTex) continue
+      // 立地头颅用 rotation(0-15)，墙上头颅用 facing（与 blocks.js headVariant 一致）
+      const yDeg = head.facing ? (HEAD_FACING_Y[head.facing] || 0) : (Number(head.rotation) || 0) * 22.5
+      const quads = bakeModel(HEAD_MODEL, { y: yDeg }, [64, 64]).quads
+      const mat = new THREE.MeshLambertMaterial({ map: skinTex, alphaTest: 0.5, flatShading: true })
+      const mesh = new THREE.Mesh(quadsToHeadGeometry(quads), mat)
+      mesh.position.set(head.x, head.y, head.z)
+      this.headsGroup.add(mesh)
+    }
   }
 
   // 动态设置背景色

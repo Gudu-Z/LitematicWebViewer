@@ -82,6 +82,25 @@ export class AssetProvider {
     return p
   }
 
+  // 从外部 URL 加载贴图（如玩家皮肤），并缓存。返回 THREE.Texture 或 null。
+  async getExternalTexture(url) {
+    if (!url) return null
+    if (this.textureCache.has(url)) return this.textureCache.get(url)
+    const p = (async () => {
+      try {
+        // 皮肤 URL 可能是 http://，但本站是 https，需统一成 https 避免混合内容被浏览器拦截
+        const resp = await fetch(String(url).replace(/^http:/, 'https:'))
+        if (!resp.ok) return null
+        const blob = await resp.blob()
+        return await textureFromBlob(blob, false)
+      } catch {
+        return null
+      }
+    })()
+    this.textureCache.set(url, p)
+    return p
+  }
+
   async _getTexture(texKey) {
     const rel = 'textures/' + texKey + '.png'
     let blob = null
@@ -101,20 +120,40 @@ export class AssetProvider {
       if (!resp.ok) return null
       blob = await resp.blob()
     }
-    return textureFromBlob(blob)
+    const animated = await this._isAnimated(texKey)
+    return textureFromBlob(blob, animated)
+  }
+
+  // 检查贴图是否为动画（.mcmeta 里有 animation 字段）。找不到 .mcmeta 返回 null（交由启发式判断）。
+  async _isAnimated(texKey) {
+    const rel = 'textures/' + texKey + '.png.mcmeta'
+    for (const p of this.packs) {
+      const entry = p.zip.file('assets/minecraft/' + rel)
+      if (entry) {
+        try { return !!JSON.parse(await entry.async('string')).animation } catch { return false }
+      }
+    }
+    try {
+      const resp = await fetch(this.baseUrl + rel)
+      if (!resp.ok) return null
+      return !!JSON.parse(await resp.text()).animation
+    } catch {
+      return null
+    }
   }
 }
 
-function textureFromBlob(blob) {
+function textureFromBlob(blob, animated) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob)
     const img = new Image()
     img.onload = () => {
       let source = img
-      // 动画贴图是「宽×宽 N 帧」的竖向长条（如 16×512、32×1024）；裁取第一帧，避免整条被压到面上。
-      // 但 64×128 这类「高比宽」的单张生物贴图（女巫/炽足兽）不能被误裁：帧数极多时宽高比才大，
-      // 这里用 >=4 区分（原版动画至少 8 帧，如 16×512 比值 32）。
-      if (img.height > img.width && img.height % img.width === 0 && img.height / img.width >= 4) {
+      // 动画贴图是「宽×宽 N 帧」的竖向长条（如 16×48 灯笼、16×512 水）；裁取第一帧，
+      // 避免整条被压到面上。优先按 .mcmeta 的 animation 字段判定；没有 .mcmeta 时用
+      // 宽高比启发式（>=4 帧）兜底，但 64×128 单张生物贴图（女巫/炽足兽）不误裁。
+      const heuristic = img.height > img.width && img.height % img.width === 0 && img.height / img.width >= 4
+      if (img.height > img.width && (animated === true || (animated == null && heuristic))) {
         const w = img.width
         const c = document.createElement('canvas')
         c.width = w
