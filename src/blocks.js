@@ -245,10 +245,14 @@ for (const [name, base] of Object.entries(COPPER_CHEST_TEX)) {
 // 尺寸/位置定义：立地杆 2×42×2 → 1.33×28×1.33，y 从方块中心(8)到 36（即地面往上 0.5..2.25 格）。
 function bannerModel() {
   const plank = { uv: [0, 0, 64, 64], texture: '#plank' }
+  // 旗面：20×40 像素（贴图左上角 u0..20 v0..40），挂在杆右侧、杆顶往下。旗面贴图 entity/banner/base
+  // 是灰度遮罩，实际底色/图案在渲染端按旗帜实例上色（这里 texture 键 #flag 供 entities.js 上色）。
+  const flag = { uv: [0, 0, 20, 40], texture: '#flag' }
   return {
-    textures: { plank: 'block/oak_planks' },
+    textures: { plank: 'block/oak_planks', flag: 'entity/banner/base' },
     elements: [
       { from: [7, 8, 7], to: [9, 36, 9], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
+      { from: [9, 8, 7.25], to: [22.33, 36, 8.75], faces: { north: flag, south: flag, up: flag, down: flag, west: flag, east: flag } },
     ],
   }
 }

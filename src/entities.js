@@ -47,6 +47,14 @@ function fixedRotQuaternion(rot) {
 // 2D 物品/头颅/时钟等 item 模型 fixed 显示旋转均为 [0,180,0]
 const Q_FLIP = fixedRotQuaternion([0, 180, 0])
 
+// 旗帜 16 色染料（与 renderer.js 的 DYE_COLORS 一致），用于给展示框里旗帜的旗面底色上色。
+const DYE_COLORS = {
+  white: '#ffffff', orange: '#ff681f', magenta: '#c74ebd', light_blue: '#3ab3da',
+  yellow: '#fed83d', lime: '#80c71f', pink: '#f38baa', gray: '#474f52',
+  light_gray: '#9d9d97', cyan: '#169c9c', purple: '#8932b8', blue: '#3c44aa',
+  brown: '#835432', green: '#5e7c16', red: '#b02e26', black: '#000000',
+}
+
 // 把 items/NAME.json 的 model 定义解析成「fixed 展示（默认）状态」的模型列表。
 // 返回 [{ path: "block/xxx"|"item/xxx", transform: {translation,scale,...}|null }]。
 // 各类解析为默认分支：composite 拆成多个（如床的 head+foot）；condition 取 on_false；
@@ -401,11 +409,19 @@ async function buildFrameItem(item, resolver, assets) {
   if (baked && baked.quads && baked.quads.length) {
     const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
     const mats = new Map()
+    // 旗帜旗面（entity/banner/base 灰度遮罩）按底色上色
+    const bannerColor = name.endsWith('_banner') || name.endsWith('_wall_banner')
+      ? DYE_COLORS[name.replace(/_wall_banner$/, '').replace(/_banner$/, '')]
+      : null
     await Promise.all(
       texKeys.map(async (tk) => {
         const tex = await assets.getTexture(tk)
         // DoubleSide：玻璃/植物等十字模型与透明方块背面也要可见（原版 cutout 不剔除背面）
-        if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true }))
+        if (tex) {
+          const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
+          if (bannerColor && tk === 'entity/banner/base') mat.color = new THREE.Color(bannerColor)
+          mats.set(tk, mat)
+        }
       }),
     )
     const center = baked.center || [-0.5, -0.5, -0.5]
