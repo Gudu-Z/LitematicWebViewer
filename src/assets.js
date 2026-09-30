@@ -71,11 +71,12 @@ export class AssetProvider {
         }
       }
     }
-    const resp = await fetch(this.baseUrl + path)
-    if (!resp.ok) return null
-    // dev 服务器下，缺失文件会返回 SPA 回退的 index.html（text/html），json() 会抛错
-    if ((resp.headers.get('content-type') || '').includes('text/html')) return null
+    // fetch 可能因网络/并发等原因 reject；返回 null 让调用方优雅降级，而不是让整个实体渲染失败。
     try {
+      const resp = await fetch(this.baseUrl + path)
+      if (!resp.ok) return null
+      // dev 服务器下，缺失文件会返回 SPA 回退的 index.html（text/html），json() 会抛错
+      if ((resp.headers.get('content-type') || '').includes('text/html')) return null
       return await resp.json()
     } catch {
       return null
@@ -85,7 +86,12 @@ export class AssetProvider {
   // 加载贴图。texKey 形如 "block/stone"（已归一化，不含 minecraft: 前缀和 textures/ 前缀）。
   getTexture(texKey) {
     if (this.textureCache.has(texKey)) return this.textureCache.get(texKey)
-    const p = this._getTexture(texKey)
+    // 加载失败（null，如并发导致的瞬时解码失败）不缓存，下次调用重试；
+    // 成功则缓存。避免一次瞬时失败把该贴图永久判为缺失。
+    const p = this._getTexture(texKey).then((tex) => {
+      if (!tex) this.textureCache.delete(texKey)
+      return tex
+    })
     this.textureCache.set(texKey, p)
     return p
   }
@@ -124,14 +130,24 @@ export class AssetProvider {
       }
     }
     if (!blob) {
-      const resp = await fetch(this.baseUrl + rel)
-      if (!resp.ok) return null
-      // dev 服务器下，缺失文件会返回 SPA 回退的 index.html（text/html），避免把它当图片加载
-      if ((resp.headers.get('content-type') || '').includes('text/html')) return null
-      blob = await resp.blob()
+      try {
+        const resp = await fetch(this.baseUrl + rel)
+        if (!resp.ok) return null
+        // dev 服务器下，缺失文件会返回 SPA 回退的 index.html（text/html），避免把它当图片加载
+        if ((resp.headers.get('content-type') || '').includes('text/html')) return null
+        blob = await resp.blob()
+      } catch {
+        return null
+      }
     }
     const animated = await this._isAnimated(texKey)
-    return textureFromBlob(blob, animated)
+    // 图片解码失败（如大量并发展示框同时加载贴图时浏览器的瞬时失败）不应让整个实体渲染抛错，
+    // 返回 null 让该贴图缺失、其余照常渲染。
+    try {
+      return await textureFromBlob(blob, animated)
+    } catch {
+      return null
+    }
   }
 
   // 检查贴图是否为动画（.mcmeta 里有 animation 字段）。找不到 .mcmeta 返回 null（交由启发式判断）。

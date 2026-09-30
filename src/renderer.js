@@ -476,14 +476,22 @@ export class Renderer {
   async renderEntities(entities, assets, data) {
     this.clearEntities()
     if (!entities || !entities.length) return
-    const meshes = await Promise.all(
-      entities.map((e) =>
-        buildEntityMesh(e, assets, data).catch((err) => {
-          console.error('实体渲染失败:', e.id, err)
-          return null
-        }),
-      ),
-    )
+    // 分批次渲染，避免「全方块」这类上千个展示框一次性并发加载贴图/模型，
+    // 超过浏览器并发上限导致部分贴图瞬时加载失败（进而整框报「实体渲染失败」）。
+    const BATCH = 50
+    const meshes = []
+    for (let i = 0; i < entities.length; i += BATCH) {
+      const chunk = entities.slice(i, i + BATCH)
+      const results = await Promise.all(
+        chunk.map((e) =>
+          buildEntityMesh(e, assets, data).catch((err) => {
+            console.error('实体渲染失败:', e.id, err)
+            return null
+          }),
+        ),
+      )
+      meshes.push(...results)
+    }
     for (const m of meshes) if (m) this.entitiesGroup.add(m)
   }
 
