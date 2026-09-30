@@ -320,9 +320,8 @@ for (const [name, base] of Object.entries(COPPER_CHEST_TEX)) {
 // 杆底在方块底 y=0、旗面 y=8/3..88/3（中心 y=16，与 renderer.renderBanners 的旗面中心一致）。
 function bannerModel() {
   const wood = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#wood' })
-  const flagF = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#flag' })
   return {
-    textures: { wood: 'entity/banner/banner_base', flag: 'entity/banner/base' },
+    textures: { wood: 'entity/banner/banner_base' },
     elements: [
       // 竖杆 2×42×2 ×2/3 → 4/3×28×4/3（居中 x=z=8，y 0..28）
       { from: [22 / 3, 0, 22 / 3], to: [26 / 3, 28, 26 / 3], faces: {
@@ -336,12 +335,8 @@ function bannerModel() {
         north: wood(24, 44, 44, 46), south: wood(2, 44, 22, 46),
         west: wood(0, 44, 2, 46), east: wood(22, 44, 24, 46),
       } },
-      // 旗面 20×40×1 ×2/3 → 40/3×80/3×2/3（y 8/3..88/3，正面 u1..21/v1..41）
-      { from: [4 / 3, 8 / 3, 26 / 3], to: [44 / 3, 88 / 3, 28 / 3], faces: {
-        south: flagF(1, 1, 21, 41), north: flagF(22, 1, 42, 41),
-        up: flagF(1, 0, 21, 1), down: flagF(21, 1, 41, 0),
-        west: flagF(0, 1, 1, 41), east: flagF(21, 1, 22, 41),
-      } },
+      // 旗面由 renderer.renderBanners 用着色贴图（底色+图案）单独绘制，这里不再渲染灰色旗面，
+      // 避免灰色旗面挡在前面、遮住着色旗面的图案。
     ],
   }
 }
