@@ -24,6 +24,14 @@ const DYE_COLORS = {
 // 墙上旗帜 facing -> 旗面朝向角（three.js 的 rotation.y，逆时针为正）
 const BANNER_FACING_Y = { north: 180, south: 0, east: 90, west: -90 }
 
+// 陶片物品 ID -> 陶片图案贴图。minecraft:skull_pottery_sherd -> entity/decorated_pot/skull_pottery_pattern；
+// 无陶片（如 minecraft:brick，或空）返回 null，用空白侧贴图 decorated_pot_side。
+function potPatternTexture(sherdId) {
+  const id = (sherdId || '').replace(/^minecraft:/, '')
+  if (!id.endsWith('_pottery_sherd')) return null
+  return 'entity/decorated_pot/' + id.replace(/_pottery_sherd$/, '_pottery_pattern')
+}
+
 // 旗帜旗面几何，UV v=0 在上（MC 约定，配合 flipY=false 贴图）。
 // 原版 BannerFlagModel 的旗面 cuboid 是 20×40×1、texOffs(0,0)、贴图 64×64，即只采样
 // 贴图左上角 u=0..20、v=0..40 的旗面区域（贴图右侧 22px 是旗面侧边的阴影，不属于正面）。
@@ -45,6 +53,41 @@ function bannerFlagGeometry() {
   return geo
 }
 const BANNER_FLAG_GEO = bannerFlagGeometry()
+
+// 装饰罐四个侧面（原版 DecoratedPotRenderer.createSidesLayer）。
+// 罐体 14×16（x/z 1..15、y 0..16），四个面贴在罐体外侧；贴图 16×16，只采样 u=1..15 的
+// 14px 内容（左右各留 1px 边框），图案正立（v=0 在上）。原版里这四个面由同一个「北面」
+// 立方体 (0,0,0)-(14,16,0) 经不同 PartPose 旋转/平移得到，这里按推导出的世界坐标与 UV
+// 直接构造，法线显式朝外（配合 side=DoubleSide 与 flatShading）。
+const POT_SIDE_GEO = (() => {
+  const hx = 7 / 16 // 半宽（14px / 2）
+  const hy = 0.5 // 半高（16px / 2）
+  const s = 1 / 16 // 1px（贴图内容 u 从 1px 到 15px）
+  const mk = (corners, nx, ny, nz) => {
+    // corners: 4 项 [x, y, z, u, v]，坐标为「以方块中心为原点」（x/z 中心 0、y 中心 0）
+    const pos = new Float32Array(12)
+    const uv = new Float32Array(8)
+    const nrm = new Float32Array(12)
+    for (let i = 0; i < 4; i++) {
+      const c = corners[i]
+      pos[i * 3] = c[0]; pos[i * 3 + 1] = c[1]; pos[i * 3 + 2] = c[2]
+      uv[i * 2] = c[3]; uv[i * 2 + 1] = c[4]
+      nrm[i * 3] = nx; nrm[i * 3 + 1] = ny; nrm[i * 3 + 2] = nz
+    }
+    const g = new THREE.BufferGeometry()
+    g.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+    g.setAttribute('uv', new THREE.BufferAttribute(uv, 2))
+    g.setAttribute('normal', new THREE.BufferAttribute(nrm, 3))
+    g.setIndex([0, 1, 2, 2, 1, 3])
+    return g
+  }
+  return [
+    mk([[-hx, hy, hx, 1 * s, 0], [hx, hy, hx, 15 * s, 0], [-hx, -hy, hx, 1 * s, 1], [hx, -hy, hx, 15 * s, 1]], 0, 0, 1), // front（+z）
+    mk([[hx, hy, -hx, 1 * s, 0], [-hx, hy, -hx, 15 * s, 0], [hx, -hy, -hx, 1 * s, 1], [-hx, -hy, -hx, 15 * s, 1]], 0, 0, -1), // back（-z）
+    mk([[-hx, hy, hx, 15 * s, 0], [-hx, hy, -hx, 1 * s, 0], [-hx, -hy, hx, 15 * s, 1], [-hx, -hy, -hx, 1 * s, 1]], -1, 0, 0), // left（-x）
+    mk([[hx, hy, -hx, 15 * s, 0], [hx, hy, hx, 1 * s, 0], [hx, -hy, -hx, 15 * s, 1], [hx, -hy, hx, 1 * s, 1]], 1, 0, 0), // right（+x）
+  ]
+})()
 
 // 玩家头颅模型（皮肤 64×64 布局）。与 vanilla HeadModel 一致：底层头 + 帽子层
 // （第二层，UV 在皮肤头部区域的第二列 +32，比底层稍大 0.25 像素）。帽子层透明处
@@ -185,6 +228,9 @@ export class Renderer {
 
     this.statuesGroup = new THREE.Group() // 铜傀儡雕像（BER 绘制）
     this.scene.add(this.statuesGroup)
+
+    this.potsGroup = new THREE.Group() // 装饰罐侧面（陶片图案逐实例绘制）
+    this.scene.add(this.potsGroup)
 
     this.entitiesGroup = new THREE.Group() // 实体（矿车、物品展示框等）
     this.scene.add(this.entitiesGroup)
@@ -363,6 +409,7 @@ export class Renderer {
     this.clearHeads()
     this.clearBanners()
     this.clearStatues()
+    this.clearPots()
     this.clearEntities()
     this.clearOverlay()
     this.clearRegionWireframes()
@@ -431,6 +478,22 @@ export class Renderer {
           m.map?.dispose()
           m.dispose()
         }
+      })
+    }
+  }
+
+  clearPots() {
+    while (this.potsGroup.children.length) {
+      const child = this.potsGroup.children.pop()
+      child.traverse((o) => {
+        if (o.geometry) o.geometry.dispose()
+        const mats = Array.isArray(o.material) ? o.material : [o.material]
+        mats.forEach((m) => {
+          if (m) {
+            m.map?.dispose()
+            m.dispose()
+          }
+        })
       })
     }
   }
@@ -558,6 +621,29 @@ export class Renderer {
       mesh.position.set(s.x + 0.5, s.y + 0.05, s.z + 0.5)
       mesh.rotation.y = ((BANNER_FACING_Y[s.facing] ?? 0) * Math.PI) / 180
       this.statuesGroup.add(mesh)
+    }
+  }
+
+  // 渲染装饰罐的四个侧面（每只罐子的陶片图案可能不同）。
+  // pots: [{x, y, z, facing, sherds: {front, back, left, right}}]，sherds 各项为陶片物品 ID 或 null。
+  async renderDecoratedPots(pots, assets) {
+    this.clearPots()
+    if (!pots || !pots.length) return
+    const blankTex = await assets.getTexture('entity/decorated_pot/decorated_pot_side')
+    if (!blankTex) return
+    const SIDES = ['front', 'back', 'left', 'right']
+    for (const pot of pots) {
+      const group = new THREE.Group()
+      for (let i = 0; i < 4; i++) {
+        const pattern = potPatternTexture(pot.sherds && pot.sherds[SIDES[i]])
+        const tex = pattern ? await assets.getTexture(pattern) : blankTex
+        if (!tex) continue
+        const mat = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide, flatShading: true })
+        group.add(new THREE.Mesh(POT_SIDE_GEO[i], mat))
+      }
+      group.position.set(pot.x + 0.5, pot.y + 0.5, pot.z + 0.5)
+      group.rotation.y = ((BANNER_FACING_Y[pot.facing] ?? 0) * Math.PI) / 180
+      this.potsGroup.add(group)
     }
   }
 

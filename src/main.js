@@ -226,6 +226,7 @@ async function openFile(file) {
     await renderCurrentPlayerHeads()
     await renderCurrentBanners()
     await renderCurrentStatues()
+    await renderCurrentPots()
     await renderCurrentEntities()
     ui.showMetadata(data.metadata)
     updateRegionUI()
@@ -271,6 +272,7 @@ async function reRenderCurrent() {
   await renderCurrentPlayerHeads()
   await renderCurrentBanners()
   await renderCurrentStatues()
+  await renderCurrentPots()
   await renderCurrentEntities()
 }
 
@@ -313,6 +315,17 @@ async function renderCurrentStatues() {
     await renderer.renderStatues(extractStatues(currentData), assets)
   } catch (e) {
     console.error('铜傀儡雕像渲染失败', e)
+  }
+}
+
+// 渲染当前结构里的装饰罐侧面（陶片图案）
+async function renderCurrentPots() {
+  if (!currentData || !renderer) return
+  try {
+    const tes = filterByRegion(currentData.tileEntities || [])
+    await renderer.renderDecoratedPots(extractDecoratedPots(tes, currentData), assets)
+  } catch (e) {
+    console.error('装饰罐渲染失败', e)
   }
 }
 
@@ -388,6 +401,7 @@ async function toggleRegion(name) {
   await renderCurrentPlayerHeads()
   await renderCurrentBanners()
   await renderCurrentStatues()
+  await renderCurrentPots()
   await renderCurrentEntities()
 }
 
@@ -545,6 +559,43 @@ function extractStatues(data) {
     statues.push({ x: lx + b.minX, y: ly + b.minY, z: lz + b.minZ, facing: p.properties?.facing, texKey: tex })
   }
   return statues
+}
+
+// 从方块实体中提取装饰罐：{x, y, z, facing, sherds: {front, back, left, right}}，sherds 各项为陶片物品 ID 或 null
+function extractDecoratedPots(tileEntities, data) {
+  const pots = []
+  const b = data.bounds
+  for (const te of tileEntities || []) {
+    if (te.id !== 'minecraft:decorated_pot') continue
+    const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
+    const props = gi !== undefined ? data.palette[gi].properties || {} : {}
+    pots.push({ x: te.x, y: te.y, z: te.z, facing: props.facing, sherds: parsePotSherds(te.nbt?.sherds) })
+  }
+  return pots
+}
+
+// 解析装饰罐的 sherds NBT：兼容 1.20 的列表格式与 1.21 的映射格式。
+// 列表顺序为 [back, left, right, front]（与原版 PotDecorations 记录字段顺序一致）。
+function parsePotSherds(sherds) {
+  const out = { front: null, back: null, left: null, right: null }
+  if (!sherds) return out
+  if (Array.isArray(sherds)) {
+    const order = ['back', 'left', 'right', 'front']
+    for (let i = 0; i < order.length && i < sherds.length; i++) out[order[i]] = sherdIdOf(sherds[i])
+    return out
+  }
+  if (typeof sherds === 'object') {
+    for (const k of Object.keys(out)) out[k] = sherdIdOf(sherds[k])
+    return out
+  }
+  return out
+}
+
+// 从 sherd 条目（字符串 ID 或物品栈对象）解出物品 ID
+function sherdIdOf(entry) {
+  if (typeof entry === 'string') return entry
+  if (entry && typeof entry === 'object') return entry.id || null
+  return null
 }
 
 // 把 JSON 文本组件转成纯文本（简化处理）

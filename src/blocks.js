@@ -362,17 +362,24 @@ for (const c of BANNER_COLORS) {
   SPECIAL_MODELS[c + '_wall_banner'] = (p) => ({ model: wallBannerModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 64 })
 }
 
-// 装饰罐：10×15×10 罐体（侧面/顶面都用 side 贴图，不渲染陶片图案）
-function potModel() {
-  const side = { uv: [0, 0, 16, 16], texture: '#all' }
+// 装饰罐（BER）：罐体分「底座」与「四个侧面」两部分。底座（颈口/罐口/罐底）贴图固定为
+// 32×32 的 entity/decorated_pot/decorated_pot_base，作为静态方块模型烘焙；四个侧面贴图随
+// 每只罐子的陶片图案而变（16×16，空白 side 或 *_pottery_pattern），由 renderer.renderDecoratedPots
+// 逐实例绘制。原版 DecoratedPotRenderer.createBaseLayer()：颈口 8×3×8（texOffs 0,0）+ 6×1×6
+// （texOffs 0,5），经 PartPose(0,37,16,π,0,0) 后落到 y 17..20 与 16..17；罐口/罐底各 14×0×14
+// （texOffs -14,13，负 u 由 auto-UV 补偿到 u14..28）。
+function potBaseModel() {
   return {
-    textures: { all: 'entity/decorated_pot/decorated_pot_side' },
+    textures: { all: 'entity/decorated_pot/decorated_pot_base' },
     elements: [
-      { from: [3, 0, 3], to: [13, 15, 13], faces: { up: side, down: side, north: side, south: side, west: side, east: side } },
+      texBox([4, 17, 4], [12, 20, 12], 0, 0), // 颈口上段 8×3×8
+      texBox([5, 16, 5], [11, 17, 11], 0, 5), // 颈口下段 6×1×6
+      texBox([1, 16, 1], [15, 16, 15], -14, 13), // 罐口（顶面）
+      texBox([1, 0, 1], [15, 0, 15], -14, 13), // 罐底
     ],
   }
 }
-SPECIAL_MODELS.decorated_pot = (p) => ({ model: potModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 16 })
+SPECIAL_MODELS.decorated_pot = (p) => ({ model: potBaseModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 32 })
 
 // 潮涌核心（BER，无 JSON 几何）：原版 ConduitRenderer.createShellLayer 就是一个 6×6×6 立方体
 // （addBox(-3,-3,-3, 6,6,6)，texOffs 0,0，32×16 贴图 entity/conduit/base）。物品渲染（ConduitSpecialRenderer）
@@ -555,6 +562,11 @@ function matchWhen(when, props) {
     if (k === 'OR') {
       // {OR: [条件1, 条件2]}：任一条件满足即匹配
       if (!Array.isArray(v) || !v.some((cond) => matchWhen(cond, props))) return false
+      continue
+    }
+    if (k === 'AND') {
+      // {AND: [条件1, 条件2]}：所有条件都满足才匹配（如雕纹书架/架子的 facing + slot 占用）
+      if (!Array.isArray(v) || !v.every((cond) => matchWhen(cond, props))) return false
       continue
     }
     if (v === undefined) continue
