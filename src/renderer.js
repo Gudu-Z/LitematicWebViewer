@@ -364,6 +364,8 @@ export class Renderer {
     this.clearBanners()
     this.clearStatues()
     this.clearEntities()
+    this.clearOverlay()
+    this.clearRegionWireframes()
   }
 
   clearBlocks(disposeTextures = false) {
@@ -446,6 +448,27 @@ export class Renderer {
           }
         })
       })
+    }
+  }
+
+  clearOverlay() {
+    while (this.overlay.children.length) {
+      const c = this.overlay.children.pop()
+      c.geometry?.dispose()
+      const mats = Array.isArray(c.material) ? c.material : [c.material]
+      mats.forEach((m) => {
+        m?.map?.dispose()
+        m?.dispose()
+      })
+    }
+  }
+
+  clearRegionWireframes() {
+    while (this.regionGroup.children.length) {
+      const c = this.regionGroup.children.pop()
+      c.geometry?.dispose()
+      const mats = Array.isArray(c.material) ? c.material : [c.material]
+      mats.forEach((m) => m?.dispose())
     }
   }
 
@@ -838,15 +861,7 @@ export class Renderer {
 
   // 坐标轴 + 长宽高标注：三条轴长度分别等于投影长/宽/高，标签贴在轴端点旁
   _updateOverlay(bounds) {
-    while (this.overlay.children.length) {
-      const c = this.overlay.children.pop()
-      c.geometry?.dispose()
-      const mats = Array.isArray(c.material) ? c.material : [c.material]
-      mats.forEach((m) => {
-        m.map?.dispose()
-        m.dispose()
-      })
-    }
+    this.clearOverlay()
 
     const { minX, minY, minZ, width, height, depth } = bounds
     const o = new THREE.Vector3(minX, minY, minZ)
@@ -864,12 +879,7 @@ export class Renderer {
 
   // 区域线框：每个区域画一个淡蓝色包围盒（含边界 [min, max] 即 [min, max+1) 的世界盒）
   _updateRegionWireframes(data) {
-    while (this.regionGroup.children.length) {
-      const c = this.regionGroup.children.pop()
-      c.geometry?.dispose()
-      const mats = Array.isArray(c.material) ? c.material : [c.material]
-      mats.forEach((m) => m?.dispose())
-    }
+    this.clearRegionWireframes()
     const regions = data.regions || []
     for (const r of regions) {
       const box = new THREE.Box3(

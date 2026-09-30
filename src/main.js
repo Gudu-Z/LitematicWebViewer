@@ -73,6 +73,7 @@ document.getElementById('packBtn').addEventListener('click', () => packInput.cli
 document.getElementById('clearBtn').addEventListener('click', () => {
   renderer?.clear()
   currentData = null
+  resetViewForClear()
   ui.clearError()
   ui.showMetadata({})
   ui.setStatus('已清除，可拖入新文件')
@@ -360,6 +361,17 @@ function resetViewForData(data) {
   setRenderModeControl('all')
   // 显示左侧控制面板
   document.getElementById('controlPanel')?.classList.add('loaded')
+}
+
+// 清除结构时重置视图相关 UI（区域列表、层级、渲染模式、左侧控制面板）
+function resetViewForClear() {
+  view.renderMode = 'all'
+  view.layerY = 0
+  view.visibleRegions = null
+  ui.setLayerLabel('-')
+  setRenderModeControl('all')
+  updateRegionUI()
+  document.getElementById('controlPanel')?.classList.remove('loaded')
 }
 
 // 切换某个区域的可见性
