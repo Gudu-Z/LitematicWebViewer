@@ -411,6 +411,9 @@ async function buildFrameItem(item, resolver, assets) {
     const props = await defaultItemProps(name, assets)
     baked = await resolver.resolve('minecraft:' + name, props)
     fixedRot = name.endsWith('_head') || name.endsWith('_skull') || name === 'shield' || name === 'conduit' ? Q_FLIP : null
+    // 潮涌核心 items/conduit.json 的 display.fixed 缩放是 [1,1,1]（不缩），总缩放 = 框体 0.5 × 1。
+    // 这里显式给 fixedScale，否则走 fixedScale=null 的 0.4 兜底会偏小约 20%。
+    if (name === 'conduit') fixedScale = [1, 1, 1]
   }
   if (baked && baked.quads && baked.quads.length) {
     const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]

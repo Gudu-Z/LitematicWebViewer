@@ -307,18 +307,31 @@ function potModel() {
 }
 SPECIAL_MODELS.decorated_pot = (p) => ({ model: potModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 16 })
 
-// 潮涌核心（BER，无 JSON 几何）：原版 ConduitRenderer 用 entity/conduit/base(32×16 壳)、
-// cage(32×16 笼)、closed_eye(16×16 眼)。壳贴图 32×16 分上下两段：u6..18/v0..6 是圆顶（顶/底），
-// u0..32/v6..12 是环带（侧面）。这里简化：满立方体顶底贴圆顶、侧面贴环带，中央眼立方体贴整张眼。
+// 潮涌核心（BER，无 JSON 几何）：原版 ConduitRenderer.createShellLayer 就是一个 6×6×6 立方体
+// （addBox(-3,-3,-3, 6,6,6)，texOffs 0,0，32×16 贴图 entity/conduit/base）。物品渲染（ConduitSpecialRenderer）
+// 只画壳，不含眼/笼（眼/笼仅世界内激活时才有）。ModelPart.Cube 自动 UV：±Y 面贴圆顶
+// （u6..12、u12..18 / v0..6 两半），四侧面贴环带（u0..24 / v6..12，每面 6 宽一段）。
+// items/conduit.json 的 special transformation 平移 [0.5,0.5,0.5] 把 -3..3px 的壳移进方块空间，
+// 与 display.fixed 的 translate(-0.5) 居中相消，故壳居中、尺寸 6/16=0.375。
 function conduitModel() {
-  const dome = { uv: [6, 0, 18, 6], texture: '#shell' }
-  const band = { uv: [0, 6, 32, 12], texture: '#shell' }
-  const eye = { uv: [0, 0, 32, 16], texture: '#eye' }
+  const shell = 'entity/conduit/base'
+  const domeL = { uv: [6, 0, 12, 6], texture: '#shell' }
+  const domeR = { uv: [12, 0, 18, 6], texture: '#shell' }
+  const band = (u) => ({ uv: [u, 6, u + 6, 12], texture: '#shell' })
   return {
-    textures: { shell: 'entity/conduit/base', eye: 'entity/conduit/closed_eye' },
+    textures: { shell },
     elements: [
-      { from: [0, 0, 0], to: [16, 16, 16], faces: { up: dome, down: dome, north: band, south: band, west: band, east: band } },
-      { from: [6, 6, 6], to: [10, 10, 10], faces: { up: eye, down: eye, north: eye, south: eye, west: eye, east: eye } },
+      {
+        from: [5, 5, 5], to: [11, 11, 11],
+        faces: {
+          up: domeL,
+          down: domeR,
+          north: band(6),
+          south: band(18),
+          west: band(0),
+          east: band(12),
+        },
+      },
     ],
   }
 }
