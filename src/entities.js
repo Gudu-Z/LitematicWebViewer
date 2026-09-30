@@ -420,12 +420,10 @@ async function buildFrameItem(item, resolver, assets) {
       fixedScale = [0.55, 0.55, 0.55]
       fixedTrans = [-4.5 / 16, 4.5 / 16, -5 / 16]
     }
-    // 旗帜 items/*_banner.json 的 special transformation：scale (2/3,−2/3,−2/3)、translation [0.5,0,0.5]，
-    // 与 display.fixed scale 0.5 合并 = 1/3（反射已烘进几何）；translation 与居中 translate(-0.5) 合并后
-    // 净平移为 (0,−0.25,0)。
+    // 旗帜 items/*_banner.json 的 special transformation：scale (2/3,−2/3,−2/3)、translation [0.5,0,0.5]。
+    // 这两者（缩放 + 平移）都已烘进 bannerModel 的几何里，故这里只需 display.fixed 的 scale 0.5。
     if (name.endsWith('_banner')) {
-      fixedScale = [1 / 3, 1 / 3, 1 / 3]
-      fixedTrans = [0, -0.25, 0]
+      fixedScale = [0.5, 0.5, 0.5]
     }
     // 龙首 display.fixed 缩放 1（不缩，0.75 已烘进几何）。display.fixed translation [0,4,0]px
     // 与居中 translate(-0.5) 合并后净平移 (0,−0.25,0)；但龙首几何的颅骨中心在方块像素 y=16

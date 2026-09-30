@@ -315,28 +315,29 @@ for (const [name, base] of Object.entries(COPPER_CHEST_TEX)) {
 // 旗帜（BER）：原版 BannerModel.createBodyLayer(true)（立地旗）＝竖杆 2×42×2（texOffs 44,0）
 // + 横杆 20×2×2（texOffs 0,42）+ 旗面 20×40×1（texOffs 0,0，BannerFlagModel），都在 64×64 贴图
 // entity/banner/banner_base（杆/横杆木纹）与 entity/banner/base（旗面灰度遮罩，按底色上色）。
-// 模型坐标是相对 ModelPart 原点（=方块中心）的，这里转成 0..16 方块像素（模型原点+8）。旗面正面
-// 经 Q_FLIP 后朝观察者。缩放/平移由 entities.js 的 fixedScale=1/3、fixedTrans=[0,-0.25,0] 提供。
+// 原版 BannerRenderer 对整面旗帜应用 MODEL_SCALE=(2/3,−2/3,−2/3)、MODEL_TRANSLATION=(0.5,0,0.5)，
+// 故这里把 2/3 缩放与平移烘进几何：竖杆 2×42 → 4/3×28、旗面 20×40 → 40/3×80/3；Y 翻转后
+// 杆底在方块底 y=0、旗面 y=8/3..88/3（中心 y=16，与 renderer.renderBanners 的旗面中心一致）。
 function bannerModel() {
   const wood = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#wood' })
   const flagF = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#flag' })
   return {
     textures: { wood: 'entity/banner/banner_base', flag: 'entity/banner/base' },
     elements: [
-      // 竖杆 2×42×2（贴图 u44..52 / v0..44）
-      { from: [7, 8, 7], to: [9, 50, 9], faces: {
+      // 竖杆 2×42×2 ×2/3 → 4/3×28×4/3（居中 x=z=8，y 0..28）
+      { from: [22 / 3, 0, 22 / 3], to: [26 / 3, 28, 26 / 3], faces: {
         up: wood(46, 0, 48, 2), down: wood(48, 2, 50, 0),
         north: wood(50, 2, 52, 44), south: wood(46, 2, 48, 44),
         west: wood(44, 2, 46, 44), east: wood(48, 2, 50, 44),
       } },
-      // 横杆 20×2×2（贴图 u0..44 / v42..46）
-      { from: [-2, 50, 7], to: [18, 52, 9], faces: {
+      // 横杆 20×2×2 ×2/3 → 40/3×4/3×4/3（y 28..88/3）
+      { from: [4 / 3, 28, 22 / 3], to: [44 / 3, 88 / 3, 26 / 3], faces: {
         up: wood(2, 42, 22, 44), down: wood(22, 44, 42, 42),
         north: wood(24, 44, 44, 46), south: wood(2, 44, 22, 46),
         west: wood(0, 44, 2, 46), east: wood(22, 44, 24, 46),
       } },
-      // 旗面 20×40×1（正面 u1..21/v1..41，背面 u22..42/v1..41）
-      { from: [-2, 12, 9], to: [18, 52, 10], faces: {
+      // 旗面 20×40×1 ×2/3 → 40/3×80/3×2/3（y 8/3..88/3，正面 u1..21/v1..41）
+      { from: [4 / 3, 8 / 3, 26 / 3], to: [44 / 3, 88 / 3, 28 / 3], faces: {
         south: flagF(1, 1, 21, 41), north: flagF(22, 1, 42, 41),
         up: flagF(1, 0, 21, 1), down: flagF(21, 1, 41, 0),
         west: flagF(0, 1, 1, 41), east: flagF(21, 1, 22, 41),
@@ -345,21 +346,24 @@ function bannerModel() {
   }
 }
 function wallBannerModel() {
-  const plank = { uv: [0, 0, 64, 64], texture: '#plank' }
+  const wood = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#wood' })
   return {
-    textures: { plank: 'block/oak_planks' },
+    textures: { wood: 'entity/banner/banner_base' },
     elements: [
-      // 墙上旗帜：旗面顶端的横木杆（原版 BannerModel 的 wall bar：addBox(-10,-44,-1,20,2,2)，
-      // 20×2×2，横跨旗面宽度、旗面从它垂下；2/3 后约 13.3×1.33×1.33）。
-      // 木杆顶边与旗面顶边对齐：旗面中心在方块上方 0.375 格、半高 5/6 格，故顶边 = 0.375+5/6
-      // = 29/24 格 = 58/3 像素；杆高 2×2/3=4/3 像素，故下边 = 58/3−4/3 = 18 像素。
-      { from: [1.5, 18, 7.5], to: [14.5, 58 / 3, 8.5], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
+      // 墙上横杆 20×2×2 ×2/3 → 40/3×4/3×4/3（贴图 u0..44/v42..46，与立地旗横杆同）；
+      // 原版 wall bar 顶点 (-10,-20.5,9.5)..(10,-18.5,11.5) 经 S(2/3,−2/3,−2/3)+T(0.5,0,0.5)
+      // 得 y 37/3..41/3、z 1/3..5/3（贴在 z≈0 的墙面上）。
+      { from: [4 / 3, 37 / 3, 1 / 3], to: [44 / 3, 41 / 3, 5 / 3], faces: {
+        up: wood(2, 42, 22, 44), down: wood(22, 44, 42, 42),
+        north: wood(24, 44, 44, 46), south: wood(2, 44, 22, 46),
+        west: wood(0, 44, 2, 46), east: wood(22, 44, 24, 46),
+      } },
     ],
   }
 }
 const BANNER_COLORS = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black']
 for (const c of BANNER_COLORS) {
-  SPECIAL_MODELS[c + '_banner'] = (p) => ({ model: bannerModel(), variant: {}, texSize: 64 })
+  SPECIAL_MODELS[c + '_banner'] = (p) => ({ model: bannerModel(), variant: { y: (Number(p.rotation) || 0) * 22.5 }, texSize: 64 })
   SPECIAL_MODELS[c + '_wall_banner'] = (p) => ({ model: wallBannerModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 64 })
 }
 
