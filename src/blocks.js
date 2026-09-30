@@ -347,7 +347,7 @@ function shieldModel() {
     textures: { all: 'entity/shield/shield_base_nopattern' },
     elements: [
       {
-        from: [2, -3, 7.5], to: [14, 19, 8.5],
+        from: [-6, -11, 1], to: [6, 11, 2],
         faces: {
           south: tex(1, 1, 13, 23), // 正面（木 + 金属边）
           north: tex(14, 1, 26, 23), // 背面（木板）
