@@ -13,19 +13,23 @@ export class AssetProvider {
     this.jsonCache = new Map() // 路径 -> Promise<object|null>
   }
 
+  // 清空两个缓存（资源包集合变化时，需丢弃旧的模型/贴图缓存以便重新解析）
+  clearCaches() {
+    this.textureCache.clear()
+    this.jsonCache.clear()
+  }
+
   // 多个资源包叠加：越靠前（index 越小）优先级越高，未命中再回落默认资源
   addPack(zip, name) {
     const i = this.packs.findIndex((p) => p.name === name)
     if (i >= 0) this.packs[i] = { name, zip }
     else this.packs.push({ name, zip })
-    this.textureCache.clear()
-    this.jsonCache.clear()
+    this.clearCaches()
   }
 
   removePack(name) {
     this.packs = this.packs.filter((p) => p.name !== name)
-    this.textureCache.clear()
-    this.jsonCache.clear()
+    this.clearCaches()
   }
 
   // delta = -1 上移（提高优先级），+1 下移
@@ -36,14 +40,12 @@ export class AssetProvider {
     if (j < 0 || j >= this.packs.length) return
     const [p] = this.packs.splice(i, 1)
     this.packs.splice(j, 0, p)
-    this.textureCache.clear()
-    this.jsonCache.clear()
+    this.clearCaches()
   }
 
   clearPacks() {
     this.packs = []
-    this.textureCache.clear()
-    this.jsonCache.clear()
+    this.clearCaches()
   }
 
   getPackNames() {

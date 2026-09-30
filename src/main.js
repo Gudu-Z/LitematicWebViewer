@@ -256,13 +256,16 @@ async function autoLoadDemo() {
 // 重新解析方块贴图并重渲染当前已加载的结构
 async function reRenderCurrent() {
   if (!currentData || !renderer) return
+  // 资源包集合已变化：贴图缓存已被清空，这里同步移除旧网格并释放其贴图，
+  // 避免旧贴图残留（泄漏）或在异步重解析期间被动画循环重新上传。
+  renderer.clear(true)
   resolver.clear()
   const palette = currentData.palette
   const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
   palette.forEach((p, i) => {
     p.baked = baked[i]
   })
-  await renderer.render(currentData, assets, (p) => ui.setProgress(p), makeBlockFilter())
+  await renderer.render(currentData, assets, (p) => ui.setProgress(p), makeBlockFilter(), false)
   await renderCurrentSigns()
   await renderCurrentPlayerHeads()
   await renderCurrentBanners()

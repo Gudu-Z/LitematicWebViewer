@@ -355,8 +355,10 @@ export class Renderer {
     }
   }
 
-  clear() {
-    this.clearBlocks()
+  // disposeTextures=true 时连同方块贴图一起释放（资源包切换时贴图缓存已失效）。
+  // 层级/区域切换等只重建方块网格的场景传 false，复用缓存里的贴图，避免反复上传。
+  clear(disposeTextures = false) {
+    this.clearBlocks(disposeTextures)
     this.clearSigns()
     this.clearHeads()
     this.clearBanners()
@@ -364,12 +366,17 @@ export class Renderer {
     this.clearEntities()
   }
 
-  clearBlocks() {
+  clearBlocks(disposeTextures = false) {
     while (this.group.children.length) {
       const child = this.group.children.pop()
       child.geometry?.dispose()
       const mats = Array.isArray(child.material) ? child.material : [child.material]
-      mats.forEach((m) => m?.dispose())
+      mats.forEach((m) => {
+        if (m) {
+          if (disposeTextures) m.map?.dispose()
+          m.dispose()
+        }
+      })
     }
   }
 
@@ -659,12 +666,13 @@ export class Renderer {
   }
 
   // data: { palette: [{name, faces}], blocks: Map<"x,y,z" -> paletteIndex>, bounds }
+  // fit=true 时把相机对准结构中心（首次载入）；fit=false 时保持相机不动（切换资源包重渲染）。
   // 返回 { faces, textures }
-  async render(data, assets, onProgress, filter) {
+  async render(data, assets, onProgress, filter, fit = true) {
     this.clear()
     const { bounds } = data
     const stats = await this._buildBlockMeshes(data, assets, onProgress, filter)
-    this._fit(bounds)
+    if (fit) this._fit(bounds)
     this._updateOverlay(bounds)
     this._updateRegionWireframes(data)
     onProgress?.(1)
