@@ -427,10 +427,12 @@ async function buildFrameItem(item, resolver, assets) {
       fixedScale = [1 / 3, 1 / 3, 1 / 3]
       fixedTrans = [0, -0.25, 0]
     }
-    // 龙首 display.fixed 缩放 1（不缩，0.75 已烘进几何），translation [0,4,0] 与居中合并后净平移 (0,−0.25,0)。
+    // 龙首 display.fixed 缩放 1（不缩，0.75 已烘进几何）。display.fixed translation [0,4,0]px
+    // 与居中 translate(-0.5) 合并后净平移 (0,−0.25,0)；但龙首几何的颅骨中心在方块像素 y=16
+    // （比普通头颅的 y=8 高 8px=0.5 格），居中后仍高出 0.5 格，需再下移 0.25 格，故净 −0.5。
     if (name === 'dragon_head' || name === 'dragon_wall_head') {
       fixedScale = [1, 1, 1]
-      fixedTrans = [0, -0.25, 0]
+      fixedTrans = [0, -0.5, 0]
     }
   }
   if (baked && baked.quads && baked.quads.length) {
