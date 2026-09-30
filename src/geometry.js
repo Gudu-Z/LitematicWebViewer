@@ -47,6 +47,11 @@ function fluidHeight(level) {
   return (l <= 0 || l >= 8) ? 8 / 9 : (8 - l) / 9
 }
 
+// 始终含水的水生植物：这些方块没有 waterlogged 属性（方块状态里永不含它），
+// 原版它们的 getFluidState 无条件返回水源（Fluids.WATER.getSource(false)），
+// 即这些植物方块内部永远被水充满。这里单独补上，否则植物方块内部不会渲染水。
+const ALWAYS_WATERLOGGED = new Set(['seagrass', 'tall_seagrass', 'kelp', 'kelp_plant'])
+
 // 方块所属流体：kind = 'water' | 'lava' | null；level 为方块状态 level 值。
 // 含水方块（waterlogged）与气泡柱（bubble_column）都视作「water 源」（level 0），
 // 这样相邻的水面高度、同流体剔除都会把它们当成同种水处理（原版它们的 FluidState 就是水）。
@@ -58,6 +63,7 @@ function fluidOfEntry(paletteEntry) {
   if (n === 'bubble_column') return { kind: 'water', level: 0, waterlogged: false, bubble: true }
   const wl = props.waterlogged
   if (wl === true || wl === 'true' || wl === 1 || wl === '1') return { kind: 'water', level: 0, waterlogged: true }
+  if (ALWAYS_WATERLOGGED.has(n)) return { kind: 'water', level: 0, waterlogged: true }
   return null
 }
 
