@@ -261,18 +261,35 @@ for (const [name, base] of Object.entries(COPPER_CHEST_TEX)) {
 
 // 旗帜：杆 / 墙架（旗面含底色+图案是每个旗帜实例独有的，由 renderer.renderBanners 单独绘制）。
 // 木板是 16×16，这里按 texSize=64 归一化（贴图采样时会各自映射到整张）。
-// 注意原版 BannerRenderer 对杆/旗面统一应用 MODEL_SCALE=(2/3,−2/3,−2/3)，这里按 2/3 后的
-// 尺寸/位置定义：立地杆 2×42×2 → 1.33×28×1.33，y 从方块中心(8)到 36（即地面往上 0.5..2.25 格）。
+// 旗帜（BER）：原版 BannerModel.createBodyLayer(true)（立地旗）＝竖杆 2×42×2（texOffs 44,0）
+// + 横杆 20×2×2（texOffs 0,42）+ 旗面 20×40×1（texOffs 0,0，BannerFlagModel），都在 64×64 贴图
+// entity/banner/banner_base（杆/横杆木纹）与 entity/banner/base（旗面灰度遮罩，按底色上色）。
+// 模型坐标是相对 ModelPart 原点（=方块中心）的，这里转成 0..16 方块像素（模型原点+8）。旗面正面
+// 经 Q_FLIP 后朝观察者。缩放/平移由 entities.js 的 fixedScale=1/3、fixedTrans=[0,-0.25,0] 提供。
 function bannerModel() {
-  const plank = { uv: [0, 0, 64, 64], texture: '#plank' }
-  // 旗面：20×40 像素（贴图左上角 u0..20 v0..40），挂在杆右侧、杆顶往下。旗面贴图 entity/banner/base
-  // 是灰度遮罩，实际底色/图案在渲染端按旗帜实例上色（这里 texture 键 #flag 供 entities.js 上色）。
-  const flag = { uv: [0, 0, 20, 40], texture: '#flag' }
+  const wood = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#wood' })
+  const flagF = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#flag' })
   return {
-    textures: { plank: 'block/oak_planks', flag: 'entity/banner/base' },
+    textures: { wood: 'entity/banner/banner_base', flag: 'entity/banner/base' },
     elements: [
-      { from: [7, 8, 7], to: [9, 36, 9], faces: { up: plank, down: plank, north: plank, south: plank, west: plank, east: plank } },
-      { from: [9, 8, 6], to: [22.33, 36, 7], faces: { north: flag, south: flag, up: flag, down: flag, west: flag, east: flag } },
+      // 竖杆 2×42×2（贴图 u44..52 / v0..44）
+      { from: [7, 8, 7], to: [9, 50, 9], faces: {
+        up: wood(46, 0, 48, 2), down: wood(48, 2, 50, 0),
+        north: wood(50, 2, 52, 44), south: wood(46, 2, 48, 44),
+        west: wood(44, 2, 46, 44), east: wood(48, 2, 50, 44),
+      } },
+      // 横杆 20×2×2（贴图 u0..44 / v42..46）
+      { from: [-2, 50, 7], to: [18, 52, 9], faces: {
+        up: wood(2, 42, 22, 44), down: wood(22, 44, 42, 42),
+        north: wood(24, 44, 44, 46), south: wood(2, 44, 22, 46),
+        west: wood(0, 44, 2, 46), east: wood(22, 44, 24, 46),
+      } },
+      // 旗面 20×40×1（正面 u1..21/v1..41，背面 u22..42/v1..41）
+      { from: [-2, 12, 9], to: [18, 52, 10], faces: {
+        south: flagF(1, 1, 21, 41), north: flagF(22, 1, 42, 41),
+        up: flagF(1, 0, 21, 1), down: flagF(21, 1, 41, 0),
+        west: flagF(0, 1, 1, 41), east: flagF(21, 1, 22, 41),
+      } },
     ],
   }
 }

@@ -410,7 +410,7 @@ async function buildFrameItem(item, resolver, assets) {
     // 特殊方块（箱子/头颅/旗帜/潜影盒/装饰罐等 BER，无 JSON 几何）走 SPECIAL_MODELS
     const props = await defaultItemProps(name, assets)
     baked = await resolver.resolve('minecraft:' + name, props)
-    fixedRot = name.endsWith('_head') || name.endsWith('_skull') || name === 'shield' || name === 'conduit' ? Q_FLIP : null
+    fixedRot = name.endsWith('_head') || name.endsWith('_skull') || name === 'shield' || name === 'conduit' || name.endsWith('_banner') ? Q_FLIP : null
     // 潮涌核心 items/conduit.json 的 display.fixed 缩放是 [1,1,1]（不缩），总缩放 = 框体 0.5 × 1。
     // 这里显式给 fixedScale，否则走 fixedScale=null 的 0.4 兜底会偏小约 20%。
     if (name === 'conduit') fixedScale = [1, 1, 1]
@@ -419,6 +419,13 @@ async function buildFrameItem(item, resolver, assets) {
     if (name === 'shield') {
       fixedScale = [0.55, 0.55, 0.55]
       fixedTrans = [-4.5 / 16, 4.5 / 16, -5 / 16]
+    }
+    // 旗帜 items/*_banner.json 的 special transformation：scale (2/3,−2/3,−2/3)、translation [0.5,0,0.5]，
+    // 与 display.fixed scale 0.5 合并 = 1/3（反射已烘进几何）；translation 与居中 translate(-0.5) 合并后
+    // 净平移为 (0,−0.25,0)。
+    if (name.endsWith('_banner')) {
+      fixedScale = [1 / 3, 1 / 3, 1 / 3]
+      fixedTrans = [0, -0.25, 0]
     }
   }
   if (baked && baked.quads && baked.quads.length) {
