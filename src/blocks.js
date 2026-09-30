@@ -137,15 +137,31 @@ function headModel(texKey, scale) {
 // 头 UV 同标准玩家头（脸 u8..16/v8..16），耳在皮肤 u40..48/v0..8。这里简化：10×8×8 头 + 两只尖耳。
 function piglinHeadModel() {
   const f = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#all' })
-  const ear = (x0, x1) => ({ from: [x0, 10, 4], to: [x1, 14, 6], faces: { up: f(40, 0, 48, 8), down: f(40, 0, 48, 8), north: f(40, 0, 48, 8), south: f(40, 0, 48, 8), west: f(40, 0, 48, 8), east: f(40, 0, 48, 8) } })
+  // 原版 PiglinModel.addHead：头 10×8×8（texOffs 0,0）+ 吻部 4×4×1（texOffs 31,1，前突下半脸）
+  // + 双耳 1×5×4（texOffs 51,6 / 39,6，头侧上方，原版有 ±30° zRot 外张，这里近似为轴对齐）。
+  // 头宽 10（普通头颅是 8），故面部 UV 用 u8..18 而非 u8..16。
+  const earL = { from: [2.5, 5, 6], to: [3.5, 10, 10], faces: {
+    up: f(55, 6, 56, 10), down: f(56, 10, 57, 6),
+    west: f(56, 10, 60, 15), south: f(55, 10, 56, 15), east: f(51, 10, 55, 15), north: f(60, 10, 61, 15),
+  } }
+  const earR = { from: [12.5, 5, 6], to: [13.5, 10, 10], faces: {
+    up: f(43, 6, 44, 10), down: f(44, 10, 45, 6),
+    west: f(44, 10, 48, 15), south: f(43, 10, 44, 15), east: f(39, 10, 43, 15), north: f(48, 10, 49, 15),
+  } }
   return {
     textures: { all: 'entity/piglin/piglin' },
     elements: [
+      // 头 10×8×8
       { from: [3, 4, 4], to: [13, 12, 12], faces: {
-          up: f(8, 0, 16, 8), down: f(16, 0, 24, 8),
-          east: f(0, 8, 8, 16), south: f(8, 8, 16, 16), west: f(16, 8, 24, 16), north: f(24, 8, 32, 16),
+          up: f(8, 0, 18, 8), down: f(18, 0, 28, 8),
+          east: f(0, 8, 8, 16), south: f(8, 8, 18, 16), west: f(18, 8, 26, 16), north: f(26, 8, 36, 16),
       } },
-      ear(3, 6), ear(10, 13),
+      // 吻部 4×4×1（前突，下半脸）
+      { from: [6, 4, 12], to: [10, 8, 13], faces: {
+          up: f(32, 1, 36, 2), down: f(36, 2, 40, 1),
+          east: f(31, 2, 32, 6), south: f(32, 2, 36, 6), west: f(36, 2, 37, 6), north: f(37, 2, 41, 6),
+      } },
+      earL, earR,
     ],
   }
 }
