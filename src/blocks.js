@@ -381,6 +381,55 @@ function potBaseModel() {
 }
 SPECIAL_MODELS.decorated_pot = (p) => ({ model: potBaseModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 32 })
 
+// 末地传送门/末地折跃门（BER，无 JSON 几何）：原版 AbstractEndPortalRenderer.submitCube
+// 就是一个满覆盖立方体（FROM(0,0,0)..TO(1,1,1)），六个面都贴 entity/end_portal/end_portal
+// 星空贴图（256×256，透明感由原版着色器实现，这里用不透明整张贴图近似）。
+// 折跃门的「光束」是瞬态特效（实体穿过时才有），此处略去，只画门体。
+function endPortalModel() {
+  const f = { uv: [0, 0, 16, 16], texture: '#portal' }
+  return {
+    textures: { portal: 'entity/end_portal/end_portal' },
+    elements: [
+      { from: [0, 0, 0], to: [16, 16, 16], faces: { up: f, down: f, north: f, south: f, west: f, east: f } },
+    ],
+  }
+}
+SPECIAL_MODELS.end_portal = () => ({ model: endPortalModel(), variant: {}, texSize: 16 })
+SPECIAL_MODELS.end_gateway = () => ({ model: endPortalModel(), variant: {}, texSize: 16 })
+
+// 移动中的活塞（moving_piston 方块实体，BER）：只在活塞动画约 2 tick 内存在，几乎不会出现在
+// 投影里。这里至少画成可识别的活塞头——复刻原版 template_piston_head 几何（16×16×4 头板 +
+// 4×4×16 活塞臂，臂伸出方块一格伸向活塞底座）。头部朝向由 facing 旋转，type 决定是否粘性。
+function pistonHeadModel(type) {
+  const sticky = String(type) === 'sticky'
+  return {
+    textures: {
+      platform: 'block/piston_top',
+      side: 'block/piston_side',
+      unsticky: sticky ? 'block/piston_top_sticky' : 'block/piston_top',
+    },
+    elements: [
+      { from: [0, 0, 0], to: [16, 16, 4], faces: {
+        down: { uv: [0, 0, 16, 4], texture: '#side', cullface: 'down', rotation: 180 },
+        up: { uv: [0, 0, 16, 4], texture: '#side', cullface: 'up' },
+        north: { uv: [0, 0, 16, 16], texture: '#platform', cullface: 'north' },
+        south: { uv: [0, 0, 16, 16], texture: '#unsticky' },
+        west: { uv: [0, 0, 16, 4], texture: '#side', rotation: 270, cullface: 'west' },
+        east: { uv: [0, 0, 16, 4], texture: '#side', rotation: 90, cullface: 'east' },
+      } },
+      { from: [6, 6, 4], to: [10, 10, 20], faces: {
+        down: { uv: [0, 0, 16, 4], texture: '#side', rotation: 90 },
+        up: { uv: [0, 0, 16, 4], texture: '#side', rotation: 270 },
+        west: { uv: [16, 4, 0, 0], texture: '#side' },
+        east: { uv: [0, 0, 16, 4], texture: '#side' },
+      } },
+    ],
+  }
+}
+// 活塞头朝向（头面朝 -z/north），与 piston_head.json 的变体一致
+const PISTON_HEAD_FACING = { down: { x: 90 }, up: { x: 270 }, north: {}, south: { y: 180 }, east: { y: 90 }, west: { y: 270 } }
+SPECIAL_MODELS.moving_piston = (p) => ({ model: pistonHeadModel(p.type), variant: PISTON_HEAD_FACING[String(p.facing || 'north')] || {}, texSize: 16 })
+
 // 潮涌核心（BER，无 JSON 几何）：原版 ConduitRenderer.createShellLayer 就是一个 6×6×6 立方体
 // （addBox(-3,-3,-3, 6,6,6)，texOffs 0,0，32×16 贴图 entity/conduit/base）。物品渲染（ConduitSpecialRenderer）
 // 只画壳，不含眼/笼（眼/笼仅世界内激活时才有）。ModelPart.Cube 自动 UV：±Y 面贴圆顶
