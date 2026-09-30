@@ -258,6 +258,41 @@ for (const [name, info] of Object.entries(HEAD_TYPES)) {
 SPECIAL_MODELS.piglin_head = (p) => ({ model: piglinHeadModel(), variant: headVariant(p, false), texSize: 64 })
 SPECIAL_MODELS.piglin_wall_head = (p) => ({ model: piglinHeadModel(), variant: headVariant(p, true), texSize: 64 })
 
+// 龙首（DragonHeadModel）：上颚头盖骨 + 上唇 + 下颌 + 双角 + 双鼻孔，7 个盒子，整体
+// PartPose.offset(0,−7.986666,0).scaled(0.75)。贴图 256×256（entity/enderdragon/dragon）。
+// 这里把 0.75 缩放烘进几何（16×16×16 → 12×12×12 等），offset 近似 −8（误差 <0.02px 忽略）。
+function dragonHeadModel() {
+  const f = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#all' })
+  // ModelPart.Cube 自动 UV：盒 w×h×d、texOffs(u,v)，面朝南（正脸）。
+  const faces = (u, v, w, h, d) => ({
+    up: f(u + d, v, u + d + w, v + d),
+    down: f(u + d + w, v, u + d + 2 * w, v + d),
+    east: f(u, v + d, u + d, v + d + h),
+    south: f(u + d, v + d, u + d + w, v + d + h),
+    west: f(u + d + w, v + d, u + d + w + d, v + d + h),
+    north: f(u + d + w + d, v + d, u + d + w + d + w, v + d + h),
+  })
+  return {
+    textures: { all: 'entity/enderdragon/dragon' },
+    elements: [
+      // 上颚头盖骨 16×16×16（texOffs 112,30）
+      { from: [2, 10, 3.5], to: [14, 22, 15.5], faces: faces(112, 30, 16, 16, 16) },
+      // 上唇 12×5×16（texOffs 176,44）
+      { from: [3.5, 13, 14], to: [12.5, 16.75, 26], faces: faces(176, 44, 12, 5, 16) },
+      // 下颌 12×4×16（texOffs 176,65）
+      { from: [3.5, 10, 14], to: [12.5, 13, 26], faces: faces(176, 65, 12, 4, 16) },
+      // 双角 2×4×6（texOffs 0,0）
+      { from: [4.25, 22, 6.5], to: [5.75, 25, 11], faces: faces(0, 0, 2, 4, 6) },
+      { from: [10.25, 22, 6.5], to: [11.75, 25, 11], faces: faces(0, 0, 2, 4, 6) },
+      // 双鼻孔 2×2×4（texOffs 112,0）
+      { from: [4.25, 16.75, 21.5], to: [5.75, 18.25, 24.5], faces: faces(112, 0, 2, 2, 4) },
+      { from: [10.25, 16.75, 21.5], to: [11.75, 18.25, 24.5], faces: faces(112, 0, 2, 2, 4) },
+    ],
+  }
+}
+SPECIAL_MODELS.dragon_head = (p) => ({ model: dragonHeadModel(), variant: headVariant(p, false), texSize: [256, 256] })
+SPECIAL_MODELS.dragon_wall_head = (p) => ({ model: dragonHeadModel(), variant: headVariant(p, true), texSize: [256, 256] })
+
 // —— 26.x 起改为「方块实体渲染器」的方块：JSON 模型为空（仅 particle），这里手工构造几何 ——
 
 // 铜箱：氧化/打蜡程度编码在方块名里（waxed_exposed_copper_chest 等）

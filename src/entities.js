@@ -427,6 +427,11 @@ async function buildFrameItem(item, resolver, assets) {
       fixedScale = [1 / 3, 1 / 3, 1 / 3]
       fixedTrans = [0, -0.25, 0]
     }
+    // 龙首 display.fixed 缩放 1（不缩，0.75 已烘进几何），translation [0,4,0] 与居中合并后净平移 (0,−0.25,0)。
+    if (name === 'dragon_head' || name === 'dragon_wall_head') {
+      fixedScale = [1, 1, 1]
+      fixedTrans = [0, -0.25, 0]
+    }
   }
   if (baked && baked.quads && baked.quads.length) {
     const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
