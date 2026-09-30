@@ -414,6 +414,12 @@ async function buildFrameItem(item, resolver, assets) {
     // 潮涌核心 items/conduit.json 的 display.fixed 缩放是 [1,1,1]（不缩），总缩放 = 框体 0.5 × 1。
     // 这里显式给 fixedScale，否则走 fixedScale=null 的 0.4 兜底会偏小约 20%。
     if (name === 'conduit') fixedScale = [1, 1, 1]
+    // 盾牌 models/item/shield.json 的 display.fixed：rotation [0,180,0]、translation [-4.5,4.5,-5]px、
+    // scale [0.55,0.55,0.55]。fixedTrans 存原值（块单位），buildItemFrame 会乘 0.5 框体缩放。
+    if (name === 'shield') {
+      fixedScale = [0.55, 0.55, 0.55]
+      fixedTrans = [-4.5 / 16, 4.5 / 16, -5 / 16]
+    }
   }
   if (baked && baked.quads && baked.quads.length) {
     const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]

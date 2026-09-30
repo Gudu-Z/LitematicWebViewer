@@ -337,13 +337,27 @@ function conduitModel() {
 }
 SPECIAL_MODELS.conduit = () => ({ model: conduitModel(), variant: {}, texSize: [32, 16] })
 
-// 盾牌（BER）：原版 ShieldModel 的 plate 是 12×22×1（texOffs 0,0）。这里简化成 12×22 薄板，
-// 整张 64×64 无图案木盾贴到正反面。展示框里 fixed 旋转 [0,180,0]。
+// 盾牌（BER）：原版 ShieldModel 的 plate 是 12×22×1（addBox(-6,-11,-2,12,22,1)，texOffs 0,0，
+// 64×64 贴图），另有 2×6×6 手柄（texOffs 26,0，藏在板后、正面看不到，此处略去）。ModelPart.Cube
+// 自动 UV：正面（南面）贴 u1..13/v1..23（木+金属边），背面（北面）贴 u14..26/v1..23（木板），
+// 四条薄边贴 1px 边条。展示框里 fixed 旋转 [0,180,0]（正面经 Q_FLIP 后朝观察者）。
 function shieldModel() {
-  const tex = { uv: [0, 0, 64, 64], texture: '#all' }
+  const tex = (u0, v0, u1, v1) => ({ uv: [u0, v0, u1, v1], texture: '#all' })
   return {
     textures: { all: 'entity/shield/shield_base_nopattern' },
-    elements: [{ from: [2, -3, 7.5], to: [14, 19, 8.5], faces: { up: tex, down: tex, north: tex, south: tex, west: tex, east: tex } }],
+    elements: [
+      {
+        from: [2, -3, 7.5], to: [14, 19, 8.5],
+        faces: {
+          south: tex(1, 1, 13, 23), // 正面（木 + 金属边）
+          north: tex(14, 1, 26, 23), // 背面（木板）
+          up: tex(1, 0, 13, 1), // 顶边
+          down: tex(13, 1, 25, 0), // 底边
+          west: tex(0, 1, 1, 23), // 左边
+          east: tex(13, 1, 14, 23), // 右边
+        },
+      },
+    ],
   }
 }
 SPECIAL_MODELS.shield = () => ({ model: shieldModel(), variant: {}, texSize: 64 })
