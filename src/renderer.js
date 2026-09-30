@@ -165,7 +165,7 @@ function redstoneTint(power) {
   return [r, g, b]
 }
 
-// 树叶染色（复刻原版 BlockColors / FoliageColor）：
+// 树叶/藤蔓染色（复刻原版 BlockColors / FoliageColor）：
 // 树叶贴图是灰度图，颜色由 tintindex 触发、按树种染色。无生物群系信息时用
 // 默认 foliage 绿；云杉/白桦用固定色（这两色从 1.x 起就没变过）。
 // 只有用「leaves」父模型（含 tintindex:0）的树叶才染色；杜鹃/白杨等树叶
@@ -173,6 +173,7 @@ function redstoneTint(power) {
 const TINTED_LEAVES = new Set([
   'oak_leaves', 'spruce_leaves', 'birch_leaves', 'jungle_leaves', 'acacia_leaves',
   'dark_oak_leaves', 'mangrove_leaves', 'cherry_leaves', 'pale_oak_leaves',
+  'vine', // 藤蔓用 foliage 色（原版 FoliageColor）
 ])
 function foliageTint(texKey) {
   const name = texKey.split('/').pop()
@@ -180,6 +181,20 @@ function foliageTint(texKey) {
   if (name === 'spruce_leaves') return 0x619961
   if (name === 'birch_leaves') return 0x80a755
   return 0x48b518
+}
+
+// 草类染色（复刻原版 BlockColors / GrassColor）：草方块顶、草/蕨、睡莲、瓜藤等
+// 贴图同样是被 tintindex 触发的灰度图，之前只染了树叶没染草，导致草块/草丛显示成灰褐色。
+const TINTED_GRASS = new Set([
+  'grass_block_top', 'grass_block_side_overlay', 'short_grass',
+  'tall_grass_top', 'tall_grass_bottom', 'fern',
+  'large_fern_top', 'large_fern_bottom', 'lily_pad',
+  'melon_stem', 'pumpkin_stem', 'attached_melon_stem', 'attached_pumpkin_stem',
+])
+function grassTint(texKey) {
+  const name = texKey.split('/').pop()
+  if (!TINTED_GRASS.has(name)) return null
+  return 0x7cbd6b // 默认草原草绿（无生物群系信息）
 }
 
 // 一条坐标轴线：从 origin 沿 (dx,dy,dz) 延伸
@@ -854,9 +869,9 @@ export class Renderer {
             const c = redstoneTint(power)
             mat.color.setRGB(c[0], c[1], c[2])
           }
-          // 树叶染色：灰度树叶贴图 × 树种色（云杉/白桦固定色，其余默认 foliage 绿）
+          // 树叶/草染色：灰度贴图 × 树种/草色（无生物群系信息时用默认 foliage/grass 绿）
           if (power === null) {
-            const fc = foliageTint(texKey)
+            const fc = foliageTint(texKey) ?? grassTint(texKey)
             if (fc != null) mat.color.setHex(fc)
           }
           materials.set(gKey, mat)
