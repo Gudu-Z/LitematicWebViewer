@@ -920,11 +920,12 @@ export class Renderer {
           // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
           // flatShading：方块每个面的 4 个顶点本就同法线，用几何导数算平直法线即可，
           // 省去法线数组（超大投影可省数百 MB 内存），光照效果一致。
+          // DoubleSide：原版水/岩浆的顶面从水下（背面）看也是可见的，不做背面剔除。
           const mat = isWater || isLava
             ? new THREE.MeshLambertMaterial(
                 isWater
-                  ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75, flatShading: true }
-                  : { map: texture, transparent: true, opacity: 0.9, flatShading: true },
+                  ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75, flatShading: true, side: THREE.DoubleSide }
+                  : { map: texture, transparent: true, opacity: 0.9, flatShading: true, side: THREE.DoubleSide },
               )
             : isBubble
               // 气泡直径 0.3 格（原交叉面半径 0.15×2），sizeAttenuation 按距离透视缩放
