@@ -84,6 +84,13 @@ document.getElementById('clearBtn').addEventListener('click', () => {
 document.getElementById('settingsBtn').addEventListener('click', () => {
   document.getElementById('settingsPanel').classList.toggle('hidden')
 })
+// 界面显示开关：隐藏时仅保留右上角按钮
+document.getElementById('uiToggleBtn').addEventListener('click', () => {
+  const hidden = document.body.classList.toggle('ui-hidden')
+  const btn = document.getElementById('uiToggleBtn')
+  btn.title = hidden ? '显示界面' : '隐藏界面'
+  btn.setAttribute('aria-label', btn.title)
+})
 document.getElementById('settingsCloseBtn').addEventListener('click', () => {
   document.getElementById('settingsPanel').classList.add('hidden')
 })

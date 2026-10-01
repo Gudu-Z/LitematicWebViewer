@@ -270,6 +270,24 @@ button.primary:hover {
   background: #343b49;
 }
 
+/* 界面显示切换按钮：界面隐藏时显示「闭眼」图标，反之「睁眼」 */
+#uiToggleBtn .icon-eye-off {
+  display: none;
+}
+body.ui-hidden #uiToggleBtn .icon-eye {
+  display: none;
+}
+body.ui-hidden #uiToggleBtn .icon-eye-off {
+  display: block;
+}
+
+/* 隐藏界面：仅保留右上角按钮（topbar） */
+body.ui-hidden #sidebar,
+body.ui-hidden #right-panel,
+body.ui-hidden #settingsPanel {
+  display: none;
+}
+
 /* 右侧信息面板 */
 #right-panel {
   position: absolute;
