@@ -376,16 +376,19 @@ export class Renderer {
     this.renderer.render(this.scene, this.camera)
   }
 
-  // 相机浸入水中时蒙上原版的水下雾（深蓝黑 #050533）。判断方式：相机所在 XZ 列存在水柱，
-  // 且相机眼高落在该水柱的纵向范围内。
+  // 相机浸入水中时蒙上原版的水下雾（深蓝黑 #050533）。判断方式：相机所在位置的那个方块
+  // 是否为水方块。相机在结构边界外一律视为「不在水下」并清除雾，否则一旦入水后飞出边界，
+  // 雾会残留（导致移动时随机出现）。
   _updateUnderwaterFog() {
     if (!this._waterColumns || !this._bounds) return
     const cam = this.camera.position
     const lx = Math.floor(cam.x) - this._bounds.minX
     const lz = Math.floor(cam.z) - this._bounds.minZ
-    if (lx < 0 || lz < 0 || lx >= this._bounds.width || lz >= this._bounds.depth) return
-    const col = this._waterColumns.get(lx + lz * this._bounds.width)
-    const underwater = !!col && cam.y >= col[0] && cam.y < col[1] + 1
+    let underwater = false
+    if (lx >= 0 && lz >= 0 && lx < this._bounds.width && lz < this._bounds.depth) {
+      const col = this._waterColumns.get(lx + lz * this._bounds.width)
+      underwater = !!col && col.has(Math.floor(cam.y))
+    }
     if (underwater) {
       if (this.scene.fog !== this._waterFog) {
         this.scene.fog = this._waterFog
@@ -852,7 +855,7 @@ export class Renderer {
     return stats
   }
 
-  // 扫描所有水方块，得到每个 XZ 列水柱的纵向范围（[minY, maxY]，世界坐标），
+  // 扫描所有水方块，得到每个 XZ 列的水方块 Y 集合（世界坐标），
   // 用于在动画循环里判断相机是否浸入水中。只关心 minecraft:water（普通水体）。
   _computeWaterColumns(data) {
     const { palette, blocks, bounds } = data
@@ -867,13 +870,12 @@ export class Renderer {
       const lz = Math.floor(key / W) % D
       const ly = Math.floor(key / strideY)
       const xz = lx + lz * W
-      const wy = ly + bounds.minY
-      const c = columns.get(xz)
-      if (!c) columns.set(xz, [wy, wy])
-      else {
-        if (wy < c[0]) c[0] = wy
-        if (wy > c[1]) c[1] = wy
+      let set = columns.get(xz)
+      if (!set) {
+        set = new Set()
+        columns.set(xz, set)
       }
+      set.add(ly + bounds.minY)
     }
     this._waterColumns = columns
   }
