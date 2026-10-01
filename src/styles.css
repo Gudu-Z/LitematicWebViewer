@@ -270,6 +270,13 @@ button.primary:hover {
   background: #343b49;
 }
 
+.lang-btn #langLabel {
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
 /* 界面显示切换按钮：界面隐藏时显示「闭眼」图标，反之「睁眼」 */
 #uiToggleBtn .icon-eye-off {
   display: none;

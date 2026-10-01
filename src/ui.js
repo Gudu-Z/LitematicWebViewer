@@ -1,5 +1,7 @@
 // UI 更新：状态栏、进度条、元数据面板、拖拽遮罩。
 
+import { t } from './i18n.js'
+
 export class UI {
   constructor(root) {
     this.metadataEl = root.querySelector('#metadata')
@@ -67,16 +69,17 @@ export class UI {
 
   showMetadata(meta) {
     const m = meta || {}
+    const none = t('metaNone')
     const items = [
-      ['名称', m.name || '（无）'],
-      ['作者', m.author || '（无）'],
-      ['尺寸', m.enclosingSize ? `${m.enclosingSize.x} × ${m.enclosingSize.y} × ${m.enclosingSize.z}` : '（无）'],
-      ['方块总数', m.totalBlocks != null ? m.totalBlocks.toLocaleString() : '（无）'],
-      ['总体积', m.totalVolume != null ? m.totalVolume.toLocaleString() : '（无）'],
-      ['区域数', m.regionCount ?? '（无）'],
-      ['数据版本', m.minecraftDataVersion || '（无）'],
+      [t('metaName'), m.name || none],
+      [t('metaAuthor'), m.author || none],
+      [t('metaSize'), m.enclosingSize ? `${m.enclosingSize.x} × ${m.enclosingSize.y} × ${m.enclosingSize.z}` : none],
+      [t('metaTotalBlocks'), m.totalBlocks != null ? m.totalBlocks.toLocaleString() : none],
+      [t('metaTotalVolume'), m.totalVolume != null ? m.totalVolume.toLocaleString() : none],
+      [t('metaRegionCount'), m.regionCount ?? none],
+      [t('metaDataVersion'), m.minecraftDataVersion || none],
     ]
-    if (m.description) items.push(['描述', m.description])
+    if (m.description) items.push([t('metaDescription'), m.description])
     this.metadataEl.innerHTML = items
       .map(([k, v]) => `<div class="row"><dt>${escapeHtml(k)}</dt><dd>${escapeHtml(String(v))}</dd></div>`)
       .join('')
@@ -89,7 +92,7 @@ export class UI {
   // 更新移动模式按钮文案
   setMoveModeLabel(mode) {
     if (!this.moveModeBtn) return
-    this.moveModeBtn.textContent = mode === 'orbit' ? '环绕模式' : '飞行模式'
+    this.moveModeBtn.textContent = mode === 'orbit' ? t('orbitMode') : t('flyMode')
   }
 
   // 同步速度滑块与数值显示
@@ -108,14 +111,15 @@ export class UI {
 
   // 更新当前层显示
   setLayerLabel(y) {
-    if (this.layerValue) this.layerValue.textContent = '层 ' + y
+    if (!this.layerValue) return
+    this.layerValue.textContent = y === '-' ? t('layerDash') : t('layerValue', { y })
   }
 
   // 渲染区域列表（可折叠，每项带眼睛开关）。visible 为 Set（null=全显示）
   renderRegionList(regions, visible, onToggle) {
     if (!this.regionListBody) return
     if (!regions || !regions.length) {
-      this.regionListBody.innerHTML = '<li class="pack-empty">无区域</li>'
+      this.regionListBody.innerHTML = `<li class="pack-empty">${t('noRegions')}</li>`
       return
     }
     this.regionListBody.innerHTML = regions
@@ -123,7 +127,7 @@ export class UI {
         const on = !visible || visible.has(r.name)
         return `
         <li data-name="${escapeHtml(r.name)}">
-          <button class="eye-btn" data-action="toggle" title="${on ? '隐藏' : '显示'}">
+          <button class="eye-btn" data-action="toggle" title="${on ? t('hide') : t('show')}">
             ${on ? '👁' : '🚫'}
           </button>
           <span class="region-name">${escapeHtml(r.name)}</span>
@@ -140,9 +144,9 @@ export class UI {
   // 渲染材料清单（每种方块类型 + 数量）。materials 已按当前排序方向排好；sortAsc 决定排序按钮文案
   renderMaterialList(materials, sortAsc) {
     if (!this.materialListBody) return
-    if (this.materialSortBtn) this.materialSortBtn.textContent = sortAsc ? '少 → 多' : '多 → 少'
+    if (this.materialSortBtn) this.materialSortBtn.textContent = sortAsc ? t('sortAsc') : t('sortDesc')
     if (!materials || !materials.length) {
-      this.materialListBody.innerHTML = '<li class="pack-empty">无方块</li>'
+      this.materialListBody.innerHTML = `<li class="pack-empty">${t('noBlocks')}</li>`
       return
     }
     this.materialListBody.innerHTML = materials
@@ -167,7 +171,7 @@ export class UI {
     const el = this.loadedPackListEl
     if (!el) return
     if (!loaded || !loaded.length) {
-      el.innerHTML = '<li class="pack-empty">未加载任何资源包</li>'
+      el.innerHTML = `<li class="pack-empty">${t('packNoneLoaded')}</li>`
       return
     }
     el.innerHTML = loaded
@@ -176,9 +180,9 @@ export class UI {
         <li data-name="${escapeHtml(name)}">
           <span class="pack-name">${escapeHtml(name)}</span>
           <span class="pack-actions">
-            <button data-action="up" title="提高优先级" ${i === 0 ? 'disabled' : ''}>↑</button>
-            <button data-action="down" title="降低优先级" ${i === loaded.length - 1 ? 'disabled' : ''}>↓</button>
-            <button data-action="unload" class="unload-btn" title="卸载">卸载</button>
+            <button data-action="up" title="${t('packUp')}" ${i === 0 ? 'disabled' : ''}>↑</button>
+            <button data-action="down" title="${t('packDown')}" ${i === loaded.length - 1 ? 'disabled' : ''}>↓</button>
+            <button data-action="unload" class="unload-btn" title="${t('packUnload')}">${t('packUnload')}</button>
           </span>
         </li>`
       )
@@ -200,7 +204,7 @@ export class UI {
     const loadedSet = new Set(loaded || [])
     const avail = (available || []).filter((p) => !loadedSet.has(p.name))
     if (!avail.length) {
-      el.innerHTML = '<li class="pack-empty">没有可加载的资源包</li>'
+      el.innerHTML = `<li class="pack-empty">${t('packNoneAvailable')}</li>`
       return
     }
     el.innerHTML = avail
@@ -208,7 +212,7 @@ export class UI {
         (p) => `
         <li data-name="${escapeHtml(p.name)}">
           <span class="pack-name">${escapeHtml(p.name)}</span>
-          <button data-action="load" class="unload-btn">加载</button>
+          <button data-action="load" class="unload-btn">${t('packLoad')}</button>
         </li>`
       )
       .join('')

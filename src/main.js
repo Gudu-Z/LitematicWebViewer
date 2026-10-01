@@ -7,12 +7,15 @@ import { AssetProvider } from './assets.js'
 import { BlockModelResolver } from './blocks.js'
 import { Renderer } from './renderer.js'
 import { UI } from './ui.js'
-import { BLOCK_NAMES } from './blockNames.js'
+import { t, setLang, getLang, applyTranslations, blockName } from './i18n.js'
 
 const container = document.getElementById('viewer')
 const ui = new UI(document.body)
 const assets = new AssetProvider()
 const resolver = new BlockModelResolver(assets)
+
+// 初始状态文案（默认中文）
+ui.setStatus(t('dragHint'))
 
 // 渲染器初始化可能因 WebGL 不可用而失败，做保护
 let renderer = null
@@ -20,7 +23,7 @@ try {
   renderer = new Renderer(container)
 } catch (e) {
   console.error(e)
-  ui.showError('无法初始化 3D 渲染（WebGL 可能不可用）：' + (e.message || e))
+  ui.showError(t('webglInitFailed') + (e.message || e))
 }
 
 let currentData = null
@@ -40,18 +43,18 @@ const view = {
 
 // 全局错误捕获，让任何错误都显示在页面上
 window.addEventListener('error', (e) => {
-  ui.showError('脚本错误：' + (e.message || (e.error && e.error.message) || '未知错误'))
+  ui.showError(t('scriptError') + (e.message || (e.error && e.error.message) || '未知错误'))
 })
 window.addEventListener('unhandledrejection', (e) => {
   const r = e.reason
-  ui.showError('运行错误：' + ((r && (r.message || r)) || '未知错误'))
+  ui.showError(t('runtimeError') + ((r && (r.message || r)) || '未知错误'))
 })
 
 // 启动自检
 function checkCapabilities() {
   const problems = []
   if (typeof DecompressionStream === 'undefined') {
-    problems.push('当前浏览器不支持 DecompressionStream（解压 .litematica 必需），请升级浏览器')
+    problems.push(t('capDecompression'))
   }
   let webglOk = false
   try {
@@ -60,7 +63,7 @@ function checkCapabilities() {
   } catch {
     webglOk = false
   }
-  if (!webglOk) problems.push('当前浏览器不支持 WebGL，无法 3D 渲染')
+  if (!webglOk) problems.push(t('capWebgl'))
   if (problems.length) ui.showError(problems.join('；'))
 }
 checkCapabilities()
@@ -78,7 +81,7 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   resetViewForClear()
   ui.clearError()
   ui.showMetadata({})
-  ui.setStatus('已清除，可拖入新文件')
+  ui.setStatus(t('statusCleared'))
   ui.setProgress(0)
   updateMaterialList()
 })
@@ -89,6 +92,13 @@ ui.onMaterialSort = () => {
   updateMaterialList()
 }
 
+// 语言切换（中 / 英）
+document.getElementById('langBtn').addEventListener('click', () => {
+  setLang(getLang() === 'zh' ? 'en' : 'zh')
+  document.getElementById('langLabel').textContent = getLang() === 'zh' ? '中' : 'EN'
+  refreshLocalizedUI()
+})
+
 // 设置面板开关 + 背景色
 document.getElementById('settingsBtn').addEventListener('click', () => {
   document.getElementById('settingsPanel').classList.toggle('hidden')
@@ -97,7 +107,7 @@ document.getElementById('settingsBtn').addEventListener('click', () => {
 document.getElementById('uiToggleBtn').addEventListener('click', () => {
   const hidden = document.body.classList.toggle('ui-hidden')
   const btn = document.getElementById('uiToggleBtn')
-  btn.title = hidden ? '显示界面' : '隐藏界面'
+  btn.title = hidden ? t('showUi') : t('hideUi')
   btn.setAttribute('aria-label', btn.title)
 })
 document.getElementById('settingsCloseBtn').addEventListener('click', () => {
@@ -210,24 +220,24 @@ window.addEventListener('drop', (e) => {
 async function openFile(file) {
   if (busy) return
   if (!renderer) {
-    ui.showError('3D 渲染不可用，无法预览')
+    ui.showError(t('renderUnavailable'))
     return
   }
   busy = true
   ui.clearError()
   try {
-    ui.setStatus('正在解析文件 …')
+    ui.setStatus(t('parsingFile'))
     ui.setProgress(0.02)
     const buffer = await file.arrayBuffer()
 
     const data = await parseLitematica(buffer, (f) => {
       ui.setProgress(0.02 + f * 0.18)
-      ui.setStatus(`正在解析文件 … ${Math.round(f * 100)}%`)
+      ui.setStatus(t('parsingFilePct', { p: Math.round(f * 100) }))
     })
     ui.setProgress(0.2)
 
     const palette = data.palette
-    ui.setStatus(`正在解析方块模型（${palette.length} 种方块）…`)
+    ui.setStatus(t('statusParsing', { n: palette.length }))
     const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
     palette.forEach((p, i) => {
       p.baked = baked[i]
@@ -236,7 +246,7 @@ async function openFile(file) {
 
     currentData = data
     resetViewForData(data)
-    ui.setStatus(`正在生成几何体（${data.blocks.size.toLocaleString()} 个方块）…`)
+    ui.setStatus(t('statusGeometry', { n: data.blocks.size.toLocaleString() }))
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
     await renderCurrentSigns()
     await renderCurrentPlayerHeads()
@@ -247,12 +257,12 @@ async function openFile(file) {
     ui.showMetadata(data.metadata)
     updateRegionUI()
     updateMaterialList()
-    const entityNote = data.entities?.length ? `，${data.entities.length} 个实体` : ''
-    ui.setStatus(`完成：${stats.faces.toLocaleString()} 个面，${stats.textures} 种贴图${entityNote}`)
+    const entityNote = data.entities?.length ? t('statusEntities', { n: data.entities.length }) : ''
+    ui.setStatus(t('statusDone', { faces: stats.faces.toLocaleString(), textures: stats.textures, entities: entityNote }))
     ui.setProgress(1)
   } catch (e) {
     console.error(e)
-    ui.showError('加载失败：' + (e.message || e))
+    ui.showError(t('loadFailed') + (e.message || e))
     ui.setProgress(0)
   } finally {
     busy = false
@@ -476,12 +486,28 @@ function updateMaterialList() {
     counts.set(name, (counts.get(name) || 0) + 1)
   }
   const list = [...counts.entries()].map(([name, count]) => ({
-    name: BLOCK_NAMES[name] || name, // 中文译名，缺失回退英文 ID
+    name: blockName(name), // 当前语言的译名，缺失回退英文 ID
     key: name, // 英文 ID（tooltip 用）
     count,
   }))
   list.sort((a, b) => (view.materialSortAsc ? a.count - b.count : b.count - a.count))
   ui.renderMaterialList(list, view.materialSortAsc)
+}
+
+// 语言切换后刷新所有文案（静态 data-i18n + 动态面板/状态）
+function refreshLocalizedUI() {
+  applyTranslations()
+  ui.showMetadata(currentData?.metadata || {})
+  updateRegionUI()
+  updateMaterialList()
+  updatePackPanels()
+  if (renderer) ui.setMoveModeLabel(renderer.getMoveMode())
+  ui.setLayerLabel(currentData ? view.layerY : '-')
+  // 界面显示开关的 title 依赖当前隐藏状态
+  const toggleBtn = document.getElementById('uiToggleBtn')
+  const bodyHidden = document.body.classList.contains('ui-hidden')
+  toggleBtn.title = bodyHidden ? t('showUi') : t('hideUi')
+  toggleBtn.setAttribute('aria-label', toggleBtn.title)
 }
 
 // 是否正在输入框里打字（避免 E/Q 等快捷键误触发）
@@ -673,17 +699,17 @@ async function loadPack(pack) {
   busy = true
   ui.clearError()
   try {
-    ui.setStatus('正在加载资源包 ' + pack.name + ' …')
+    ui.setStatus(t('loadingPack', { name: pack.name }))
     const resp = await fetch('resourcepacks/' + encodeURIComponent(pack.file))
-    if (!resp.ok) throw new Error('资源包下载失败（HTTP ' + resp.status + '）')
+    if (!resp.ok) throw new Error(t('packDownloadFailed', { status: resp.status }))
     const zip = await JSZip.loadAsync(await resp.blob())
     assets.addPack(zip, pack.name)
     await reRenderCurrent()
     updatePackPanels()
-    ui.setStatus('资源包已加载：' + pack.name)
+    ui.setStatus(t('packLoaded', { name: pack.name }))
   } catch (e) {
     console.error(e)
-    ui.showError('资源包加载失败：' + (e.message || e))
+    ui.showError(t('packLoadFailed') + (e.message || e))
   } finally {
     busy = false
   }
@@ -698,10 +724,10 @@ async function unloadPack(name) {
     assets.removePack(name)
     await reRenderCurrent()
     updatePackPanels()
-    ui.setStatus('已卸载资源包：' + name)
+    ui.setStatus(t('packUnloaded', { name }))
   } catch (e) {
     console.error(e)
-    ui.showError('卸载失败：' + (e.message || e))
+    ui.showError(t('packUnloadFailed') + (e.message || e))
   } finally {
     busy = false
   }
@@ -717,7 +743,7 @@ async function movePack(name, delta) {
     updatePackPanels()
   } catch (e) {
     console.error(e)
-    ui.showError('调整优先级失败：' + (e.message || e))
+    ui.showError(t('packMoveFailed') + (e.message || e))
   } finally {
     busy = false
   }
@@ -729,15 +755,15 @@ async function loadPackFromFile(file) {
   busy = true
   ui.clearError()
   try {
-    ui.setStatus('正在加载资源包 …')
+    ui.setStatus(t('loadingPackShort'))
     const zip = await JSZip.loadAsync(file)
     assets.addPack(zip, file.name.replace(/\.zip$/i, ''))
     await reRenderCurrent()
     updatePackPanels()
-    ui.setStatus('资源包已加载（打开文件后生效）')
+    ui.setStatus(t('packLoadedShort'))
   } catch (e) {
     console.error(e)
-    ui.showError('资源包加载失败：' + (e.message || e))
+    ui.showError(t('packLoadFailed') + (e.message || e))
   } finally {
     busy = false
   }

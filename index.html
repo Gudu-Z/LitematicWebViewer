@@ -13,8 +13,8 @@
         <div class="panel">
           <h1>LitematicWebViewer</h1>
           <div class="buttons">
-            <button id="openBtn" class="primary">打开 .litematica 文件</button>
-            <button id="clearBtn">清除</button>
+            <button id="openBtn" class="primary" data-i18n="openFile">打开 .litematica 文件</button>
+            <button id="clearBtn" data-i18n="clear">清除</button>
           </div>
           <input type="file" id="fileInput" accept=".litematic,.litematica,.nbt" hidden />
           <input type="file" id="packInput" accept=".zip" hidden />
@@ -27,40 +27,43 @@
 
         <div class="panel" id="controlPanel">
           <div class="control-row">
-            <span class="control-label">移动</span>
+            <span class="control-label" data-i18n="move">移动</span>
             <button id="moveModeBtn">环绕模式</button>
           </div>
           <div class="control-row">
-            <label class="control-label" for="speedSlider">速度</label>
+            <label class="control-label" for="speedSlider" data-i18n="speed">速度</label>
             <input type="range" id="speedSlider" min="0.1" max="10" step="0.1" value="1" />
             <span id="speedValue" class="control-value">1.0×</span>
           </div>
           <div class="control-row">
-            <label class="control-label" for="renderMode">渲染</label>
+            <label class="control-label" for="renderMode" data-i18n="render">渲染</label>
             <select id="renderMode">
-              <option value="all" selected>全部渲染</option>
-              <option value="below">层级下方</option>
-              <option value="above">层级上方</option>
-              <option value="single">单层渲染</option>
+              <option value="all" selected data-i18n="renderAll">全部渲染</option>
+              <option value="below" data-i18n="renderBelow">层级下方</option>
+              <option value="above" data-i18n="renderAbove">层级上方</option>
+              <option value="single" data-i18n="renderSingle">单层渲染</option>
             </select>
           </div>
           <div class="control-row">
-            <span class="control-label">层级</span>
-            <button id="layerDownBtn" title="下一层 (Q)">↓</button>
+            <span class="control-label" data-i18n="layer">层级</span>
+            <button id="layerDownBtn" data-i18n-title="layerDownTitle" title="下一层 (Q)">↓</button>
             <span id="layerValue" class="control-value">层 -</span>
-            <button id="layerUpBtn" title="上一层 (E)">↑</button>
-            <button id="locateBtn" title="把当前层设为摄像机所在高度">定位到此处</button>
+            <button id="layerUpBtn" data-i18n-title="layerUpTitle" title="上一层 (E)">↑</button>
+            <button id="locateBtn" data-i18n="locateHere" data-i18n-title="locateHereTitle" title="把当前层设为摄像机所在高度">定位到此处</button>
           </div>
         </div>
 
         <div class="hint">
-          <p>环绕模式：左键旋转 · 右键平移 · 滚轮缩放</p>
-          <p>飞行模式（按 WASD 切换）：左键转头 · WASD 移动 · 右键平移 · 滚轮调速</p>
-          <p>E / Q：上一 / 下一层</p>
+          <p data-i18n="hint1">环绕模式：左键旋转 · 右键平移 · 滚轮缩放</p>
+          <p data-i18n="hint2">飞行模式（按 WASD 切换）：左键转头 · WASD 移动 · 右键平移 · 滚轮调速</p>
+          <p data-i18n="hint3">E / Q：上一 / 下一层</p>
         </div>
       </aside>
 
       <div id="topbar">
+        <button id="langBtn" class="icon-btn lang-btn" title="切换语言 / Switch language" aria-label="切换语言 / Switch language">
+          <span id="langLabel">中</span>
+        </button>
         <button id="uiToggleBtn" class="icon-btn" title="隐藏界面" aria-label="切换界面显示">
           <svg class="icon-eye" viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
@@ -71,7 +74,7 @@
             <line x1="1" y1="1" x2="23" y2="23" />
           </svg>
         </button>
-        <button id="settingsBtn" class="icon-btn" title="设置" aria-label="设置">
+        <button id="settingsBtn" class="icon-btn" data-i18n-title="settings" title="设置" aria-label="设置">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
             <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.13.23.38.32.59.22l2.39-.96c.49.37 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.21.1.46 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" />
           </svg>
@@ -82,6 +85,7 @@
           href="https://github.com/Gudu-Z/LitematicWebViewer"
           target="_blank"
           rel="noopener"
+          data-i18n-title="github"
           title="GitHub"
           aria-label="GitHub 仓库"
         >
@@ -93,24 +97,24 @@
 
       <aside id="right-panel">
         <div class="panel">
-          <h2>信息</h2>
+          <h2 data-i18n="info">信息</h2>
           <dl id="metadata" class="metadata">
-            <div class="row empty">尚未加载文件</div>
+            <div class="row empty" data-i18n="metaNotLoaded">尚未加载文件</div>
           </dl>
 
           <div id="regionList" class="region-list">
-            <button id="regionListToggle" class="region-toggle" title="展开/收起区域">
-              <span>区域</span>
+            <button id="regionListToggle" class="region-toggle" data-i18n-title="regionsToggleTitle" title="展开/收起区域">
+              <span data-i18n="regions">区域</span>
             </button>
             <ul id="regionListBody" class="region-body"></ul>
           </div>
 
           <div id="materialList" class="material-list">
             <div class="material-head">
-              <button id="materialListToggle" class="material-toggle" title="展开/收起材料">
-                <span>材料</span>
+              <button id="materialListToggle" class="material-toggle" data-i18n-title="materialsToggleTitle" title="展开/收起材料">
+                <span data-i18n="materials">材料</span>
               </button>
-              <button id="materialSortBtn" class="material-sort" title="切换排序">多 → 少</button>
+              <button id="materialSortBtn" class="material-sort" data-i18n-title="materialSortTitle" title="切换排序">多 → 少</button>
             </div>
             <ul id="materialListBody" class="material-body"></ul>
           </div>
@@ -120,50 +124,50 @@
       <div id="settingsPanel" class="hidden">
         <div class="panel settings">
           <div class="settings-head">
-            <h2>设置</h2>
-            <button id="settingsCloseBtn" class="icon-btn" title="关闭">×</button>
+            <h2 data-i18n="settings">设置</h2>
+            <button id="settingsCloseBtn" class="icon-btn" data-i18n-title="close" title="关闭">×</button>
           </div>
 
           <div class="setting-row">
-            <label for="bgColor">背景颜色</label>
+            <label for="bgColor" data-i18n="bgColor">背景颜色</label>
             <input type="color" id="bgColor" value="#2a2a2a" />
           </div>
 
-          <div class="settings-section-title">显示</div>
+          <div class="settings-section-title" data-i18n="sectionDisplay">显示</div>
           <div class="setting-row">
-            <label for="showEntities">显示实体</label>
+            <label for="showEntities" data-i18n="showEntities">显示实体</label>
             <input type="checkbox" id="showEntities" checked />
           </div>
           <div class="setting-row">
-            <label for="showWireframes">显示区域线框</label>
+            <label for="showWireframes" data-i18n="showWireframes">显示区域线框</label>
             <input type="checkbox" id="showWireframes" checked />
           </div>
           <div class="setting-row">
-            <label for="showDimensions">显示尺寸</label>
+            <label for="showDimensions" data-i18n="showDimensions">显示尺寸</label>
             <input type="checkbox" id="showDimensions" checked />
           </div>
 
-          <div class="settings-section-title">操作</div>
+          <div class="settings-section-title" data-i18n="sectionControls">操作</div>
           <div class="setting-row">
-            <label for="sensitivitySlider">镜头灵敏度</label>
+            <label for="sensitivitySlider" data-i18n="sensitivity">镜头灵敏度</label>
             <input type="range" id="sensitivitySlider" min="0.005" max="0.05" step="0.001" value="0.007" />
             <span id="sensitivityValue" class="control-value">0.007</span>
           </div>
 
-          <div class="settings-section-title">资源包</div>
+          <div class="settings-section-title" data-i18n="resourcePacks">资源包</div>
           <div class="pack-cols">
             <div class="pack-col">
-              <div class="pack-col-title">已加载（越靠上优先级越高）</div>
+              <div class="pack-col-title" data-i18n="loadedPacks">已加载（越靠上优先级越高）</div>
               <ul id="loadedPackList" class="packlist"></ul>
             </div>
             <div class="pack-col">
-              <div class="pack-col-title">可加载</div>
+              <div class="pack-col-title" data-i18n="availablePacks">可加载</div>
               <ul id="availablePackList" class="packlist"></ul>
             </div>
           </div>
 
           <div class="buttons" style="margin-top: 12px">
-            <button id="packBtn">从文件加载资源包 (.zip)</button>
+            <button id="packBtn" data-i18n="loadPack">从文件加载资源包 (.zip)</button>
           </div>
         </div>
       </div>
