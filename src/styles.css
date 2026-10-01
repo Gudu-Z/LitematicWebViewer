@@ -610,13 +610,27 @@ body.ui-hidden #settingsPanel {
 .material-body {
   list-style: none;
   margin: 6px 0 0;
-  padding: 0;
+  padding: 0 2px 0 0;
   max-height: 220px;
   overflow-y: auto;
+  scrollbar-gutter: stable;
 }
 
 .material-body.collapsed {
   display: none;
+}
+
+.material-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.material-body::-webkit-scrollbar-thumb {
+  background: #3a4150;
+  border-radius: 4px;
+}
+
+.material-body::-webkit-scrollbar-thumb:hover {
+  background: #4a5262;
 }
 
 .material-body li {

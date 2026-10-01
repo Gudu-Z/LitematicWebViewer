@@ -7,6 +7,7 @@ import { AssetProvider } from './assets.js'
 import { BlockModelResolver } from './blocks.js'
 import { Renderer } from './renderer.js'
 import { UI } from './ui.js'
+import { BLOCK_NAMES } from './blockNames.js'
 
 const container = document.getElementById('viewer')
 const ui = new UI(document.body)
@@ -474,7 +475,11 @@ function updateMaterialList() {
     const name = (p.name || '').replace(/^minecraft:/, '')
     counts.set(name, (counts.get(name) || 0) + 1)
   }
-  const list = [...counts.entries()].map(([name, count]) => ({ name, count }))
+  const list = [...counts.entries()].map(([name, count]) => ({
+    name: BLOCK_NAMES[name] || name, // 中文译名，缺失回退英文 ID
+    key: name, // 英文 ID（tooltip 用）
+    count,
+  }))
   list.sort((a, b) => (view.materialSortAsc ? a.count - b.count : b.count - a.count))
   ui.renderMaterialList(list, view.materialSortAsc)
 }

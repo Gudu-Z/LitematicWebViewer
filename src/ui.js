@@ -149,7 +149,7 @@ export class UI {
       .map(
         (m) => `
         <li>
-          <span class="material-name" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
+          <span class="material-name" title="${escapeHtml(m.key || m.name)}">${escapeHtml(m.name)}</span>
           <span class="material-count">${m.count.toLocaleString()}</span>
         </li>`
       )
