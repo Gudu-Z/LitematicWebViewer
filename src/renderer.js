@@ -235,7 +235,7 @@ export class Renderer {
     this._building = new Set() // 正在生成的块（防止并发重复构建）
     this._buildQueue = []
     this._drainPromise = null
-    this._viewDistance = 128 // 视距（格）
+    this._viewDistance = 256 // 视距（格）
     this._lastCamChunk = null
     this._totalFaces = 0 // 当前已加载分块的总面数（状态栏用）
 
@@ -1144,7 +1144,7 @@ export class Renderer {
   }
 
   setViewDistance(v) {
-    this._viewDistance = Math.max(CHUNK, Math.min(512, Number(v) || 128))
+    this._viewDistance = Math.max(CHUNK, Math.min(1024, Number(v) || 256))
     this._lastCamChunk = null // 下一帧循环重算分块
   }
 
