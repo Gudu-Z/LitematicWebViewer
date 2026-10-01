@@ -94,6 +94,16 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     throw new Error('文件中没有 Regions 数据')
   }
 
+  // 方块数量过大时直接拒绝：后续要把所有非空气方块存入 Map 并合并成几何体，
+  // 几十万方块的投影浏览器能承受，上千万方块会撑爆内存/几何体数组（本次报错的
+  // 两个投影分别是 9449 万与 1.99 亿方块）。
+  const MAX_BLOCKS = 20_000_000
+  if (metadata.totalBlocks > MAX_BLOCKS) {
+    const err = new Error(`方块数量过大（${metadata.totalBlocks.toLocaleString()}，上限 ${MAX_BLOCKS.toLocaleString()}）`)
+    err.code = 'FILE_TOO_LARGE'
+    throw err
+  }
+
   // 第一遍：统计总方块数 + 全局边界 + 收集每个区域的名称与边界（区域名是 Regions 对象的键）
   let totalBlocks = 0
   let minX = Infinity, minY = Infinity, minZ = Infinity

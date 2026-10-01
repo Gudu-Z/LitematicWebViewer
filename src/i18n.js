@@ -78,6 +78,7 @@ const STRINGS = {
   statusDone: ['完成：{faces} 个面，{textures} 种贴图{entities}', 'Done: {faces} faces, {textures} textures{entities}'],
   statusEntities: ['，{n} 个实体', ', {n} entities'],
   loadFailed: ['加载失败：', 'Load failed: '],
+  fileTooLarge: ['文件过大，浏览器内存不足以完整预览', 'File too large — not enough memory to preview'],
   layerValue: ['层 {y}', 'Layer {y}'],
   layerDash: ['层 -', 'Layer -'],
   webglInitFailed: ['无法初始化 3D 渲染（WebGL 可能不可用）：', 'Failed to initialize 3D rendering (WebGL may be unavailable): '],

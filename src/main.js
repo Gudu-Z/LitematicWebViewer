@@ -267,7 +267,8 @@ async function openFile(file) {
     ui.setProgress(1)
   } catch (e) {
     console.error(e)
-    ui.showError(t('loadFailed') + (e.message || e))
+    if (e && e.code === 'FILE_TOO_LARGE') ui.showError(t('fileTooLarge'))
+    else ui.showError(t('loadFailed') + (e.message || e))
     ui.setProgress(0)
   } finally {
     busy = false
