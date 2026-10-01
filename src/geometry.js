@@ -148,18 +148,32 @@ function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible) {
   const selfH = fluidHeight(fluidOf[gi].level)
   let vx = 0
   let vz = 0
-  const get = (dx, dz) => {
+  const get = (dx, dy, dz) => {
     const nx = lx + dx
+    const ny = ly + dy
     const nz = lz + dz
-    if (nx < 0 || nx >= grid.W || nz < 0 || nz >= grid.D) return undefined
-    if (visible && !visible(nx, ly, nz)) return undefined
-    return blocks.get(nx + nz * grid.W + ly * grid.strideY)
+    if (nx < 0 || nx >= grid.W || ny < 0 || ny >= grid.H || nz < 0 || nz >= grid.D) return undefined
+    if (visible && !visible(nx, ny, nz)) return undefined
+    return blocks.get(nx + nz * grid.W + ny * grid.strideY)
   }
+  // 复刻原版 FlowingFluid.getFlow：空气邻居会看其下方是否有同种流体（水往下一级流），
+  // 同种流体邻居按高度差；别的流体（岩浆）不影响。
   for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
-    const ngi = get(dx, dz)
+    const ngi = get(dx, 0, dz)
     const nfo = ngi === undefined ? null : fluidOf[ngi]
-    if (!nfo || nfo.kind !== kind) continue // 只比较同种流体
-    const diff = selfH - fluidHeight(nfo.level)
+    if (nfo && nfo.kind !== kind) continue // 别的流体不影响流向
+    let diff = 0
+    if (!nfo) {
+      // 空气邻居：下方有同种流体（且高度 > 0）→ 产生朝该方向的流向（原版 diff = selfH - (belowH - 8/9)）
+      const bgi = get(dx, -1, dz)
+      const bfo = bgi === undefined ? null : fluidOf[bgi]
+      if (bfo && bfo.kind === kind && fluidHeight(bfo.level) > 0) {
+        diff = selfH - (fluidHeight(bfo.level) - 8 / 9)
+      }
+    } else if (fluidHeight(nfo.level) > 0) {
+      // 同种流体邻居：按高度差
+      diff = selfH - fluidHeight(nfo.level)
+    }
     if (diff !== 0) {
       vx += dx * diff
       vz += dz * diff
