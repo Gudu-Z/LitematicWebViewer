@@ -34,6 +34,16 @@ export function isTransparent(name) {
     || n.endsWith('_roots')
 }
 
+// 原版 FluidRenderer 在水面侧面贴着「半透明方块」（HalfTransparentBlock：玻璃/冰/黏液/蜂蜜）
+// 或「树叶」（LeavesBlock）时，改用 overlay 贴图（water_overlay）而非 flow 贴图。
+function isOverlayBlock(name) {
+  const n = shortName(name)
+  return n.endsWith('_leaves')
+    || n === 'glass' || n.endsWith('_stained_glass') || n === 'tinted_glass'
+    || n === 'ice' || n === 'frosted_ice'
+    || n === 'slime_block' || n === 'honey_block'
+}
+
 // 红石粉的线/点贴图需要按信号强度分别染色
 function isRedstoneDustTex(texKey) {
   return /(redstone_dust_dot|redstone_dust_line0|redstone_dust_line1)$/.test(texKey)
@@ -312,9 +322,12 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
   }
   // 侧面（邻居为同种流体或不透明完整方块、或含水方块自身满侧面时剔除）
   const side = (dx, dz) => get(dx, 0, dz)
+  // 侧面贴着玻璃/树叶等半透明方块时用 overlay 贴图（原版 HalfTransparentBlock/LeavesBlock）
+  const overlayTex = isLava ? null : 'block/water_overlay'
   const emitSide = (dx, dz, bit, pos, uv) => {
-    if (isFluid(side(dx, dz)) || isCullingSolid(side(dx, dz)) || (selfMask & bit)) return
-    record(flowTex, pos, uv)
+    const ngi = side(dx, dz)
+    if (isFluid(ngi) || isCullingSolid(ngi) || (selfMask & bit)) return
+    record(overlayTex && isOverlayBlock(giName(ngi)) ? overlayTex : flowTex, pos, uv)
     count++
   }
   emitSide(0, -1, 4, [[x + 1, y + w, z], [x, y + w, z], [x + 1, y + h10, z], [x, y + h00, z]], [[0, 1], [1, 1], [0, 0], [1, 0]])

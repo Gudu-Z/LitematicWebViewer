@@ -924,7 +924,7 @@ export class Renderer {
         const sep = gKey.indexOf('|p')
         const texKey = sep >= 0 ? gKey.slice(0, sep) : gKey
         const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
-        const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow'
+        const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow' || texKey === 'block/water_overlay'
         const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
         // 气泡柱内的气泡：原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡）。
         // 用点精灵（THREE.Points）渲染，始终面向摄像头，任何角度都可见。
