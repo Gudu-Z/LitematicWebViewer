@@ -857,8 +857,10 @@ export class Renderer {
     return stats
   }
 
-  // 扫描所有「含水」方块（水、气泡柱、含水方块），得到每个 XZ 列的水方块 Y 集合（世界坐标），
-  // 用于在动画循环里判断相机是否浸入水中。复用 geometry.fluidOfEntry 判断方块流体是否为水。
+  // 扫描所有「满格水体」方块（水源、流动水、气泡柱），得到每个 XZ 列的水方块 Y 集合（世界坐标），
+  // 用于在动画循环里判断相机是否浸入水中（眼睛在水面之下）。
+  // 复用 geometry.fluidOfEntry，但排除「含水方块」（waterlogged 的台阶/楼梯等半格方块）——
+  // 它们只有部分空间是水，若纳入会把「位于半格实体里的相机」误判成水下，导致雾在水面之上也生效。
   _computeWaterColumns(data) {
     const { palette, blocks, bounds } = data
     const W = bounds.width
@@ -867,7 +869,8 @@ export class Renderer {
     const columns = new Map()
     for (const [key, gi] of blocks) {
       const p = palette[gi]
-      if (!p || fluidOfEntry(p)?.kind !== 'water') continue
+      const fo = p && fluidOfEntry(p)
+      if (!fo || fo.kind !== 'water' || fo.waterlogged) continue
       const lx = key % W
       const lz = Math.floor(key / W) % D
       const ly = Math.floor(key / strideY)
