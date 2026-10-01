@@ -42,7 +42,7 @@ function isRedstoneDustTex(texKey) {
 // 流体（水/岩浆）高度（0-1）：与原版 FluidState.getHeight() = 内部 level / 9 一致。
 // 方块状态里的 level：0=水源(内部 level 8)、1..7=流动(内部 8-level)、8=下落(内部 8)。
 // 故 source / falling → 8/9；flowing L → (8-L)/9。这里的 8/9 正是原版 FLUID_HEIGHT 常量。
-function fluidHeight(level) {
+export function fluidHeight(level) {
   const l = Number(level) || 0
   return (l <= 0 || l >= 8) ? 8 / 9 : (8 - l) / 9
 }

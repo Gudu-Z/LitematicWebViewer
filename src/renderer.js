@@ -4,7 +4,7 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { buildFaceGroups, fluidOfEntry } from './geometry.js'
+import { buildFaceGroups, fluidOfEntry, fluidHeight } from './geometry.js'
 import { buildEntityMesh, buildCopperGolemStatueMesh } from './entities.js'
 import { bakeModel } from './modelBaker.js'
 
@@ -217,7 +217,7 @@ export class Renderer {
     // 让近处也明显泛蓝、更接近原版观感。
     this._waterFogColor = new THREE.Color(0x050533)
     this._waterFog = new THREE.Fog(this._waterFogColor, -8, 48)
-    this._waterColumns = null // Map<XZ key -> [minY, maxY]>，水柱纵向范围（世界坐标）
+    this._waterSurface = null // Map<方块整数 key -> 该方块内水面世界Y>，用于判断相机是否在水面之下
     this._bounds = null
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000)
@@ -378,18 +378,22 @@ export class Renderer {
     this.renderer.render(this.scene, this.camera)
   }
 
-  // 相机浸入水中时蒙上原版的水下雾（深蓝黑 #050533）。判断方式：相机所在位置的那个方块
-  // 是否为水方块。相机在结构边界外一律视为「不在水下」并清除雾，否则一旦入水后飞出边界，
-  // 雾会残留（导致移动时随机出现）。
+  // 相机浸入水中时蒙上原版的水下雾（深蓝黑 #050533）。复刻原版 Camera.getFluidInCamera：
+  // 相机所在方块含水、且相机眼高低于该方块内的水面，才算水下。相机在结构边界外视为不在水下。
   _updateUnderwaterFog() {
-    if (!this._waterColumns || !this._bounds) return
+    if (!this._waterSurface || !this._bounds) return
     const cam = this.camera.position
     const lx = Math.floor(cam.x) - this._bounds.minX
+    const ly = Math.floor(cam.y) - this._bounds.minY
     const lz = Math.floor(cam.z) - this._bounds.minZ
     let underwater = false
-    if (lx >= 0 && lz >= 0 && lx < this._bounds.width && lz < this._bounds.depth) {
-      const col = this._waterColumns.get(lx + lz * this._bounds.width)
-      underwater = !!col && col.has(Math.floor(cam.y))
+    if (
+      lx >= 0 && ly >= 0 && lz >= 0 &&
+      lx < this._bounds.width && ly < this._bounds.height && lz < this._bounds.depth
+    ) {
+      const key = lx + lz * this._bounds.width + ly * (this._bounds.width * this._bounds.depth)
+      const surfaceY = this._waterSurface.get(key)
+      underwater = surfaceY !== undefined && cam.y < surfaceY
     }
     if (underwater) {
       if (this.scene.fog !== this._waterFog) {
@@ -461,8 +465,8 @@ export class Renderer {
     this.clearEntities()
     this.clearOverlay()
     this.clearRegionWireframes()
-    // 清除水下雾状态（下次载入时重新计算水柱）
-    this._waterColumns = null
+    // 清除水下雾状态（下次载入时重新计算水面）
+    this._waterSurface = null
     this._bounds = null
     if (this.scene.fog) {
       this.scene.fog = null
@@ -848,7 +852,7 @@ export class Renderer {
     this.clear()
     const { bounds } = data
     this._bounds = bounds
-    this._computeWaterColumns(data)
+    this._computeWaterSurface(data)
     const stats = await this._buildBlockMeshes(data, assets, onProgress, filter)
     if (fit) this._fit(bounds)
     this._updateOverlay(bounds)
@@ -857,32 +861,43 @@ export class Renderer {
     return stats
   }
 
-  // 扫描所有「满格水体」方块（水源、流动水、气泡柱），得到每个 XZ 列的水方块 Y 集合（世界坐标），
-  // 用于在动画循环里判断相机是否浸入水中（眼睛在水面之下）。
-  // 复用 geometry.fluidOfEntry，但排除「含水方块」（waterlogged 的台阶/楼梯等半格方块）——
-  // 它们只有部分空间是水，若纳入会把「位于半格实体里的相机」误判成水下，导致雾在水面之上也生效。
-  _computeWaterColumns(data) {
+  // 扫描所有含水方块（水源、流动水、气泡柱、含水方块），得到每个方块内「水面世界Y」，
+  // 用于判断相机是否浸入水中。复刻原版 Camera.getFluidInCamera + FluidState.getHeightForCamera：
+  //   - 上方是同种水 → 水续满，水面到方块顶（高度 1）
+  //   - 水源且上方是完整实体方块 → 被顶满（高度 1）
+  //   - 否则 → 按 level 算（源 8/9、流动 (8-level)/9），流动水不满一格
+  // 这样即使水面不满一整个方块，只要相机眼睛低于该方块内的水面就算水下。
+  _computeWaterSurface(data) {
     const { palette, blocks, bounds } = data
     const W = bounds.width
     const D = bounds.depth
+    const H = bounds.height
     const strideY = W * D
-    const columns = new Map()
+    const surface = new Map()
     for (const [key, gi] of blocks) {
       const p = palette[gi]
       const fo = p && fluidOfEntry(p)
-      if (!fo || fo.kind !== 'water' || fo.waterlogged) continue
+      if (!fo || fo.kind !== 'water') continue
       const lx = key % W
       const lz = Math.floor(key / W) % D
       const ly = Math.floor(key / strideY)
-      const xz = lx + lz * W
-      let set = columns.get(xz)
-      if (!set) {
-        set = new Set()
-        columns.set(xz, set)
+      const y = ly + bounds.minY
+      let h = fluidHeight(fo.level)
+      if (ly + 1 < H) {
+        const aboveGi = blocks.get(key + strideY)
+        const aboveFo = aboveGi !== undefined ? fluidOfEntry(palette[aboveGi]) : null
+        if (aboveFo && aboveFo.kind === 'water') {
+          h = 1 // 上方还是水 → 水续满，表面到方块顶
+        } else if (fo.level <= 0 && aboveGi !== undefined) {
+          const ap = palette[aboveGi]
+          if (ap && ap.baked && ap.baked.fullCube && !fluidOfEntry(ap)) {
+            h = 1 // 水源被上方完整实体方块顶满（原版 isFaceSturdy）
+          }
+        }
       }
-      set.add(ly + bounds.minY)
+      surface.set(key, y + h)
     }
-    this._waterColumns = columns
+    this._waterSurface = surface
   }
 
   // 只重建方块网格（层级/区域变化时调用，不动相机、告示牌、头颅、实体）。
