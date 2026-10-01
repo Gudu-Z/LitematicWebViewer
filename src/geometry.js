@@ -389,13 +389,17 @@ function writeFace(g, verts, uvs, ox, oy, oz) {
 // blocks: Map<整数key -> paletteIndex>
 // bounds: {minX,minY,minZ,width,height,depth}（用于把整数 key 还原为世界坐标）
 // onProgress(fraction) 每处理约 6.5 万方块回调一次进度，并让出主线程。
+// filter(x,y,z,ly)：层级/区域切片过滤，被排除的方块不生成、且剔除时按空气处理。
+// emitBounds（可选）：只生成落在该世界包围盒内的方块（分块渲染用）；其外的方块
+//   （即「外壳」）仍参与面剔除/流体判断，但不被生成。注意与 filter 的区别：
+//   filter 会让被排除方块「当作空气」影响剔除，emitBounds 只是限制发射范围。
 //
 // 采用「两遍扫描」：第一遍统计每个贴图组的精确面数，据此分配精确大小的
 // Float32/Uint32 数组，第二遍填充。相比普通 JS 数组（每个数 8 字节 + push 扩容），
 // 内存减半且无扩容峰值，超大投影（上千万面）也不会撑爆内存。
 // 法线不存（每个面的 4 个顶点本就同法线，渲染用 flatShading 即可得到相同光照）。
 // 返回 { groups: Map<texKey, {positions,uvs,indices}>, emitted: 面数 }
-export async function buildFaceGroups(palette, blocks, bounds, onProgress, filter) {
+export async function buildFaceGroups(palette, blocks, bounds, onProgress, filter, emitBounds) {
   const grid = {
     W: bounds.width,
     D: bounds.depth,
@@ -463,6 +467,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     const x = lx + minX
     const y = ly + minY
     const z = lz + minZ
+    if (emitBounds && (x < emitBounds.minX || x > emitBounds.maxX || y < emitBounds.minY || y > emitBounds.maxY || z < emitBounds.minZ || z > emitBounds.maxZ)) continue
     if (filter && !filter(x, y, z, ly)) continue
     const finfo = fluidOf[gi]
     if (finfo) {
@@ -510,6 +515,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     const x = lx + minX
     const y = ly + minY
     const z = lz + minZ
+    if (emitBounds && (x < emitBounds.minX || x > emitBounds.maxX || y < emitBounds.minY || y > emitBounds.maxY || z < emitBounds.minZ || z > emitBounds.maxZ)) continue
     if (filter && !filter(x, y, z, ly)) continue
     const finfo = fluidOf[gi]
     if (finfo) {

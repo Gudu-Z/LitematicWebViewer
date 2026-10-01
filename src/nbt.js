@@ -135,7 +135,7 @@ export async function decompressNBT(data) {
 
 // 解压后数据超过该体积时视为「文件过大」直接报错，避免浏览器一次性分配
 // 超大 ArrayBuffer（上百 MB 甚至 GB）导致内存不足崩溃。
-const MAX_DECOMPRESSED = 512 * 1024 * 1024 // 512 MB
+const MAX_DECOMPRESSED = 1024 * 1024 * 1024 // 1 GB（Parrots 级投影解压后约 365MB；海盗城 1.59GB 仍会被拦）
 
 async function inflate(data, format) {
   const ds = new DecompressionStream(format)

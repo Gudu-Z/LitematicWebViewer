@@ -7,8 +7,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildFaceGroups, fluidOfEntry, fluidHeight } from './geometry.js'
 import { buildEntityMesh, buildCopperGolemStatueMesh } from './entities.js'
 import { bakeModel } from './modelBaker.js'
+import { CHUNK } from './blockStore.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
+
+// 让出主线程一小段时间（分块流式生成时保持界面响应）
+const yieldThread = () => new Promise((r) => setTimeout(r, 0))
 
 // 墙上告示牌的 facing -> 方向向量（文字朝向）
 const SIGN_FACING = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0] }
@@ -217,9 +221,23 @@ export class Renderer {
     // 让近处也明显泛蓝、更接近原版观感。
     this._waterFogColor = new THREE.Color(0x050533)
     this._waterFog = new THREE.Fog(this._waterFogColor, -8, 48)
-    this._waterSurface = null // Map<方块整数 key -> 该方块内水面世界Y>，用于判断相机是否在水面之下
     this._fogEnabled = true // 水下雾开关
     this._bounds = null
+    // 分块渲染状态
+    this._store = null // BlockStore（方块数据）
+    this._palette = null
+    this._assets = null
+    this._filter = null // 层级/区域切片过滤
+    this._materialCache = new Map() // texKey -> material|null（跨块共享）
+    this.chunks = new Map() // chunkKey -> { cx, cy, cz, group }
+    this._wanted = new Set() // 视距内的块
+    this._queued = new Set() // 已入队待生成的块
+    this._building = new Set() // 正在生成的块（防止并发重复构建）
+    this._buildQueue = []
+    this._drainPromise = null
+    this._viewDistance = 128 // 视距（格）
+    this._lastCamChunk = null
+    this._totalFaces = 0 // 当前已加载分块的总面数（状态栏用）
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000)
     this.camera.position.set(20, 16, 20)
@@ -457,28 +475,39 @@ export class Renderer {
     this._lastTime = now
     this._applyMovement(dt)
     this._updateUnderwaterFog()
+    this._streamChunks()
     // 飞行模式下不跑 OrbitControls.update()——它会 lookAt(target) 覆盖掉原地转头的旋转
     if (this.moveMode === 'orbit') this.controls.update()
     this.renderer.render(this.scene, this.camera)
   }
 
   // 相机浸入水中时蒙上原版的水下雾（深蓝黑 #050533）。复刻原版 Camera.getFluidInCamera：
-  // 相机所在方块含水、且相机眼高低于该方块内的水面，才算水下。相机在结构边界外视为不在水下。
+  // 相机所在方块含水、且相机眼高低于该方块内的水面，才算水下。按需查 BlockStore，
+  // 不再全量扫描（分块渲染下只查相机脚下那一个方块）。
   _updateUnderwaterFog() {
-    if (!this._fogEnabled || !this._waterSurface || !this._bounds) return
+    if (!this._fogEnabled || !this._store || !this._palette) return
     const cam = this.camera.position
-    const lx = Math.floor(cam.x) - this._bounds.minX
-    const ly = Math.floor(cam.y) - this._bounds.minY
-    const lz = Math.floor(cam.z) - this._bounds.minZ
-    let underwater = false
-    if (
-      lx >= 0 && ly >= 0 && lz >= 0 &&
-      lx < this._bounds.width && ly < this._bounds.height && lz < this._bounds.depth
-    ) {
-      const key = lx + lz * this._bounds.width + ly * (this._bounds.width * this._bounds.depth)
-      const surfaceY = this._waterSurface.get(key)
-      underwater = surfaceY !== undefined && cam.y < surfaceY
+    const bx = Math.floor(cam.x)
+    const by = Math.floor(cam.y)
+    const bz = Math.floor(cam.z)
+    let surfaceY
+    const gi = this._store.get(bx, by, bz)
+    if (gi !== undefined) {
+      const p = this._palette[gi]
+      const fo = p && fluidOfEntry(p)
+      if (fo && fo.kind === 'water') {
+        let h = fluidHeight(fo.level)
+        const aboveGi = this._store.get(bx, by + 1, bz)
+        const aboveFo = aboveGi !== undefined ? fluidOfEntry(this._palette[aboveGi]) : null
+        if (aboveFo && aboveFo.kind === 'water') h = 1
+        else if (fo.level <= 0 && aboveGi !== undefined) {
+          const ap = this._palette[aboveGi]
+          if (ap && ap.baked && ap.baked.fullCube && !fluidOfEntry(ap)) h = 1
+        }
+        surfaceY = by + h
+      }
     }
+    const underwater = surfaceY !== undefined && cam.y < surfaceY
     if (underwater) {
       if (this.scene.fog !== this._waterFog) {
         this.scene.fog = this._waterFog
@@ -560,9 +589,12 @@ export class Renderer {
     this.clearEntities()
     this.clearOverlay()
     this.clearRegionWireframes()
-    // 清除水下雾状态（下次载入时重新计算水面）
-    this._waterSurface = null
+    // 清除分块状态（下次载入时重新设置）
+    this._store = null
+    this._palette = null
+    this._assets = null
     this._bounds = null
+    this._lastCamChunk = null
     if (this.scene.fog) {
       this.scene.fog = null
       this.scene.background = new THREE.Color(this._bgColor)
@@ -570,17 +602,33 @@ export class Renderer {
   }
 
   clearBlocks(disposeTextures = false) {
-    while (this.group.children.length) {
-      const child = this.group.children.pop()
-      child.geometry?.dispose()
-      const mats = Array.isArray(child.material) ? child.material : [child.material]
-      mats.forEach((m) => {
-        if (m) {
-          if (disposeTextures) m.map?.dispose()
-          m.dispose()
-        }
-      })
+    this._disposeAllChunks()
+    if (disposeTextures) {
+      // 资源包变化：贴图缓存已失效，连同材质一起释放
+      for (const mat of this._materialCache.values()) {
+        if (!mat) continue
+        mat.map?.dispose()
+        mat.dispose()
+      }
+      this._materialCache.clear()
     }
+  }
+
+  _disposeChunk(entry) {
+    if (entry.group) {
+      entry.group.traverse((o) => o.geometry?.dispose())
+      this.group.remove(entry.group)
+    }
+    this._totalFaces -= entry.faces || 0
+  }
+
+  _disposeAllChunks() {
+    for (const entry of this.chunks.values()) this._disposeChunk(entry)
+    this.chunks.clear()
+    this._wanted.clear()
+    this._queued.clear()
+    this._buildQueue.length = 0
+    this._totalFaces = 0
   }
 
   clearHeads() {
@@ -955,163 +1003,254 @@ export class Renderer {
     return tex
   }
 
-  // data: { palette: [{name, faces}], blocks: Map<"x,y,z" -> paletteIndex>, bounds }
+  // data: { palette, store, bounds, ... }，store 为 BlockStore（分块存储）。
   // fit=true 时把相机对准结构中心（首次载入）；fit=false 时保持相机不动（切换资源包重渲染）。
-  // 返回 { faces, textures }
+  // 只生成视距内的分块，返回 { faces, textures }。
   async render(data, assets, onProgress, filter, fit = true) {
     this.clear()
     const { bounds } = data
     this._bounds = bounds
-    this._computeWaterSurface(data)
-    const stats = await this._buildBlockMeshes(data, assets, onProgress, filter)
+    this._store = data.store
+    this._palette = data.palette
+    this._assets = assets
+    this._filter = filter || null
     if (fit) this._fit(bounds)
     this._updateOverlay(bounds)
     this._updateRegionWireframes(data)
+    // 先记录当前相机所在块，避免初始构建期间 _streamChunks 并发入队同一批块
+    this._lastCamChunk = this._camChunkKey()
+    const stats = await this._buildAllWanted(onProgress)
+    if (this._store.chunks.size > 0) {
+      let anyMat = false
+      for (const m of this._materialCache.values()) if (m) { anyMat = true; break }
+      if (!anyMat) throw new Error('贴图加载失败：请确认已运行 npm run setup')
+    }
     onProgress?.(1)
     return stats
   }
 
-  // 扫描所有含水方块（水源、流动水、气泡柱、含水方块），得到每个方块内「水面世界Y」，
-  // 用于判断相机是否浸入水中。复刻原版 Camera.getFluidInCamera + FluidState.getHeightForCamera：
-  //   - 上方是同种水 → 水续满，水面到方块顶（高度 1）
-  //   - 水源且上方是完整实体方块 → 被顶满（高度 1）
-  //   - 否则 → 按 level 算（源 8/9、流动 (8-level)/9），流动水不满一格
-  // 这样即使水面不满一整个方块，只要相机眼睛低于该方块内的水面就算水下。
-  _computeWaterSurface(data) {
-    const { palette, blocks, bounds } = data
-    const W = bounds.width
-    const D = bounds.depth
-    const H = bounds.height
-    const strideY = W * D
-    const surface = new Map()
-    for (const [key, gi] of blocks) {
-      const p = palette[gi]
-      const fo = p && fluidOfEntry(p)
-      if (!fo || fo.kind !== 'water') continue
-      const lx = key % W
-      const lz = Math.floor(key / W) % D
-      const ly = Math.floor(key / strideY)
-      const y = ly + bounds.minY
-      let h = fluidHeight(fo.level)
-      if (ly + 1 < H) {
-        const aboveGi = blocks.get(key + strideY)
-        const aboveFo = aboveGi !== undefined ? fluidOfEntry(palette[aboveGi]) : null
-        if (aboveFo && aboveFo.kind === 'water') {
-          h = 1 // 上方还是水 → 水续满，表面到方块顶
-        } else if (fo.level <= 0 && aboveGi !== undefined) {
-          const ap = palette[aboveGi]
-          if (ap && ap.baked && ap.baked.fullCube && !fluidOfEntry(ap)) {
-            h = 1 // 水源被上方完整实体方块顶满（原版 isFaceSturdy）
+  // —— 分块渲染 ——
+
+  // 层级/区域变化时重建所有视距内的块（复用材质缓存，不动相机/实体等）
+  async rebuildAllChunks(filter) {
+    this._filter = filter || null
+    this._disposeAllChunks()
+    return this._buildAllWanted()
+  }
+
+  // 生成视距内所有缺失的块（首次载入 / 重建时调用），返回 { faces, textures }
+  async _buildAllWanted(onProgress) {
+    this._computeWanted()
+    const wanted = Array.from(this._wanted)
+    let built = 0
+    for (const key of wanted) {
+      if (!this._wanted.has(key) || this.chunks.has(key)) continue
+      await this._buildChunkKey(key)
+      built++
+      onProgress?.(wanted.length ? 0.45 + 0.5 * (built / wanted.length) : 1)
+    }
+    return { faces: this._totalFaces, textures: this._materialCache.size }
+  }
+
+  // 每帧（相机跨块时）增量加载/卸载分块
+  _streamChunks() {
+    if (!this._store) return
+    const key = this._camChunkKey()
+    if (key === this._lastCamChunk) return
+    this._lastCamChunk = key
+    this._computeWanted()
+    for (const [k, entry] of this.chunks) {
+      if (!this._wanted.has(k)) {
+        this._disposeChunk(entry)
+        this.chunks.delete(k)
+      }
+    }
+    const cam = this.camera.position
+    const missing = []
+    for (const k of this._wanted) {
+      if (!this.chunks.has(k) && !this._queued.has(k)) missing.push(k)
+    }
+    if (missing.length) {
+      missing.sort((a, b) => this._chunkDist2(a, cam) - this._chunkDist2(b, cam))
+      for (const k of missing) this._queued.add(k)
+      this._buildQueue.push(...missing)
+      this._drain()
+    }
+  }
+
+  // 后台逐个构建分块（流式），直到队列清空
+  _drain() {
+    if (this._drainPromise) return this._drainPromise
+    this._drainPromise = (async () => {
+      try {
+        while (this._buildQueue.length) {
+          const key = this._buildQueue.shift()
+          this._queued.delete(key)
+          if (this.chunks.has(key) || !this._wanted.has(key)) continue
+          try {
+            await this._buildChunkKey(key)
+          } catch (e) {
+            console.error('分块生成失败', e)
           }
+          await yieldThread()
+        }
+      } finally {
+        this._drainPromise = null
+      }
+    })()
+    return this._drainPromise
+  }
+
+  _camChunkKey() {
+    if (!this._store) return null
+    const cam = this.camera.position
+    const s = this._store
+    return Math.floor((cam.x - s.minX) / CHUNK) + ',' + Math.floor((cam.y - s.minY) / CHUNK) + ',' + Math.floor((cam.z - s.minZ) / CHUNK)
+  }
+
+  _chunkDist2(key, cam) {
+    const { cx, cy, cz } = this._store.chunkCoordsOf(key)
+    const s = this._store
+    const wx = s.minX + (cx + 0.5) * CHUNK
+    const wy = s.minY + (cy + 0.5) * CHUNK
+    const wz = s.minZ + (cz + 0.5) * CHUNK
+    const dx = wx - cam.x
+    const dy = wy - cam.y
+    const dz = wz - cam.z
+    return dx * dx + dy * dy + dz * dz
+  }
+
+  // 视距内的块集合（球形，半径 = viewDistance / CHUNK 向上取整）
+  _computeWanted() {
+    const cam = this.camera.position
+    const s = this._store
+    const ccx = Math.floor((cam.x - s.minX) / CHUNK)
+    const ccy = Math.floor((cam.y - s.minY) / CHUNK)
+    const ccz = Math.floor((cam.z - s.minZ) / CHUNK)
+    const r = Math.max(1, Math.ceil(this._viewDistance / CHUNK))
+    const r2 = r * r
+    this._wanted.clear()
+    for (let dz = -r; dz <= r; dz++) {
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (dx * dx + dy * dy + dz * dz > r2) continue
+          const cx = ccx + dx
+          const cy = ccy + dy
+          const cz = ccz + dz
+          if (cx < 0 || cy < 0 || cz < 0 || cx >= s.cx || cy >= s.cy || cz >= s.cz) continue
+          this._wanted.add(s.chunkKeyOf(cx, cy, cz))
         }
       }
-      surface.set(key, y + h)
     }
-    this._waterSurface = surface
   }
 
-  // 只重建方块网格（层级/区域变化时调用，不动相机、告示牌、头颅、实体）。
-  async renderBlocks(data, assets, filter) {
-    this.clearBlocks()
-    return this._buildBlockMeshes(data, assets, null, filter)
+  setViewDistance(v) {
+    this._viewDistance = Math.max(CHUNK, Math.min(512, Number(v) || 128))
+    this._lastCamChunk = null // 下一帧循环重算分块
   }
 
-  async _buildBlockMeshes(data, assets, onProgress, filter) {
-    const { palette, blocks, bounds } = data
+  async _buildChunkKey(key) {
+    if (!this._store || !this._palette) return
+    const { cx, cy, cz } = this._store.chunkCoordsOf(key)
+    await this._buildChunk(cx, cy, cz)
+  }
 
-    const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45), filter)
-    if (emitted === 0) {
-      return { faces: 0, textures: 0 }
-    }
-    onProgress?.(0.45)
-
-    const texKeys = Array.from(groups.keys())
-    const materials = new Map()
-    let loaded = 0
-    await Promise.all(
-      texKeys.map(async (gKey) => {
-        // 组键可能带强度后缀（如 redstone_dust_dot|p15）
-        const sep = gKey.indexOf('|p')
-        const texKey = sep >= 0 ? gKey.slice(0, sep) : gKey
-        const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
-        const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow' || texKey === 'block/water_overlay'
-        const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
-        // 气泡柱内的气泡：原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡）。
-        // 用点精灵（THREE.Points）渲染，始终面向摄像头，任何角度都可见。
-        const isBubble = texKey === 'particle/bubble'
-        // 铁轨是零厚度平面（含斜坡）：用 Lambert 会让朝下的面被 cull 后露出暗面（斜坡朝南的一面发黑），
-        // 改用无光照 + 双面，让铁轨从任何角度都保持同一亮度（原版铁轨本就不随朝向变暗）。
-        const isRail = texKey.includes('rail')
-        const texture = await assets.getTexture(texKey)
-        if (texture) {
-          // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
-          // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
-          // flatShading：方块每个面的 4 个顶点本就同法线，用几何导数算平直法线即可，
-          // 省去法线数组（超大投影可省数百 MB 内存），光照效果一致。
-          // DoubleSide：原版水/岩浆的顶面从水下（背面）看也是可见的，不做背面剔除。
-          const mat = isWater || isLava
-            ? new THREE.MeshLambertMaterial(
-                isWater
-                  ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75, flatShading: true, side: THREE.DoubleSide }
-                  : { map: texture, transparent: true, opacity: 0.9, flatShading: true, side: THREE.DoubleSide },
-              )
-            : isBubble
-              // 气泡直径 0.3 格（原交叉面半径 0.15×2），sizeAttenuation 按距离透视缩放
-              ? new THREE.PointsMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, size: 0.3, sizeAttenuation: true })
-              : isRail
-                ? new THREE.MeshBasicMaterial({ map: texture, alphaTest: 0.5, side: THREE.DoubleSide })
-                : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
-          // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
-          if (power !== null) {
-            const c = redstoneTint(power)
-            mat.color.setRGB(c[0], c[1], c[2])
-          }
-          // 树叶/草染色：灰度贴图 × 树种/草色（无生物群系信息时用默认 foliage/grass 绿）
-          if (power === null) {
-            const fc = foliageTint(texKey) ?? grassTint(texKey)
-            if (fc != null) mat.color.setHex(fc)
-          }
-          materials.set(gKey, mat)
+  // 生成一个块（含 1 格外壳用于面剔除）的合并几何
+  async _buildChunk(cx, cy, cz) {
+    const key = this._store.chunkKeyOf(cx, cy, cz)
+    if (this.chunks.has(key) || this._building.has(key)) return
+    this._building.add(key)
+    try {
+      const { blocks, bounds } = this._store.decodeChunk(cx, cy, cz, 1)
+      const emitBounds = this._store.chunkBounds(cx, cy, cz)
+      const { groups, emitted } = await buildFaceGroups(this._palette, blocks, bounds, null, this._filter, emitBounds)
+      if (emitted === 0) {
+        this.chunks.set(key, { cx, cy, cz, group: null, faces: 0 })
+        return
+      }
+      const group = new THREE.Group()
+      for (const [texKey, g] of groups) {
+        const mat = await this._ensureMaterial(texKey)
+        if (!mat) continue
+        if (texKey === 'particle/bubble') {
+          const geo = new THREE.BufferGeometry()
+          geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3))
+          const points = new THREE.Points(geo, mat)
+          points.renderOrder = -1
+          group.add(points)
+          continue
         }
-        loaded++
-        onProgress?.(0.45 + 0.5 * (loaded / Math.max(1, texKeys.length)))
-      })
-    )
-
-    if (materials.size === 0 && groups.size > 0) {
-      throw new Error(`贴图加载失败：${texKeys.length} 张贴图都未能加载（请确认已运行 npm run setup）`)
-    }
-
-    let i = 0
-    for (const [texKey, g] of groups) {
-      const mat = materials.get(texKey)
-      if (!mat) continue
-      // 气泡组是点云：positions 只存中心坐标（每点 3 个 float）。
-      // renderOrder = -1：强制气泡在所有透明物体之前绘制——水会写深度（默认 depthWrite），
-      // 若气泡排在水后面，柱内的气泡会被水面深度全部挡住（只有个别角度可见）。
-      // 气泡先画、只和实体方块做深度测试，水随后混合在其上（气泡带一点水的蓝色），
-      // 与原版一致：水不遮挡其内部的气泡粒子。
-      if (texKey === 'particle/bubble') {
         const geo = new THREE.BufferGeometry()
         geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3))
-        const points = new THREE.Points(geo, mat)
-        points.renderOrder = -1
-        this.group.add(points)
-        continue
+        geo.setAttribute('uv', new THREE.BufferAttribute(g.uvs, 2))
+        geo.setIndex(new THREE.BufferAttribute(g.indices, 1))
+        group.add(new THREE.Mesh(geo, mat))
+        if ((group.children.length & 3) === 0) await yieldThread()
       }
-      const geo = new THREE.BufferGeometry()
-      // 注意：这里必须用 BufferAttribute 直接包装类型数组（不复制）——
-      // Float32BufferAttribute 会复制一份（超大投影多占一倍内存），
-      // 且 setIndex 只自动转换普通数组，直接传 Uint32Array 会被当成裸数组导致渲染报错。
-      geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3))
-      geo.setAttribute('uv', new THREE.BufferAttribute(g.uvs, 2))
-      geo.setIndex(new THREE.BufferAttribute(g.indices, 1))
-      this.group.add(new THREE.Mesh(geo, mat))
-      // 超大几何体上传 GPU 时也定期让出主线程，避免最后一段卡顿
-      if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
+      if (this._wanted.has(key)) {
+        this.group.add(group)
+        this.chunks.set(key, { cx, cy, cz, group, faces: emitted })
+        this._totalFaces += emitted
+      } else {
+        group.traverse((o) => o.geometry?.dispose())
+      }
+    } finally {
+      this._building.delete(key)
     }
+  }
 
-    return { faces: emitted, textures: materials.size }
+  // 按贴图组 key 取（或创建并缓存）材质，跨块共享，避免重复上传贴图
+  async _ensureMaterial(texKey) {
+    if (this._materialCache.has(texKey)) return this._materialCache.get(texKey)
+    const mat = await this._createMaterial(texKey)
+    this._materialCache.set(texKey, mat) // mat 可能为 null（贴图缺失）
+    return mat
+  }
+
+  async _createMaterial(gKey) {
+    const assets = this._assets
+    if (!assets) return null
+    // 组键可能带强度后缀（如 redstone_dust_dot|p15）
+    const sep = gKey.indexOf('|p')
+    const texKey = sep >= 0 ? gKey.slice(0, sep) : gKey
+    const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
+    const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow' || texKey === 'block/water_overlay'
+    const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
+    // 气泡柱内的气泡：原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡）。
+    // 用点精灵（THREE.Points）渲染，始终面向摄像头，任何角度都可见。
+    const isBubble = texKey === 'particle/bubble'
+    // 铁轨是零厚度平面（含斜坡）：用 Lambert 会让朝下的面被 cull 后露出暗面（斜坡朝南的一面发黑），
+    // 改用无光照 + 双面，让铁轨从任何角度都保持同一亮度（原版铁轨本就不随朝向变暗）。
+    const isRail = texKey.includes('rail')
+    const texture = await assets.getTexture(texKey)
+    if (!texture) return null
+    // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
+    // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
+    // flatShading：方块每个面的 4 个顶点本就同法线，用几何导数算平直法线即可，
+    // 省去法线数组（超大投影可省数百 MB 内存），光照效果一致。
+    // DoubleSide：原版水/岩浆的顶面从水下（背面）看也是可见的，不做背面剔除。
+    const mat = isWater || isLava
+      ? new THREE.MeshLambertMaterial(
+          isWater
+            ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75, flatShading: true, side: THREE.DoubleSide }
+            : { map: texture, transparent: true, opacity: 0.9, flatShading: true, side: THREE.DoubleSide },
+        )
+      : isBubble
+        // 气泡直径 0.3 格（原交叉面半径 0.15×2），sizeAttenuation 按距离透视缩放
+        ? new THREE.PointsMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, size: 0.3, sizeAttenuation: true })
+        : isRail
+          ? new THREE.MeshBasicMaterial({ map: texture, alphaTest: 0.5, side: THREE.DoubleSide })
+          : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
+    // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
+    if (power !== null) {
+      const c = redstoneTint(power)
+      mat.color.setRGB(c[0], c[1], c[2])
+    } else {
+      // 树叶/草染色：灰度贴图 × 树种/草色（无生物群系信息时用默认 foliage/grass 绿）
+      const fc = foliageTint(texKey) ?? grassTint(texKey)
+      if (fc != null) mat.color.setHex(fc)
+    }
+    return mat
   }
 
   // 调试：读取当前画面像素，统计有多少种颜色（判断画面是否有内容）

@@ -8,8 +8,9 @@
 //   - 世界最小角 world = min(origin, origin + size + 1)
 
 import { parseNBT, decompressNBT } from './nbt.js'
+import { BlockStore } from './blockStore.js'
 
-// 空气类方块：解析时直接跳过、不存入 blocks Map，避免超大型投影占用过多内存。
+// 空气类方块：解析时直接跳过、不存入 store，避免超大型投影占用过多内存。
 const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
 
 // 解码位压缩的 BlockStates（小端序），返回每个位置的调色板索引。
@@ -94,10 +95,9 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     throw new Error('文件中没有 Regions 数据')
   }
 
-  // 方块数量过大时直接拒绝：后续要把所有非空气方块存入 Map 并合并成几何体，
-  // 几十万方块的投影浏览器能承受，上千万方块会撑爆内存/几何体数组（本次报错的
-  // 两个投影分别是 9449 万与 1.99 亿方块）。
-  const MAX_BLOCKS = 20_000_000
+  // 方块数量过大时直接拒绝：分块渲染后 ~1 亿方块（Parrots 级）可在浏览器里预览，
+  // 超过则可能连紧凑的方块数据都放不下（本次报错的完整海盗城是 1.99 亿方块）。
+  const MAX_BLOCKS = 120_000_000
   if (metadata.totalBlocks > MAX_BLOCKS) {
     const err = new Error(`方块数量过大（${metadata.totalBlocks.toLocaleString()}，上限 ${MAX_BLOCKS.toLocaleString()}）`)
     err.code = 'FILE_TOO_LARGE'
@@ -137,6 +137,13 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
   const D = maxZ - minZ + 1
   const strideY = W * D // 每升高一层（y+1）整数 key 增加的步长
 
+  const bounds = {
+    minX, minY, minZ, maxX, maxY, maxZ,
+    width: W,
+    height: maxY - minY + 1,
+    depth: D,
+  }
+
   const palette = []
   const paletteIndexByKey = new Map()
   const getGlobalIndex = (name, properties) => {
@@ -152,7 +159,8 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     return idx
   }
 
-  const blocks = new Map()
+  const store = new BlockStore(bounds)
+  const blockCountsByPalette = [] // palette 索引 -> 方块数量（供材料清单）
   const tileEntities = [] // 方块实体（如告示牌）
   const entities = [] // 实体（如矿车、物品展示框）
   let doneBlocks = 0
@@ -205,22 +213,21 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
 
     const bits = Math.max(2, Math.ceil(Math.log2(paletteList.length)))
     const rowSize = dz * dx // 每层（y 固定）的方块数
-    const lx0 = wx0 - minX
-    const lz0 = wz0 - minZ
-    const ly0 = wy0 - minY
 
-    // 按「层」分块解码并即时存入 Map：避免一次性分配超大数组，
+    // 按「层」分块解码并即时写入紧凑存储：避免一次性分配超大数组，
     // 且每解码一层让出一次主线程，防止超大投影（上亿方块）卡死界面。
     for (let y = 0; y < dy; y++) {
       const decoded = decodeBlockStates(region.BlockStates, bits, rowSize, y * rowSize)
-      const yKey = (ly0 + y) * strideY
+      const wy = wy0 + y
       let rowIdx = 0
       for (let z = 0; z < dz; z++) {
-        const rowBase = yKey + (lz0 + z) * W + lx0
+        const wz = wz0 + z
         for (let x = 0; x < dx; x++) {
           const li = decoded[rowIdx++]
-          if (isSkip[li]) continue // 空气类方块不入 Map
-          blocks.set(rowBase + x, localToGlobal[li] ?? 0)
+          if (isSkip[li]) continue // 空气类方块不入 store
+          const gi = localToGlobal[li] ?? 0
+          store.set(wx0 + x, wy, wz, gi)
+          blockCountsByPalette[gi] = (blockCountsByPalette[gi] || 0) + 1
         }
       }
       doneBlocks += rowSize
@@ -230,14 +237,7 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     region.BlockStates = null // 该区域已解码完，释放大数组（超大投影可达数百 MB），降低峰值内存
   }
 
-  const bounds = {
-    minX, minY, minZ, maxX, maxY, maxZ,
-    width: W,
-    height: maxY - minY + 1,
-    depth: D,
-  }
-
-  return { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList }
+  return { metadata, palette, store, blockCountsByPalette, bounds, tileEntities, entities, regions: regionList }
 }
 
 export async function parseLitematica(buffer, onProgress) {
