@@ -1020,11 +1020,10 @@ export class Renderer {
     // 先记录当前相机所在块，避免初始构建期间 _streamChunks 并发入队同一批块
     this._lastCamChunk = this._camChunkKey()
     const stats = await this._buildAllWanted(onProgress)
-    if (this._store.chunks.size > 0) {
-      let anyMat = false
-      for (const m of this._materialCache.values()) if (m) { anyMat = true; break }
-      if (!anyMat) throw new Error('贴图加载失败：请确认已运行 npm run setup')
-    }
+    // 只有「尝试加载过贴图且全部失败」才报错（初始视距内可能没有方块，此时未尝试任何贴图，不报错）
+    let anyMat = false
+    for (const m of this._materialCache.values()) if (m) { anyMat = true; break }
+    if (this._materialCache.size > 0 && !anyMat) throw new Error('贴图加载失败：请确认已运行 npm run setup')
     onProgress?.(1)
     return stats
   }
