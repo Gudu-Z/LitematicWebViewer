@@ -270,6 +270,25 @@ button.primary:hover {
   background: #343b49;
 }
 
+/* 语言按钮：地球图标左下角的小字标注当前语言 */
+.lang-btn {
+  position: relative;
+}
+
+.lang-btn .lang-badge {
+  position: absolute;
+  left: 2px;
+  bottom: 1px;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  padding: 1px 2px;
+  border-radius: 3px;
+  background: rgba(20, 24, 30, 0.9);
+  color: #e8eaed;
+  pointer-events: none;
+}
+
 /* 界面显示切换按钮：界面隐藏时显示「闭眼」图标，反之「睁眼」 */
 #uiToggleBtn .icon-eye-off {
   display: none;

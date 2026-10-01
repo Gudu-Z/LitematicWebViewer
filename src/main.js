@@ -95,6 +95,7 @@ ui.onMaterialSort = () => {
 // 语言切换（中 / 英）
 document.getElementById('langBtn').addEventListener('click', () => {
   setLang(getLang() === 'zh' ? 'en' : 'zh')
+  document.getElementById('langLabel').textContent = getLang() === 'zh' ? '中' : 'EN'
   refreshLocalizedUI()
 })
 
