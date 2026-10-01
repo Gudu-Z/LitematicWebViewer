@@ -18,6 +18,10 @@ export class UI {
     this.regionListEl = root.querySelector('#regionList')
     this.regionListBody = root.querySelector('#regionListBody')
     this.regionListToggle = root.querySelector('#regionListToggle')
+    this.materialListBody = root.querySelector('#materialListBody')
+    this.materialListToggle = root.querySelector('#materialListToggle')
+    this.materialSortBtn = root.querySelector('#materialSortBtn')
+    this.onMaterialSort = null // 由 main.js 设置，点击排序按钮时触发
 
     // 区域列表折叠
     if (this.regionListToggle) {
@@ -25,6 +29,19 @@ export class UI {
         this.regionListBody.classList.toggle('collapsed')
         this.regionListToggle.classList.toggle('collapsed')
       })
+    }
+
+    // 材料清单折叠
+    if (this.materialListToggle) {
+      this.materialListToggle.addEventListener('click', () => {
+        this.materialListBody.classList.toggle('collapsed')
+        this.materialListToggle.classList.toggle('collapsed')
+      })
+    }
+
+    // 材料排序切换
+    if (this.materialSortBtn) {
+      this.materialSortBtn.addEventListener('click', () => this.onMaterialSort?.())
     }
   }
 
@@ -118,6 +135,25 @@ export class UI {
         onToggle(btn.closest('li').getAttribute('data-name'))
       })
     })
+  }
+
+  // 渲染材料清单（每种方块类型 + 数量）。materials 已按当前排序方向排好；sortAsc 决定排序按钮文案
+  renderMaterialList(materials, sortAsc) {
+    if (!this.materialListBody) return
+    if (this.materialSortBtn) this.materialSortBtn.textContent = sortAsc ? '少 → 多' : '多 → 少'
+    if (!materials || !materials.length) {
+      this.materialListBody.innerHTML = '<li class="pack-empty">无方块</li>'
+      return
+    }
+    this.materialListBody.innerHTML = materials
+      .map(
+        (m) => `
+        <li>
+          <span class="material-name" title="${escapeHtml(m.name)}">${escapeHtml(m.name)}</span>
+          <span class="material-count">${m.count.toLocaleString()}</span>
+        </li>`
+      )
+      .join('')
   }
 
   // 渲染资源包两栏：loaded=已加载（按优先级顺序，名字数组），available=可加载 [{name, file}]

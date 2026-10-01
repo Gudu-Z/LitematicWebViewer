@@ -34,6 +34,7 @@ const view = {
   showEntities: true,
   showWireframes: true,
   showDimensions: true,
+  materialSortAsc: false, // 材料排序：false=多→少，true=少→多
 }
 
 // 全局错误捕获，让任何错误都显示在页面上
@@ -78,7 +79,14 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   ui.showMetadata({})
   ui.setStatus('已清除，可拖入新文件')
   ui.setProgress(0)
+  updateMaterialList()
 })
+
+// 材料排序切换（多→少 / 少→多）
+ui.onMaterialSort = () => {
+  view.materialSortAsc = !view.materialSortAsc
+  updateMaterialList()
+}
 
 // 设置面板开关 + 背景色
 document.getElementById('settingsBtn').addEventListener('click', () => {
@@ -237,6 +245,7 @@ async function openFile(file) {
     await renderCurrentEntities()
     ui.showMetadata(data.metadata)
     updateRegionUI()
+    updateMaterialList()
     const entityNote = data.entities?.length ? `，${data.entities.length} 个实体` : ''
     ui.setStatus(`完成：${stats.faces.toLocaleString()} 个面，${stats.textures} 种贴图${entityNote}`)
     ui.setProgress(1)
@@ -451,6 +460,23 @@ function setRenderModeControl(mode) {
 // 更新区域列表 UI
 function updateRegionUI() {
   ui.renderRegionList(currentData?.regions || [], view.visibleRegions, (name) => toggleRegion(name))
+}
+
+// 更新材料清单：按方块类型统计数量（忽略属性，如 oak_stairs 的所有朝向/含水状态合并计数）
+function updateMaterialList() {
+  if (!currentData) {
+    ui.renderMaterialList([], view.materialSortAsc)
+    return
+  }
+  const counts = new Map()
+  for (const gi of currentData.blocks.values()) {
+    const p = currentData.palette[gi]
+    const name = (p.name || '').replace(/^minecraft:/, '')
+    counts.set(name, (counts.get(name) || 0) + 1)
+  }
+  const list = [...counts.entries()].map(([name, count]) => ({ name, count }))
+  list.sort((a, b) => (view.materialSortAsc ? a.count - b.count : b.count - a.count))
+  ui.renderMaterialList(list, view.materialSortAsc)
 }
 
 // 是否正在输入框里打字（避免 E/Q 等快捷键误触发）
