@@ -168,11 +168,6 @@ if (renderer) {
     view.showFog = e.target.checked
     renderer.setUnderwaterFogEnabled(view.showFog)
   })
-  document.getElementById('viewDistanceSlider').addEventListener('input', (e) => {
-    const v = Number(e.target.value)
-    document.getElementById('viewDistanceValue').textContent = String(v)
-    renderer.setViewDistance(v)
-  })
   // 设置：渲染模式
   document.getElementById('renderMode').addEventListener('change', (e) => {
     setRenderMode(e.target.value)
@@ -256,7 +251,7 @@ async function openFile(file) {
 
     currentData = data
     resetViewForData(data)
-    ui.setStatusKey('statusGeometry', { n: data.store.count.toLocaleString() })
+    ui.setStatusKey('statusGeometry', { n: data.blocks.size.toLocaleString() })
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
     await renderCurrentSigns()
     await renderCurrentPlayerHeads()
@@ -400,7 +395,7 @@ function makeBlockFilter() {
 // 仅重渲染方块（层级/区域变化时）
 async function reRenderBlocks() {
   if (!currentData || !renderer) return
-  await renderer.rebuildAllChunks(makeBlockFilter())
+  await renderer.renderBlocks(currentData, assets, makeBlockFilter())
 }
 
 // 载入新文件时重置视图状态
@@ -491,13 +486,10 @@ function updateMaterialList() {
     return
   }
   const counts = new Map()
-  const byPalette = currentData.blockCountsByPalette || []
-  for (let gi = 0; gi < byPalette.length; gi++) {
-    const c = byPalette[gi]
-    if (!c) continue
+  for (const gi of currentData.blocks.values()) {
     const p = currentData.palette[gi]
     const name = (p.name || '').replace(/^minecraft:/, '')
-    counts.set(name, (counts.get(name) || 0) + c)
+    counts.set(name, (counts.get(name) || 0) + 1)
   }
   const list = [...counts.entries()].map(([name, count]) => ({
     name: blockName(name), // 当前语言的译名，缺失回退英文 ID
@@ -534,9 +526,10 @@ function isTypingTarget(e) {
 // 从方块实体中提取玩家头颅：{x, y, z, rotation?, facing?, skinUrl}
 function extractPlayerHeads(tileEntities, data) {
   const heads = []
+  const b = data.bounds
   for (const te of tileEntities || []) {
     if (te.id !== 'minecraft:skull') continue
-    const gi = data.store.get(te.x, te.y, te.z)
+    const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
     if (gi === undefined) continue
     const p = data.palette[gi]
     const name = (p.name || '').replace(/^minecraft:/, '')
@@ -580,7 +573,8 @@ function extractSigns(tileEntities, data) {
       for (let i = 1; i <= 4; i++) lines.push(textComponentToString(te.nbt && te.nbt['Text' + i]))
     }
     if (lines.every((l) => !l)) continue
-    const gi = data.store.get(te.x, te.y, te.z)
+    const b = data.bounds
+    const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
     const props = gi !== undefined ? data.palette[gi].properties || {} : {}
     // 立地告示牌用 rotation，墙上告示牌用 facing；挂告示牌单独标记（板在下方）
     signs.push({
@@ -598,9 +592,10 @@ function extractSigns(tileEntities, data) {
 // 从方块实体中提取旗帜：{x, y, z, rotation?, facing?, baseColor, patterns: [{pattern, color}]}
 function extractBanners(tileEntities, data) {
   const banners = []
+  const b = data.bounds
   for (const te of tileEntities || []) {
     if (te.id !== 'minecraft:banner') continue
-    const gi = data.store.get(te.x, te.y, te.z)
+    const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
     if (gi === undefined) continue
     const p = data.palette[gi]
     const name = (p.name || '').replace(/^minecraft:/, '')
@@ -621,22 +616,29 @@ function extractBanners(tileEntities, data) {
 // 从方块中提取铜傀儡雕像：{x, y, z, facing, texKey}
 function extractStatues(data) {
   const statues = []
-  data.store.forEachBlock((wx, wy, wz, gi) => {
+  const b = data.bounds
+  const W = b.width
+  const strideY = W * b.depth
+  for (const [key, gi] of data.blocks) {
     const p = data.palette[gi]
     const name = (p.name || '').replace(/^minecraft:/, '')
-    if (!name.endsWith('copper_golem_statue')) return
+    if (!name.endsWith('copper_golem_statue')) continue
+    const lx = key % W
+    const lz = Math.floor(key / W) % b.depth
+    const ly = Math.floor(key / strideY)
     const tex = 'entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : '')
-    statues.push({ x: wx, y: wy, z: wz, facing: p.properties?.facing, texKey: tex })
-  })
+    statues.push({ x: lx + b.minX, y: ly + b.minY, z: lz + b.minZ, facing: p.properties?.facing, texKey: tex })
+  }
   return statues
 }
 
 // 从方块实体中提取装饰罐：{x, y, z, facing, sherds: {front, back, left, right}}，sherds 各项为陶片物品 ID 或 null
 function extractDecoratedPots(tileEntities, data) {
   const pots = []
+  const b = data.bounds
   for (const te of tileEntities || []) {
     if (te.id !== 'minecraft:decorated_pot') continue
-    const gi = data.store.get(te.x, te.y, te.z)
+    const gi = data.blocks.get((te.x - b.minX) + (te.z - b.minZ) * b.width + (te.y - b.minY) * (b.width * b.depth))
     const props = gi !== undefined ? data.palette[gi].properties || {} : {}
     pots.push({ x: te.x, y: te.y, z: te.z, facing: props.facing, sherds: parsePotSherds(te.nbt?.sherds) })
   }

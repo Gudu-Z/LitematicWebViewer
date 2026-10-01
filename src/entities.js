@@ -562,12 +562,15 @@ const RAIL_NAMES = new Set(['rail', 'powered_rail', 'detector_rail', 'activator_
 
 // 查找矿车所在铁轨的前进方向：先查脚下方块，再查下一格（矿车可能停在 ascending 铁轨顶端）。
 function railDirectionAt(data, x, y, z) {
-  if (!data?.store || !data?.palette) return null
-  const { store, palette } = data
+  if (!data?.blocks || !data?.palette || !data?.bounds) return null
+  const { blocks, palette, bounds } = data
   const cx = Math.floor(x)
   const cz = Math.floor(z)
+  const W = bounds.width
+  const strideY = W * bounds.depth
   for (const cy of [Math.floor(y), Math.floor(y) - 1]) {
-    const gi = store.get(cx, cy, cz)
+    const key = (cx - bounds.minX) + (cz - bounds.minZ) * W + (cy - bounds.minY) * strideY
+    const gi = blocks.get(key)
     if (gi === undefined) continue
     const p = palette[gi]
     const name = (p?.name || '').replace(/^minecraft:/, '')
