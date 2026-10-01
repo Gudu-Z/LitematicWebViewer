@@ -43,6 +43,7 @@ const STRINGS = {
   showEntities: ['显示实体', 'Show entities'],
   showWireframes: ['显示区域线框', 'Show region wireframes'],
   showDimensions: ['显示尺寸', 'Show dimensions'],
+  showFog: ['水下雾气', 'Underwater fog'],
   sectionControls: ['操作', 'Controls'],
   sensitivity: ['镜头灵敏度', 'Look sensitivity'],
   resourcePacks: ['资源包', 'Resource packs'],

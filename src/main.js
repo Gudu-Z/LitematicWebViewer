@@ -38,6 +38,7 @@ const view = {
   showEntities: true,
   showWireframes: true,
   showDimensions: true,
+  showFog: true, // 水下雾开关
   materialSortAsc: false, // 材料排序：false=多→少，true=少→多
 }
 
@@ -162,6 +163,10 @@ if (renderer) {
   document.getElementById('showDimensions').addEventListener('change', (e) => {
     view.showDimensions = e.target.checked
     renderer.setDimensionsVisible(view.showDimensions)
+  })
+  document.getElementById('showFog').addEventListener('change', (e) => {
+    view.showFog = e.target.checked
+    renderer.setUnderwaterFogEnabled(view.showFog)
   })
   // 设置：渲染模式
   document.getElementById('renderMode').addEventListener('change', (e) => {

@@ -218,6 +218,7 @@ export class Renderer {
     this._waterFogColor = new THREE.Color(0x050533)
     this._waterFog = new THREE.Fog(this._waterFogColor, -8, 48)
     this._waterSurface = null // Map<方块整数 key -> 该方块内水面世界Y>，用于判断相机是否在水面之下
+    this._fogEnabled = true // 水下雾开关
     this._bounds = null
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000)
@@ -381,7 +382,7 @@ export class Renderer {
   // 相机浸入水中时蒙上原版的水下雾（深蓝黑 #050533）。复刻原版 Camera.getFluidInCamera：
   // 相机所在方块含水、且相机眼高低于该方块内的水面，才算水下。相机在结构边界外视为不在水下。
   _updateUnderwaterFog() {
-    if (!this._waterSurface || !this._bounds) return
+    if (!this._fogEnabled || !this._waterSurface || !this._bounds) return
     const cam = this.camera.position
     const lx = Math.floor(cam.x) - this._bounds.minX
     const ly = Math.floor(cam.y) - this._bounds.minY
@@ -790,6 +791,13 @@ export class Renderer {
   setEntitiesVisible(v) { this.entitiesGroup.visible = !!v }
   setWireframesVisible(v) { this.regionGroup.visible = !!v }
   setDimensionsVisible(v) { this.overlay.visible = !!v }
+  setUnderwaterFogEnabled(v) {
+    this._fogEnabled = !!v
+    if (!this._fogEnabled && this.scene.fog) {
+      this.scene.fog = null
+      this.scene.background = new THREE.Color(this._bgColor)
+    }
+  }
 
   // 渲染告示牌文字：告示牌本身（柱/板）已由方块模型渲染，这里只在板面上加文字。
   // signs: [{x, y, z, rotation?, facing?, lines: [4 行文字]}]
