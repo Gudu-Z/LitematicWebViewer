@@ -277,6 +277,12 @@ export class Renderer {
     this.onSensitivityChange = null
     this.onFirstMoveKey = null // WASD 首次按下时回调，切到飞行模式
 
+    // 触摸输入（移动端飞行模式：虚拟摇杆 + 上升/下降按钮）
+    this._joy = { x: 0, z: 0 } // 摇杆：x 左右、z 前后（-1..1）
+    this._touchVertical = 0 // 上升/下降按钮：+1 / -1 / 0
+    this._isTouch = false
+    this._touchEl = null
+
     // WASD 移动
     this.keys = new Set()
     this._lastTime = performance.now()
@@ -286,6 +292,7 @@ export class Renderer {
     window.addEventListener('keyup', this._onKeyUp)
 
     this._initFlyControls()
+    this._initTouchControls()
 
     this._onResize = () => this._resize()
     window.addEventListener('resize', this._onResize)
@@ -296,6 +303,7 @@ export class Renderer {
   // 飞行模式的鼠标/滚轮控制（原地转头、右键平移、滚轮调速）
   _initFlyControls() {
     const el = this.renderer.domElement
+    el.style.touchAction = 'none' // 触摸拖拽交给指针事件，禁止浏览器滚动/缩放手势
     this._flyDragging = null // null | 'look' | 'pan'
     this._flyLast = { x: 0, y: 0 }
 
@@ -344,6 +352,81 @@ export class Renderer {
 
   _applyFlyRotation() {
     this.camera.rotation.set(this._pitch, this._yaw, 0)
+  }
+
+  // 移动端触摸控制：飞行模式下的虚拟摇杆（左下方）+ 上升/下降按钮（右下方）。
+  // 仅触摸设备启用；飞行模式时显示，离开飞行模式隐藏。摇杆偏移映射到
+  // 前后/左右移动向量，上升/下降按钮映射到垂直移动。
+  _initTouchControls() {
+    this._isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    const root = document.getElementById('touchControls')
+    const joystick = document.getElementById('joystick')
+    const knob = document.getElementById('joystickKnob')
+    const btnUp = document.getElementById('btnUp')
+    const btnDown = document.getElementById('btnDown')
+    this._touchEl = root
+    if (!this._isTouch || !root || !joystick || !knob || !btnUp || !btnDown) return
+
+    // 摇杆：手指偏移映射到 -1..1 的 (x 左右, z 前后)
+    const R = 36 // 摇杆头最大偏移（px）= 底座半径 60 - 摇杆头半径 24
+    let activeId = null
+    let cx = 0
+    let cy = 0
+    const reset = () => {
+      activeId = null
+      knob.style.transform = 'translate(0, 0)'
+      this._joy.x = 0
+      this._joy.z = 0
+    }
+    joystick.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      activeId = e.pointerId
+      const rect = joystick.getBoundingClientRect()
+      cx = rect.left + rect.width / 2
+      cy = rect.top + rect.height / 2
+      joystick.setPointerCapture(e.pointerId)
+    })
+    joystick.addEventListener('pointermove', (e) => {
+      if (e.pointerId !== activeId) return
+      let dx = e.clientX - cx
+      let dy = e.clientY - cy
+      const len = Math.hypot(dx, dy) || 1
+      const k = len > R ? R / len : 1
+      dx *= k
+      dy *= k
+      knob.style.transform = `translate(${dx}px, ${dy}px)`
+      this._joy.x = dx / R // 右为正
+      this._joy.z = -dy / R // 上（屏幕 -y）为前进
+    })
+    joystick.addEventListener('pointerup', reset)
+    joystick.addEventListener('pointercancel', reset)
+
+    // 上升/下降：按住持续生效，松开归零
+    const release = () => {
+      this._touchVertical = 0
+    }
+    btnUp.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      this._touchVertical = 1
+    })
+    btnDown.addEventListener('pointerdown', (e) => {
+      e.preventDefault()
+      this._touchVertical = -1
+    })
+    btnUp.addEventListener('pointerup', release)
+    btnUp.addEventListener('pointercancel', release)
+    btnUp.addEventListener('pointerleave', release)
+    btnDown.addEventListener('pointerup', release)
+    btnDown.addEventListener('pointercancel', release)
+    btnDown.addEventListener('pointerleave', release)
+
+    this._updateTouchControlsVisibility()
+  }
+
+  _updateTouchControlsVisibility() {
+    if (this._touchEl) {
+      this._touchEl.classList.toggle('visible', this._isTouch && this.moveMode === 'fly')
+    }
   }
 
   _key(e, down) {
@@ -408,7 +491,12 @@ export class Renderer {
   }
 
   _applyMovement(dt) {
-    if (this.keys.size === 0) return
+    // 键盘 + 触摸（摇杆/上升下降）输入合并判断
+    const joyX = this._joy.x
+    const joyZ = this._joy.z
+    const joyActive = this.moveMode === 'fly' && (joyX !== 0 || joyZ !== 0)
+    const touchVert = this.moveMode === 'fly' ? this._touchVertical : 0
+    if (this.keys.size === 0 && !joyActive && touchVert === 0) return
     const cam = this.camera.position
     const target = this.controls.target
     const dist = cam.distanceTo(target)
@@ -437,12 +525,18 @@ export class Renderer {
     if (this.keys.has('KeyS')) move.sub(forward)
     if (this.keys.has('KeyD')) move.add(right)
     if (this.keys.has('KeyA')) move.sub(right)
+    // 触摸摇杆：z 前后（上=前进）、x 左右（右=右移）
+    if (joyZ !== 0) move.addScaledVector(forward, joyZ)
+    if (joyX !== 0) move.addScaledVector(right, joyX)
 
-    if (this.keys.has('Space')) {
+    let vertical = 0
+    if (this.keys.has('Space')) vertical += 1
+    if (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) vertical -= 1
+    vertical += touchVert
+    if (vertical > 0) {
       cam.y += step
       target.y += step
-    }
-    if (this.keys.has('ShiftLeft') || this.keys.has('ShiftRight')) {
+    } else if (vertical < 0) {
       cam.y -= step
       target.y -= step
     }
@@ -764,12 +858,20 @@ export class Renderer {
     if (mode !== 'orbit' && mode !== 'fly') return
     this.moveMode = mode
     this.controls.enabled = mode === 'orbit'
+    // OrbitControls.disconnect() 会把 touchAction 还原成 ''，飞行模式的触摸转头需要 none 才能接管手势
+    this.renderer.domElement.style.touchAction = 'none'
     if (mode === 'fly') {
       // 进入飞行模式：从当前相机朝向初始化 yaw/pitch
       const e = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ')
       this._yaw = e.y
       this._pitch = e.x
+    } else {
+      // 离开飞行模式：复位触摸输入
+      this._joy.x = 0
+      this._joy.z = 0
+      this._touchVertical = 0
     }
+    this._updateTouchControlsVisibility()
     this.onMoveModeChange?.(mode)
   }
 

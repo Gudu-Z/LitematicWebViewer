@@ -9,6 +9,8 @@ const STRINGS = {
   clear: ['清除', 'Clear'],
   dragHint: ['拖入 .litematica 文件开始预览', 'Drag a .litematica file to preview'],
   move: ['移动', 'Move'],
+  moveUp: ['上升', 'Ascend'],
+  moveDown: ['下降', 'Descend'],
   orbitMode: ['环绕模式', 'Orbit mode'],
   flyMode: ['飞行模式', 'Fly mode'],
   speed: ['速度', 'Speed'],

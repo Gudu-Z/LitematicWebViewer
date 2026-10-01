@@ -77,6 +77,8 @@ button {
   cursor: pointer;
   font-size: 13px;
   transition: background 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 button:hover {
@@ -671,4 +673,131 @@ body.ui-hidden #settingsPanel {
 .material-body .material-count {
   color: #9aa4b2;
   font-variant-numeric: tabular-nums;
+}
+
+/* —— 移动端触摸控制：飞行模式虚拟摇杆（左下）+ 上升/下降按钮（右下）—— */
+#touchControls {
+  display: none;
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 24;
+}
+
+#touchControls.visible {
+  display: block;
+}
+
+#joystick {
+  position: absolute;
+  left: calc(20px + env(safe-area-inset-left, 0px));
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  width: 120px;
+  height: 120px;
+  border-radius: 50%;
+  background: rgba(20, 24, 30, 0.32);
+  border: 2px solid rgba(232, 234, 237, 0.35);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+#joystickKnob {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 48px;
+  height: 48px;
+  margin: -24px 0 0 -24px;
+  border-radius: 50%;
+  background: rgba(232, 234, 237, 0.55);
+  border: 2px solid rgba(232, 234, 237, 0.8);
+  pointer-events: none;
+}
+
+#verticalBtns {
+  position: absolute;
+  right: calc(20px + env(safe-area-inset-right, 0px));
+  bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  pointer-events: auto;
+}
+
+#verticalBtns button {
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border-radius: 50%;
+  font-size: 22px;
+  line-height: 1;
+  background: rgba(20, 24, 30, 0.45);
+  border: 2px solid rgba(232, 234, 237, 0.4);
+  color: #e8eaed;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+#verticalBtns button:active {
+  background: rgba(59, 111, 212, 0.6);
+}
+
+/* —— 移动端适配 —— */
+@media (max-width: 768px) {
+  #sidebar {
+    width: min(200px, 47vw);
+    top: 8px;
+    left: 8px;
+    max-height: calc(100% - 16px);
+    gap: 8px;
+  }
+
+  .panel {
+    padding: 10px;
+    border-radius: 8px;
+  }
+
+  .panel h1 {
+    font-size: 14px;
+  }
+
+  #right-panel {
+    width: min(190px, 45vw);
+    top: 58px;
+    right: 8px;
+    max-height: calc(100% - 66px);
+    gap: 8px;
+  }
+
+  #topbar {
+    top: 8px;
+    right: 8px;
+    gap: 6px;
+  }
+
+  .icon-btn {
+    width: 38px;
+    height: 38px;
+  }
+
+  #settingsPanel {
+    width: calc(100% - 16px);
+    right: 8px;
+    top: 58px;
+    max-height: calc(100% - 66px);
+  }
+
+  .pack-cols {
+    grid-template-columns: 1fr;
+  }
+
+  .hint {
+    font-size: 10px;
+    padding: 6px 10px;
+  }
+
+  button {
+    padding: 10px 10px;
+  }
 }

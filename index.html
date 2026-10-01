@@ -2,7 +2,7 @@
 <html lang="zh-CN">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>LitematicWebViewer</title>
   </head>
   <body>
@@ -183,6 +183,17 @@
 
       <div id="dropOverlay"><div>松开以打开文件</div></div>
       <div id="errorBanner" class="hidden"></div>
+
+      <!-- 移动端触摸控制：飞行模式下的虚拟摇杆（左下）+ 上升/下降按钮（右下） -->
+      <div id="touchControls">
+        <div id="joystick" role="application" aria-label="移动摇杆">
+          <div id="joystickKnob"></div>
+        </div>
+        <div id="verticalBtns">
+          <button id="btnUp" data-i18n-title="moveUp" title="上升" aria-label="上升">▲</button>
+          <button id="btnDown" data-i18n-title="moveDown" title="下降" aria-label="下降">▼</button>
+        </div>
+      </div>
     </div>
 
     <script type="module" src="/src/main.js"></script>
