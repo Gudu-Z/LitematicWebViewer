@@ -55,7 +55,7 @@ const ALWAYS_WATERLOGGED = new Set(['seagrass', 'tall_seagrass', 'kelp', 'kelp_p
 // 方块所属流体：kind = 'water' | 'lava' | null；level 为方块状态 level 值。
 // 含水方块（waterlogged）与气泡柱（bubble_column）都视作「water 源」（level 0），
 // 这样相邻的水面高度、同流体剔除都会把它们当成同种水处理（原版它们的 FluidState 就是水）。
-function fluidOfEntry(paletteEntry) {
+export function fluidOfEntry(paletteEntry) {
   const n = shortName(paletteEntry.name)
   const props = paletteEntry.properties || {}
   if (n === 'water') return { kind: 'water', level: Number(props.level) || 0, waterlogged: false }

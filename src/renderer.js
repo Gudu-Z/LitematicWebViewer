@@ -4,7 +4,7 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { buildFaceGroups } from './geometry.js'
+import { buildFaceGroups, fluidOfEntry } from './geometry.js'
 import { buildEntityMesh, buildCopperGolemStatueMesh } from './entities.js'
 import { bakeModel } from './modelBaker.js'
 
@@ -212,9 +212,11 @@ export class Renderer {
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color(0x2a2a2a) // 默认深灰背景
     this._bgColor = 0x2a2a2a
-    // 水下雾：复刻原版 WaterFogEnvironment —— 雾色 #050533（深蓝黑）、起始距离 -8 格、终止 96 格
+    // 水下雾：复刻原版 WaterFogEnvironment —— 雾色 #050533（深蓝黑）、起始距离 -8 格、终止 96 格。
+    // three.js 的 Fog 用 smoothstep 插值（原版是线性），近距离会更淡，故把终止距离缩短到 48 格补偿，
+    // 让近处也明显泛蓝、更接近原版观感。
     this._waterFogColor = new THREE.Color(0x050533)
-    this._waterFog = new THREE.Fog(this._waterFogColor, -8, 96)
+    this._waterFog = new THREE.Fog(this._waterFogColor, -8, 48)
     this._waterColumns = null // Map<XZ key -> [minY, maxY]>，水柱纵向范围（世界坐标）
     this._bounds = null
 
@@ -855,8 +857,8 @@ export class Renderer {
     return stats
   }
 
-  // 扫描所有水方块，得到每个 XZ 列的水方块 Y 集合（世界坐标），
-  // 用于在动画循环里判断相机是否浸入水中。只关心 minecraft:water（普通水体）。
+  // 扫描所有「含水」方块（水、气泡柱、含水方块），得到每个 XZ 列的水方块 Y 集合（世界坐标），
+  // 用于在动画循环里判断相机是否浸入水中。复用 geometry.fluidOfEntry 判断方块流体是否为水。
   _computeWaterColumns(data) {
     const { palette, blocks, bounds } = data
     const W = bounds.width
@@ -865,7 +867,7 @@ export class Renderer {
     const columns = new Map()
     for (const [key, gi] of blocks) {
       const p = palette[gi]
-      if (!p || (p.name || '').replace(/^minecraft:/, '') !== 'water') continue
+      if (!p || fluidOfEntry(p)?.kind !== 'water') continue
       const lx = key % W
       const lz = Math.floor(key / W) % D
       const ly = Math.floor(key / strideY)
