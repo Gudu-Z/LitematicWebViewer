@@ -277,8 +277,8 @@ button.primary:hover {
 
 .lang-btn .lang-badge {
   position: absolute;
-  left: 2px;
-  bottom: 1px;
+  right: 4px;
+  bottom: 2px;
   font-size: 9px;
   font-weight: 700;
   line-height: 1;
