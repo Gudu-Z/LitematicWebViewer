@@ -345,7 +345,7 @@ export class Renderer {
       if (this.moveMode !== 'fly') return
       e.preventDefault()
       const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15
-      this.moveSpeed = Math.min(10, Math.max(0.1, this.moveSpeed * factor))
+      this.moveSpeed = Math.min(20, Math.max(0.1, this.moveSpeed * factor))
       this.onSpeedChange?.(this.moveSpeed)
     }, { passive: false })
   }
@@ -880,7 +880,7 @@ export class Renderer {
   }
 
   setMoveSpeed(speed) {
-    this.moveSpeed = Math.min(10, Math.max(0.1, Number(speed) || 1))
+    this.moveSpeed = Math.min(20, Math.max(0.1, Number(speed) || 1))
     this.onSpeedChange?.(this.moveSpeed)
   }
 
