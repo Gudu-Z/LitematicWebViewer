@@ -15,7 +15,7 @@ const assets = new AssetProvider()
 const resolver = new BlockModelResolver(assets)
 
 // 初始状态文案（默认中文）
-ui.setStatus(t('dragHint'))
+ui.setStatusKey('dragHint')
 
 // 渲染器初始化可能因 WebGL 不可用而失败，做保护
 let renderer = null
@@ -81,7 +81,7 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   resetViewForClear()
   ui.clearError()
   ui.showMetadata({})
-  ui.setStatus(t('statusCleared'))
+  ui.setStatusKey('statusCleared')
   ui.setProgress(0)
   updateMaterialList()
 })
@@ -95,7 +95,6 @@ ui.onMaterialSort = () => {
 // 语言切换（中 / 英）
 document.getElementById('langBtn').addEventListener('click', () => {
   setLang(getLang() === 'zh' ? 'en' : 'zh')
-  document.getElementById('langLabel').textContent = getLang() === 'zh' ? '中' : 'EN'
   refreshLocalizedUI()
 })
 
@@ -226,18 +225,18 @@ async function openFile(file) {
   busy = true
   ui.clearError()
   try {
-    ui.setStatus(t('parsingFile'))
+    ui.setStatusKey('parsingFile')
     ui.setProgress(0.02)
     const buffer = await file.arrayBuffer()
 
     const data = await parseLitematica(buffer, (f) => {
       ui.setProgress(0.02 + f * 0.18)
-      ui.setStatus(t('parsingFilePct', { p: Math.round(f * 100) }))
+      ui.setStatusKey('parsingFilePct', { p: Math.round(f * 100) })
     })
     ui.setProgress(0.2)
 
     const palette = data.palette
-    ui.setStatus(t('statusParsing', { n: palette.length }))
+    ui.setStatusKey('statusParsing', { n: palette.length })
     const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
     palette.forEach((p, i) => {
       p.baked = baked[i]
@@ -246,7 +245,7 @@ async function openFile(file) {
 
     currentData = data
     resetViewForData(data)
-    ui.setStatus(t('statusGeometry', { n: data.blocks.size.toLocaleString() }))
+    ui.setStatusKey('statusGeometry', { n: data.blocks.size.toLocaleString() })
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
     await renderCurrentSigns()
     await renderCurrentPlayerHeads()
@@ -258,7 +257,7 @@ async function openFile(file) {
     updateRegionUI()
     updateMaterialList()
     const entityNote = data.entities?.length ? t('statusEntities', { n: data.entities.length }) : ''
-    ui.setStatus(t('statusDone', { faces: stats.faces.toLocaleString(), textures: stats.textures, entities: entityNote }))
+    ui.setStatusKey('statusDone', { faces: stats.faces.toLocaleString(), textures: stats.textures, entities: entityNote })
     ui.setProgress(1)
   } catch (e) {
     console.error(e)
@@ -497,6 +496,7 @@ function updateMaterialList() {
 // 语言切换后刷新所有文案（静态 data-i18n + 动态面板/状态）
 function refreshLocalizedUI() {
   applyTranslations()
+  ui.refreshStatus()
   ui.showMetadata(currentData?.metadata || {})
   updateRegionUI()
   updateMaterialList()
@@ -699,14 +699,14 @@ async function loadPack(pack) {
   busy = true
   ui.clearError()
   try {
-    ui.setStatus(t('loadingPack', { name: pack.name }))
+    ui.setStatusKey('loadingPack', { name: pack.name })
     const resp = await fetch('resourcepacks/' + encodeURIComponent(pack.file))
     if (!resp.ok) throw new Error(t('packDownloadFailed', { status: resp.status }))
     const zip = await JSZip.loadAsync(await resp.blob())
     assets.addPack(zip, pack.name)
     await reRenderCurrent()
     updatePackPanels()
-    ui.setStatus(t('packLoaded', { name: pack.name }))
+    ui.setStatusKey('packLoaded', { name: pack.name })
   } catch (e) {
     console.error(e)
     ui.showError(t('packLoadFailed') + (e.message || e))
@@ -724,7 +724,7 @@ async function unloadPack(name) {
     assets.removePack(name)
     await reRenderCurrent()
     updatePackPanels()
-    ui.setStatus(t('packUnloaded', { name }))
+    ui.setStatusKey('packUnloaded', { name })
   } catch (e) {
     console.error(e)
     ui.showError(t('packUnloadFailed') + (e.message || e))
@@ -755,12 +755,12 @@ async function loadPackFromFile(file) {
   busy = true
   ui.clearError()
   try {
-    ui.setStatus(t('loadingPackShort'))
+    ui.setStatusKey('loadingPackShort')
     const zip = await JSZip.loadAsync(file)
     assets.addPack(zip, file.name.replace(/\.zip$/i, ''))
     await reRenderCurrent()
     updatePackPanels()
-    ui.setStatus(t('packLoadedShort'))
+    ui.setStatusKey('packLoadedShort')
   } catch (e) {
     console.error(e)
     ui.showError(t('packLoadFailed') + (e.message || e))

@@ -63,6 +63,17 @@ export class UI {
     this.statusEl.textContent = text
   }
 
+  // 记录状态来源（key + 插值变量），语言切换后能重新翻译
+  setStatusKey(key, vars) {
+    this._statusKey = key
+    this._statusVars = vars
+    this.setStatus(t(key, vars))
+  }
+
+  refreshStatus() {
+    if (this._statusKey) this.setStatus(t(this._statusKey, this._statusVars))
+  }
+
   setProgress(p) {
     this.progressFill.style.width = Math.round(Math.min(1, Math.max(0, p)) * 100) + '%'
   }
