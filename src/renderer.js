@@ -211,6 +211,12 @@ export class Renderer {
     this.container = container
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color(0x2a2a2a) // 默认深灰背景
+    this._bgColor = 0x2a2a2a
+    // 水下雾：复刻原版 WaterFogEnvironment —— 雾色 #050533（深蓝黑）、起始距离 -8 格、终止 96 格
+    this._waterFogColor = new THREE.Color(0x050533)
+    this._waterFog = new THREE.Fog(this._waterFogColor, -8, 96)
+    this._waterColumns = null // Map<XZ key -> [minY, maxY]>，水柱纵向范围（世界坐标）
+    this._bounds = null
 
     this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000)
     this.camera.position.set(20, 16, 20)
@@ -364,9 +370,31 @@ export class Renderer {
     const dt = Math.min((now - this._lastTime) / 1000, 0.1)
     this._lastTime = now
     this._applyMovement(dt)
+    this._updateUnderwaterFog()
     // 飞行模式下不跑 OrbitControls.update()——它会 lookAt(target) 覆盖掉原地转头的旋转
     if (this.moveMode === 'orbit') this.controls.update()
     this.renderer.render(this.scene, this.camera)
+  }
+
+  // 相机浸入水中时蒙上原版的水下雾（深蓝黑 #050533）。判断方式：相机所在 XZ 列存在水柱，
+  // 且相机眼高落在该水柱的纵向范围内。
+  _updateUnderwaterFog() {
+    if (!this._waterColumns || !this._bounds) return
+    const cam = this.camera.position
+    const lx = Math.floor(cam.x) - this._bounds.minX
+    const lz = Math.floor(cam.z) - this._bounds.minZ
+    if (lx < 0 || lz < 0 || lx >= this._bounds.width || lz >= this._bounds.depth) return
+    const col = this._waterColumns.get(lx + lz * this._bounds.width)
+    const underwater = !!col && cam.y >= col[0] && cam.y < col[1] + 1
+    if (underwater) {
+      if (this.scene.fog !== this._waterFog) {
+        this.scene.fog = this._waterFog
+        this.scene.background = this._waterFogColor
+      }
+    } else if (this.scene.fog) {
+      this.scene.fog = null
+      this.scene.background = new THREE.Color(this._bgColor)
+    }
   }
 
   _applyMovement(dt) {
@@ -428,6 +456,13 @@ export class Renderer {
     this.clearEntities()
     this.clearOverlay()
     this.clearRegionWireframes()
+    // 清除水下雾状态（下次载入时重新计算水柱）
+    this._waterColumns = null
+    this._bounds = null
+    if (this.scene.fog) {
+      this.scene.fog = null
+      this.scene.background = new THREE.Color(this._bgColor)
+    }
   }
 
   clearBlocks(disposeTextures = false) {
@@ -710,6 +745,7 @@ export class Renderer {
 
   // 动态设置背景色
   setBackgroundColor(color) {
+    this._bgColor = color
     this.scene.background = new THREE.Color(color)
   }
 
@@ -806,12 +842,40 @@ export class Renderer {
   async render(data, assets, onProgress, filter, fit = true) {
     this.clear()
     const { bounds } = data
+    this._bounds = bounds
+    this._computeWaterColumns(data)
     const stats = await this._buildBlockMeshes(data, assets, onProgress, filter)
     if (fit) this._fit(bounds)
     this._updateOverlay(bounds)
     this._updateRegionWireframes(data)
     onProgress?.(1)
     return stats
+  }
+
+  // 扫描所有水方块，得到每个 XZ 列水柱的纵向范围（[minY, maxY]，世界坐标），
+  // 用于在动画循环里判断相机是否浸入水中。只关心 minecraft:water（普通水体）。
+  _computeWaterColumns(data) {
+    const { palette, blocks, bounds } = data
+    const W = bounds.width
+    const D = bounds.depth
+    const strideY = W * D
+    const columns = new Map()
+    for (const [key, gi] of blocks) {
+      const p = palette[gi]
+      if (!p || (p.name || '').replace(/^minecraft:/, '') !== 'water') continue
+      const lx = key % W
+      const lz = Math.floor(key / W) % D
+      const ly = Math.floor(key / strideY)
+      const xz = lx + lz * W
+      const wy = ly + bounds.minY
+      const c = columns.get(xz)
+      if (!c) columns.set(xz, [wy, wy])
+      else {
+        if (wy < c[0]) c[0] = wy
+        if (wy > c[1]) c[1] = wy
+      }
+    }
+    this._waterColumns = columns
   }
 
   // 只重建方块网格（层级/区域变化时调用，不动相机、告示牌、头颅、实体）。
