@@ -670,19 +670,21 @@ function cuboidFaces(c, texW, texH) {
   const uS = u + dz + dx + dz, uS2 = u + dz + dx + dz + dx
   const vT = v, vM = v + dz, vB = v + dz + dy
   const FACES = [
-    [['v5', 'v4', 'v0', 'v1'], [uN, vT, uE, vM], [0, 1, 0]], // down(+y)
-    [['v2', 'v3', 'v7', 'v6'], [uE, vM, uE2, vT], [0, -1, 0]], // up(-y)
-    [['v0', 'v4', 'v7', 'v3'], [u, vM, uN, vB], [-1, 0, 0]], // west(-x)
-    [['v1', 'v0', 'v3', 'v2'], [uN, vM, uE, vB], [0, 0, -1]], // north(-z)
-    [['v5', 'v1', 'v2', 'v6'], [uE, vM, uS, vB], [1, 0, 0]], // east(+x)
-    [['v4', 'v5', 'v6', 'v7'], [uS, vM, uS2, vB], [0, 0, 1]], // south(+z)
+    [['v5', 'v4', 'v0', 'v1'], [uN, vT, uE, vM], [0, 1, 0], dy === 0], // down(+y)：dy=0 时与 up 面重合，跳过
+    [['v2', 'v3', 'v7', 'v6'], [uE, vM, uE2, vT], [0, -1, 0], false], // up(-y)
+    [['v0', 'v4', 'v7', 'v3'], [u, vM, uN, vB], [-1, 0, 0], dx === 0], // west(-x)：dx=0 时与 east 面重合，跳过
+    [['v1', 'v0', 'v3', 'v2'], [uN, vM, uE, vB], [0, 0, -1], dz === 0], // north(-z)：dz=0 时与 south 面重合，跳过
+    [['v5', 'v1', 'v2', 'v6'], [uE, vM, uS, vB], [1, 0, 0], false], // east(+x)
+    [['v4', 'v5', 'v6', 'v7'], [uS, vM, uS2, vB], [0, 0, 1], false], // south(+z)
   ]
-  // 平面（某维度为 0）的“背面”采样与“正面”相同的 UV，避免背面空白（如炽足兽刚毛、沼泽骷髅蘑菇）
+  // 平面（某维度为 0）的“背面”采样与“正面”相同的 UV，避免背面空白（如炽足兽刚毛、沼泽骷髅蘑菇）。
+  // 同时上面已经把这些与正面重合的背面标记为 skip，避免两个重合面（法线相反）z-fighting。
   if (dy === 0) FACES[1][1] = FACES[0][1].slice()
   if (dz === 0) FACES[5][1] = FACES[3][1].slice()
   if (dx === 0) FACES[4][1] = FACES[2][1].slice()
   const out = []
-  for (const [idx, [u1, v1, u2, v2], dir] of FACES) {
+  for (const [idx, [u1, v1, u2, v2], dir, skip] of FACES) {
+    if (skip) continue
     const nuv = (uu, vv) => [uu / texW, vv / texH]
     let pairs = [
       [V[idx[0]], nuv(u2, v1)],
