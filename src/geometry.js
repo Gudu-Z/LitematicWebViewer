@@ -139,9 +139,9 @@ function fullFaceMask(quads) {
   return mask
 }
 
-// 流体顶面的水平流向角度（弧度），仿原版 FlowableFluid.getVelocity：向高度更低的
-// 「同种流体」邻居求和方向向量。无水平流动返回 null（此时顶面用静止贴图）。
-// 只统计同种流体邻居（空气/异种流体不贡献水平流速），因此：
+// 流体顶面的水平流向角度（弧度），仿原版 FlowingFluid.getFlow：向高度更低的
+// 「同种流体」邻居（含「空气下方有水」的下一级流）求和方向向量。无水平流动返回 null
+// （此时顶面用静止贴图）。因此：
 //   - 流动水/岩浆：流向更低处；
 //   - 水源方块：在「喂给旁边流动水」时也有流向，静止水体则无流向。
 function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible) {
@@ -156,24 +156,30 @@ function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible) {
     if (visible && !visible(nx, ny, nz)) return undefined
     return blocks.get(nx + nz * grid.W + ny * grid.strideY)
   }
-  // 复刻原版 FlowingFluid.getFlow：空气邻居会看其下方是否有同种流体（水往下一级流），
-  // 同种流体邻居按高度差；别的流体（岩浆）不影响。
+  // 复刻原版 FlowingFluid.getFlow：
+  //   - 同种流体邻居：按高度差贡献流向；
+  //   - 真正的空气邻居：若其下方有同种流体（高度 > 0），水会往下一级流（diff = selfH - (belowH - 8/9)）；
+  //   - 非流体方块邻居（实心/透明）：原版按 BLOCKS_FLUID_FLOW 标签跳过，不产生流向；
+  //   - 别的流体（岩浆）不影响。
   for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
     const ngi = get(dx, 0, dz)
     const nfo = ngi === undefined ? null : fluidOf[ngi]
     if (nfo && nfo.kind !== kind) continue // 别的流体不影响流向
     let diff = 0
-    if (!nfo) {
-      // 空气邻居：下方有同种流体（且高度 > 0）→ 产生朝该方向的流向（原版 diff = selfH - (belowH - 8/9)）
+    if (nfo) {
+      // 同种流体邻居：按高度差
+      if (fluidHeight(nfo.level) > 0) {
+        diff = selfH - fluidHeight(nfo.level)
+      }
+    } else if (ngi === undefined) {
+      // 邻居是真正的空气（解析时空气不入 blocks）：下方有同种流体（且高度 > 0）→ 水往下一级流
       const bgi = get(dx, -1, dz)
       const bfo = bgi === undefined ? null : fluidOf[bgi]
       if (bfo && bfo.kind === kind && fluidHeight(bfo.level) > 0) {
         diff = selfH - (fluidHeight(bfo.level) - 8 / 9)
       }
-    } else if (fluidHeight(nfo.level) > 0) {
-      // 同种流体邻居：按高度差
-      diff = selfH - fluidHeight(nfo.level)
     }
+    // ngi !== undefined && nfo === null → 非流体方块邻居：跳过（diff 保持 0）
     if (diff !== 0) {
       vx += dx * diff
       vz += dz * diff
