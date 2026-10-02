@@ -914,7 +914,10 @@ async function buildMob(entity, id, assets) {
   if (scale !== 1) group.scale.setScalar(scale)
 
   group.position.set(x, y, z)
-  group.rotation.y = -(yaw * Math.PI) / 180
+  // 末影龙朝向特殊：原版 EnderDragonRenderer 用 rotateDegrees(Y, -yRot) + scale(-1,-1,1)
+  // （=绕 Z 转 180°），而其它生物用 rotateDegrees(Y, 180-yRot)。经换算，龙等效于
+  // 绕 Y 转 (yaw-180°)，而不是其它生物的 -yaw。
+  group.rotation.y = id === 'ender_dragon' ? (yaw * Math.PI) / 180 - Math.PI : -(yaw * Math.PI) / 180
   return group
 }
 
