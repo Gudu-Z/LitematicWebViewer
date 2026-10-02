@@ -49,12 +49,12 @@ function isRedstoneDustTex(texKey) {
   return /(redstone_dust_dot|redstone_dust_line0|redstone_dust_line1)$/.test(texKey)
 }
 
-// 流体（水/岩浆）高度（0-1）：与原版 FluidState.getHeight() = 内部 level / 9 一致。
-// 方块状态里的 level：0=水源(内部 level 8)、1..7=流动(内部 8-level)、8=下落(内部 8)。
-// 故 source / falling → 8/9；flowing L → (8-L)/9。这里的 8/9 正是原版 FLUID_HEIGHT 常量。
+// 流体（水/岩浆）自身高度（0-1）：与原版 FluidState.getOwnHeight() = getAmount()/9 一致。
+// 原版 getAmount()：水源(level 0) → 8；流动水 → 方块状态里的 level 值；下落(level 8) → 8。
+// 故 source / falling → 8/9；flowing L → L/9。这里的 8/9 正是原版 FLUID_HEIGHT 常量。
 export function fluidHeight(level) {
   const l = Number(level) || 0
-  return (l <= 0 || l >= 8) ? 8 / 9 : (8 - l) / 9
+  return (l <= 0 || l >= 8) ? 8 / 9 : l / 9
 }
 
 // 始终含水的水生植物：这些方块没有 waterlogged 属性（方块状态里永不含它），
@@ -212,7 +212,7 @@ function bubbleScatter(lx, ly, lz) {
 // lx/lz/ly 是局部坐标（用于邻居查找与越界判断），x/y/z 是世界坐标（用于顶点）。
 //
 // 表面高度算法按原版 FluidRenderer（1.21.11 反编译源码）移植：
-//   - getFluidHeight：同种流体取 (8-level)/9（上方有同种流体视为满格 1）；
+//   - getFluidHeight：同种流体取 level/9（上方有同种流体视为满格 1）；
 //     非同种方块：实心（原版 isSolid，树叶除外）为 -1，其余（空气等）为 0。
 //   - calculateFluidHeight：角点 = 自身 + 两相邻 + 对角 的加权平均；
 //     高度 ≥ 0.8 权重 ×10（让表面贴近高水位），< 0 的实心贡献不参与；
