@@ -985,9 +985,10 @@ async function buildBoat(entity, id, assets) {
         }),
       )
       const chest = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
-      // 原版箱船的箱子是船模型里 12×12×12（0.75 方块）的 chest_bottom+chest_lid，中心在船体中心
+      // 原版箱船的箱子是船模型里 12×12×12（0.75 方块）的 chest_bottom+chest_lid，
+      // 中心在船体后部（x=-0.5，即 back 方向），不是船体正中心
       chest.scale.setScalar(0.75)
-      chest.position.set(0, 0.28, 0)
+      chest.position.set(-0.5, 0.28, 0)
       group.add(chest)
     }
   }
