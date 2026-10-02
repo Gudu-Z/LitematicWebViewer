@@ -92,10 +92,12 @@ src/
   ui.js                界面更新
   i18n.js              中英双语字典
   blockNames.js        方块中/英文译名（由脚本生成）
+  fluidFlowBlocks.js   阻挡流体流动的方块集合（由脚本生成）
   styles.css           样式
 scripts/
   fetch-assets.mjs     下载官方资源
   gen-block-names.mjs  生成方块译名表
+  gen-fluid-flow-blocks.mjs  生成阻挡流体流动的方块集合（BLOCKS_FLUID_FLOW）
   gen-test.mjs         生成测试样例
   copy-packs.mjs       复制资源包
   verify-*.mjs / bench-pipeline.mjs   解码/几何验证与基准（开发用）

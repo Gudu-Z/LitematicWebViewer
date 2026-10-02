@@ -10,6 +10,8 @@
 // 邻居查找用整数算术（lx±1 等），但整数 key 在边界处会「回绕」（x+1 到最大 x 时
 // 绕到下一行 z 的 x=0），因此查找前必须先做边界检查，否则会误删边界处的可见面。
 
+import { FLUID_FLOW_BLOCKS } from './fluidFlowBlocks.js'
+
 const SKIP_BLOCKS = new Set([
   'air', 'cave_air', 'void_air',
   'structure_void', 'barrier', 'light',
@@ -140,11 +142,11 @@ function fullFaceMask(quads) {
 }
 
 // 流体顶面的水平流向角度（弧度），仿原版 FlowingFluid.getFlow：向高度更低的
-// 「同种流体」邻居（含「空气下方有水」的下一级流）求和方向向量。无水平流动返回 null
+// 「同种流体」邻居（含「空气/非阻挡方块下方有水」的下一级流）求和方向向量。无水平流动返回 null
 // （此时顶面用静止贴图）。因此：
 //   - 流动水/岩浆：流向更低处；
 //   - 水源方块：在「喂给旁边流动水」时也有流向，静止水体则无流向。
-function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible) {
+function flowAngle(palette, fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible) {
   const selfH = fluidHeight(fluidOf[gi].level)
   let vx = 0
   let vz = 0
@@ -158,8 +160,9 @@ function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible) {
   }
   // 复刻原版 FlowingFluid.getFlow：
   //   - 同种流体邻居：按高度差贡献流向；
-  //   - 真正的空气邻居：若其下方有同种流体（高度 > 0），水会往下一级流（diff = selfH - (belowH - 8/9)）；
-  //   - 非流体方块邻居（实心/透明）：原版按 BLOCKS_FLUID_FLOW 标签跳过，不产生流向；
+  //   - 空气、或不在 BLOCKS_FLUID_FLOW 标签里的非流体方块（植物/火把/铁轨/红石线等）：
+  //     若其下方有同种流体（高度 > 0），水往下一级流（diff = selfH - (belowH - 8/9)）；
+  //   - 属于 BLOCKS_FLUID_FLOW 标签的方块（实心/台阶/栅栏/树叶/告示牌等）：阻挡流动，跳过；
   //   - 别的流体（岩浆）不影响。
   for (const [dx, dz] of [[0, -1], [0, 1], [-1, 0], [1, 0]]) {
     const ngi = get(dx, 0, dz)
@@ -171,15 +174,15 @@ function flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible) {
       if (fluidHeight(nfo.level) > 0) {
         diff = selfH - fluidHeight(nfo.level)
       }
-    } else if (ngi === undefined) {
-      // 邻居是真正的空气（解析时空气不入 blocks）：下方有同种流体（且高度 > 0）→ 水往下一级流
+    } else if (ngi === undefined || !FLUID_FLOW_BLOCKS.has(shortName(palette[ngi].name))) {
+      // 空气 / 非阻挡方块：其下方有同种流体（且高度 > 0）→ 水往下一级流
       const bgi = get(dx, -1, dz)
       const bfo = bgi === undefined ? null : fluidOf[bgi]
       if (bfo && bfo.kind === kind && fluidHeight(bfo.level) > 0) {
         diff = selfH - (fluidHeight(bfo.level) - 8 / 9)
       }
     }
-    // ngi !== undefined && nfo === null → 非流体方块邻居：跳过（diff 保持 0）
+    // ngi !== undefined && 属于 BLOCKS_FLUID_FLOW → 阻挡流动：跳过（diff 保持 0）
     if (diff !== 0) {
       vx += dx * diff
       vz += dz * diff
@@ -316,7 +319,7 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
   if (topShown) {
     // 顶面：有水平流速时用 flow 贴图并按流向旋转（水源、流动水、岩浆都适用）；
     // 无流速（静止水体）用 still 贴图。原版正是按 getVelocity 的 x/z 分量是否为零来切换。
-    const angle = flowAngle(fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible)
+    const angle = flowAngle(palette, fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible)
     let topTex = stillTex
     let topUVs = [[0, 1], [1, 1], [0, 0], [1, 0]]
     if (angle !== null) {
