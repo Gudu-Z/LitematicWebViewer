@@ -10,6 +10,7 @@ import { bakeModel } from './modelBaker.js'
 import { addBlockEffects, portalMaterial, animateObject } from './blockEffects.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
+const PERSPECTIVE_FOV = 60
 
 // 墙上告示牌的 facing -> 方向向量（文字朝向）
 const SIGN_FACING = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0] }
@@ -251,7 +252,7 @@ export class Renderer {
     this._fogEnabled = true // 水下雾开关
     this._bounds = null
 
-    this.camera = new THREE.PerspectiveCamera(60, 1, 0.1, 1000)
+    this.camera = new THREE.PerspectiveCamera(PERSPECTIVE_FOV, 1, 0.1, 1000)
     this.camera.position.set(20, 16, 20)
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
@@ -477,7 +478,13 @@ export class Renderer {
   _resize() {
     const w = this.container.clientWidth || 1
     const h = this.container.clientHeight || 1
-    this.camera.aspect = w / h
+    if (this.camera.isOrthographicCamera) {
+      const halfHeight = (this.camera.top - this.camera.bottom) / 2
+      this.camera.left = -halfHeight * w / h
+      this.camera.right = halfHeight * w / h
+    } else {
+      this.camera.aspect = w / h
+    }
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(w, h)
   }
@@ -895,6 +902,42 @@ export class Renderer {
     this.scene.background = new THREE.Color(color)
   }
 
+  getProjectionMode() {
+    return this.camera.isOrthographicCamera ? 'orthographic' : 'perspective'
+  }
+
+  setProjectionMode(mode) {
+    if (!['perspective', 'orthographic'].includes(mode) || mode === this.getProjectionMode()) return
+    const previous = this.camera
+    const aspect = (this.container.clientWidth || 1) / (this.container.clientHeight || 1)
+    const forward = previous.getWorldDirection(new THREE.Vector3())
+    const offset = this.controls.target.clone().sub(previous.position)
+    // Match scale at the target plane. In flight the target may be off-axis or behind us.
+    const depth = offset.dot(forward)
+    const distance = Math.max(previous.near * 2, depth > 0 ? depth : offset.length())
+    let camera
+    if (mode === 'orthographic') {
+      const halfHeight = distance * Math.tan(THREE.MathUtils.degToRad(previous.getEffectiveFOV() / 2))
+      camera = new THREE.OrthographicCamera(-halfHeight * aspect, halfHeight * aspect, halfHeight, -halfHeight, previous.near, previous.far)
+      camera.position.copy(previous.position)
+    } else {
+      camera = new THREE.PerspectiveCamera(PERSPECTIVE_FOV, aspect, previous.near, previous.far)
+      const halfHeight = (previous.top - previous.bottom) / (2 * previous.zoom)
+      const newDistance = halfHeight / Math.tan(THREE.MathUtils.degToRad(camera.fov / 2))
+      camera.position.copy(previous.position).addScaledVector(forward, distance - newDistance)
+      camera.far = Math.max(previous.far, previous.far + newDistance - distance)
+      camera.updateProjectionMatrix()
+    }
+    camera.up.copy(previous.up)
+    camera.rotation.order = 'YXZ'
+    camera.quaternion.copy(previous.quaternion)
+    this.camera = camera
+    this.controls.object = camera
+    // Updating OrbitControls in flight would turn the camera back towards its old target.
+    if (this.moveMode === 'orbit') this.controls.update()
+    camera.updateMatrixWorld(true)
+  }
+
   // —— 移动模式 ——
   setMoveMode(mode) {
     if (mode !== 'orbit' && mode !== 'fly') return
@@ -1212,18 +1255,34 @@ export class Renderer {
     const radius = Math.max(1, Math.sqrt(w * w + h * h + d * d) / 2)
     this.controls.target.set(cx, cy, cz)
     const inset = this.getViewportInsets?.() || {}
-    const width = this.container.clientWidth, height = this.container.clientHeight
+    const width = this.container.clientWidth || 1, height = this.container.clientHeight || 1
     // Fit inside the unobstructed viewport, including portrait screens and side panels.
     const usableWidth = Math.max(width * .2, width - 2 * Math.max(inset.left || 0, inset.right || 0))
     const usableHeight = Math.max(height * .2, height - 2 * Math.max(inset.top || 0, inset.bottom || 0))
-    const halfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * Math.min(usableHeight / height, usableWidth / height))
-    const dist = radius / Math.sin(halfFov) * 1.08
+    const available = Math.min(usableHeight / height, usableWidth / height)
+    this.camera.zoom = 1
+    let dist
+    if (this.camera.isOrthographicCamera) {
+      const halfHeight = radius * 1.08 / available
+      this.camera.top = halfHeight
+      this.camera.bottom = -halfHeight
+      this.camera.left = -halfHeight * width / height
+      this.camera.right = halfHeight * width / height
+      dist = radius * 3
+    } else {
+      this.camera.aspect = width / height
+      const halfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * available)
+      dist = radius / Math.sin(halfFov) * 1.08
+    }
     const direction = new THREE.Vector3(.8, .55, .8).normalize()
     this.camera.position.copy(this.controls.target).addScaledVector(direction, dist)
     this.camera.near = Math.max(0.05, radius / 2000)
     this.camera.far = Math.max(200, radius * 200)
     this.camera.updateProjectionMatrix()
     this.controls.update()
+    const rotation = new THREE.Euler().setFromQuaternion(this.camera.quaternion, 'YXZ')
+    this._yaw = rotation.y
+    this._pitch = rotation.x
   }
 
   // 坐标轴 + 长宽高标注：三条轴长度分别等于投影长/宽/高，标签贴在轴端点旁

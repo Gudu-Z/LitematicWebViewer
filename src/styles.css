@@ -28,6 +28,9 @@ a:hover { color: #d2e8ff; }
 .lang-badge { position: absolute; right: 5px; bottom: 3px; font-size: 9px; font-weight: 700; line-height: 1; padding: 2px; border-radius: 3px; background: #1b2b40; pointer-events: none; }
 #uiToggleBtn .icon-eye-off, body.ui-hidden #uiToggleBtn .icon-eye { display: none; }
 body.ui-hidden #uiToggleBtn .icon-eye-off { display: block; }
+#projectionBtn .icon-orthographic, #projectionBtn[aria-pressed="true"] .icon-perspective { display: none; }
+#projectionBtn[aria-pressed="true"] .icon-orthographic { display: block; }
+#projectionBtn[aria-pressed="true"] { color: var(--accent); border-color: #659bce; background: #254568; }
 body.ui-hidden #sidebar, body.ui-hidden #right-panel, body.ui-hidden #welcome, body.ui-hidden #mobilePanels { display: none; }
 body.ui-hidden #app-header { visibility: hidden; }
 body.ui-hidden #viewer { top: 0; }

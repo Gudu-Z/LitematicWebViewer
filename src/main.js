@@ -163,6 +163,18 @@ document.getElementById('uiToggleBtn').addEventListener('click', () => {
   btn.setAttribute('aria-pressed', String(hidden))
   renderer?._resize()
 })
+
+function refreshProjectionButton() {
+  const button = document.getElementById('projectionBtn')
+  const orthographic = renderer?.getProjectionMode() === 'orthographic'
+  button.disabled = !renderer
+  button.setAttribute('aria-pressed', String(orthographic))
+  button.title = t(orthographic ? 'orthographicProjectionTitle' : 'perspectiveProjectionTitle')
+}
+document.getElementById('projectionBtn').addEventListener('click', () => {
+  renderer?.setProjectionMode(renderer.getProjectionMode() === 'perspective' ? 'orthographic' : 'perspective')
+  refreshProjectionButton()
+})
 document.getElementById('settingsCloseBtn').addEventListener('click', () => {
   settingsPanel.close()
 })
@@ -588,6 +600,7 @@ function refreshLocalizedUI() {
   const bodyHidden = document.body.classList.contains('ui-hidden')
   toggleBtn.title = bodyHidden ? t('showUi') : t('hideUi')
   toggleBtn.setAttribute('aria-label', toggleBtn.title)
+  refreshProjectionButton()
 }
 
 // 是否正在输入框里打字（避免 E/Q 等快捷键误触发）
