@@ -55,7 +55,7 @@ try {
   assert.notEqual(wind.material.map, windTexture)
   assert.equal(wind.material.map.source, windTexture.source, '资源包贴图应保留')
   assert.equal(wind.material.map.wrapS, THREE.RepeatWrapping)
-  assert.deepEqual(requests, ['entity/breeze/breeze', 'entity/breeze/breeze_wind'])
+  assert.deepEqual(requests, ['entity/breeze/breeze', 'entity/breeze/breeze_wind', 'entity/breeze/breeze_eyes'])
 
   group.updateMatrixWorld(true)
   const camera = new THREE.PerspectiveCamera()
@@ -70,7 +70,7 @@ try {
     let previousDistance = Infinity
     for (const index of faceOrder) {
       const center = new THREE.Vector3()
-      for (const vertex of quads[index].verts) center.add(new THREE.Vector3(...vertex))
+      for (let corner = 0; corner < 4; corner++) center.add(wind.getVertexPosition(index * 4 + corner, new THREE.Vector3()))
       center.multiplyScalar(0.25).applyMatrix4(wind.matrixWorld)
       const distance = center.distanceToSquared(camera.position)
       assert.ok(distance <= previousDistance + 1e-10, '透明面应从远到近绘制')
@@ -89,7 +89,8 @@ try {
   const missingWind = await buildEntityMesh(entity, {
     async getTexture(key) { return key === 'entity/breeze/breeze_wind' ? null : skin },
   })
-  assert.equal(missingWind.children.length, 1, '外层贴图缺失时保留主体')
+  assert.ok(missingWind.getObjectByName('body'), '外层贴图缺失时保留主体')
+  assert.equal(missingWind.getObjectByName('breeze_wind'), undefined)
   const pigRequests = []
   const pig = await buildEntityMesh({ ...entity, id: 'minecraft:pig' }, {
     async getTexture(key) { pigRequests.push(key); return skin },

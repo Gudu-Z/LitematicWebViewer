@@ -10,14 +10,30 @@
 export const EXTRA_MODELS = {
   // ---------------------------------------------------------------------------
   // 史莱姆（64×32）。原版用 getOuterTexturedModelData/getInnerTexturedModelData，
-  // 解析器不支持，这里手写：外皮主体 + 内层的眼睛/嘴（前移到前表面外，因本项目无半透明）。
+  // 内芯与眼/嘴使用原版位置，外壳由独立半透明层绘制。
   SlimeEntityModel: {
     w: 64, h: 32,
     parts: {
-      cube: { pivot: [0, 0, 0], cuboids: [{ u: 0, v: 0, x: -4, y: 16, z: -4, dx: 8, dy: 8, dz: 8 }], children: {} },
-      right_eye: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 0, x: -3.25, y: 18, z: -4.5, dx: 2, dy: 2, dz: 1 }], children: {} },
-      left_eye: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 4, x: 1.25, y: 18, z: -4.5, dx: 2, dy: 2, dz: 1 }], children: {} },
-      mouth: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 8, x: 0, y: 21, z: -4.5, dx: 1, dy: 1, dz: 1 }], children: {} },
+      cube: { pivot: [0, 0, 0], cuboids: [{ u: 0, v: 16, x: -3, y: 17, z: -3, dx: 6, dy: 6, dz: 6 }], children: {} },
+      right_eye: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 0, x: -3.25, y: 18, z: -3.5, dx: 2, dy: 2, dz: 2 }], children: {} },
+      left_eye: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 4, x: 1.25, y: 18, z: -3.5, dx: 2, dy: 2, dz: 2 }], children: {} },
+      mouth: { pivot: [0, 0, 0], cuboids: [{ u: 32, v: 8, x: 0, y: 21, z: -3.5, dx: 1, dy: 1, dz: 1 }], children: {} },
+    },
+  },
+  SlimeOuterEntityModel: {
+    w: 64, h: 32,
+    parts: { cube: { pivot: [0, 0, 0], cuboids: [{ u: 0, v: 0, x: -4, y: 16, z: -4, dx: 8, dy: 8, dz: 8 }], children: {} } },
+  },
+
+  // SheepWoolEntityModel.getTexturedModelData：头/身体/腿膨胀量各不相同。
+  SheepWoolEntityModel: {
+    w: 64, h: 32,
+    parts: {
+      head: { pivot: [0, 6, -8], cuboids: [{ u: 0, v: 0, x: -3, y: -4, z: -4, dx: 6, dy: 6, dz: 6, dil: [0.6, 0.6, 0.6] }] },
+      body: { pivot: [0, 5, 2], rot: [Math.PI / 2, 0, 0], cuboids: [{ u: 28, v: 8, x: -4, y: -10, z: -7, dx: 8, dy: 16, dz: 6, dil: [1.75, 1.75, 1.75] }] },
+      ...Object.fromEntries([['right_hind_leg', -3, 7], ['left_hind_leg', 3, 7], ['right_front_leg', -3, -5], ['left_front_leg', 3, -5]].map(([name, x, z]) => [name, {
+        pivot: [x, 12, z], cuboids: [{ u: 0, v: 16, x: -2, y: 0, z: -2, dx: 4, dy: 6, dz: 4, dil: [0.5, 0.5, 0.5] }],
+      }])),
     },
   },
 

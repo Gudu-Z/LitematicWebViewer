@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="data:,">
+<title>生物实体渲染检查</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#18202d;color:#ecf0f6;font:14px system-ui,sans-serif}header{height:80px;padding:15px 24px;display:flex;align-items:center;gap:18px}h1{font-size:19px;margin:0}a{color:#bdd7ff}button,select{background:#293448;color:inherit;border:1px solid #48546a;border-radius:5px;padding:7px}#status{color:#a8b8ce}#grid{display:grid;grid-template-columns:repeat(6,1fr);position:relative;z-index:1;pointer-events:none;padding:0 12px;gap:8px}.cell{height:250px;border:1px solid #354052;border-radius:8px;position:relative}.label{position:absolute;bottom:10px;width:100%;text-align:center;font-size:13px;color:#d5deec}canvas{position:fixed;left:0;top:0;width:100%;height:100%;z-index:0;pointer-events:none}header{position:relative;z-index:2}@media(max-width:900px){#grid{grid-template-columns:repeat(3,1fr)}}
+</style>
+<header><h1>生物渲染检查</h1><select id="scope"><option value="features">特效与修复</option><option value="all">全部已支持生物</option></select><button id="previous">上一页</button><button id="next">下一页</button><button id="pause">暂停动画</button><span id="status">加载中…</span><a href="../">返回预览器</a></header>
+<div id="grid"></div>
+<script type="module">
+import * as THREE from 'three'
+import { AssetProvider } from '../src/assets.js'
+import { buildEntityMesh } from '../src/entities.js'
+import { FEATURE_FIXTURES, ALL_MOB_FIXTURES } from './entity-fixtures.mjs'
+const params = new URLSearchParams(location.search), scope = params.get('scope') || 'features'
+const fixtures = scope === 'all' ? ALL_MOB_FIXTURES : FEATURE_FIXTURES
+const size = 24, page = Math.min(Math.floor((fixtures.length - 1) / size), Math.max(0, Number(params.get('page')) || 0))
+document.querySelector('#scope').value = scope
+const navigate = p => { location.search = new URLSearchParams({ scope, page: p }) }
+document.querySelector('#scope').onchange = e => { location.search = new URLSearchParams({ scope: e.target.value, page: 0 }) }
+document.querySelector('#previous').onclick = () => navigate(Math.max(0, page - 1))
+document.querySelector('#next').onclick = () => navigate(Math.min(Math.floor((fixtures.length - 1) / size), page + 1))
+const assets = new AssetProvider(); assets.baseUrl = new URL('../assets/minecraft/', location.href).href
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2)); document.body.append(renderer.domElement)
+const scenes = [], missing = [], loadTexture = assets.getTexture.bind(assets)
+assets.getTexture = async key => { const texture = await loadTexture(key); if (!texture) missing.push(key); return texture }
+for (const fixture of fixtures.slice(page * size, (page + 1) * size)) {
+  const cell = document.createElement('div'); cell.className = 'cell'
+  const label = document.createElement('div'); label.className = 'label'; label.textContent = fixture.label
+  cell.append(label); document.querySelector('#grid').append(cell)
+  const scene = new THREE.Scene(); scene.background = new THREE.Color('#202c3c')
+  scene.add(new THREE.HemisphereLight(0xffffff, 0x647080, 1.7))
+  const sun = new THREE.DirectionalLight(0xffffff, 1.4); sun.position.set(3, 5, 4); scene.add(sun)
+  const group = await buildEntityMesh(fixture, assets); scene.add(group)
+  group.rotation.y = -0.4
+  group.updateMatrixWorld(true)
+  group.traverse(o => { if (o.isSkinnedMesh) { o.skeleton.update(); o.computeBoundingBox() } })
+  const box = new THREE.Box3().setFromObject(group), center = box.getCenter(new THREE.Vector3())
+  const extent = box.getSize(new THREE.Vector3())
+  const radius = Math.max(extent.x, extent.y, extent.z, 0.6) * 0.72
+  const camera = new THREE.OrthographicCamera(-radius, radius, radius, -radius, 0.01, 200)
+  camera.position.copy(center).add(new THREE.Vector3(0.3, 0.2, 1).multiplyScalar(radius * 5)); camera.lookAt(center)
+  scenes.push({ cell, scene, group, camera, fixture, radius })
+}
+let paused = false
+document.querySelector('#pause').onclick = e => { paused = !paused; e.target.textContent = paused ? '继续动画' : '暂停动画' }
+function renderFrame() {
+  renderer.setSize(innerWidth, innerHeight, false)
+  renderer.setScissorTest(false); renderer.setClearColor('#18202d'); renderer.clear(); renderer.setScissorTest(true)
+  for (const view of scenes) {
+    const r = view.cell.getBoundingClientRect()
+    if (r.bottom < 0 || r.top > innerHeight) continue
+    const aspect = r.width / r.height
+    view.camera.left = -view.radius * aspect; view.camera.right = view.radius * aspect; view.camera.updateProjectionMatrix()
+    renderer.setViewport(r.left, innerHeight - r.bottom, r.width, r.height)
+    renderer.setScissor(r.left, innerHeight - r.bottom, r.width, r.height)
+    renderer.render(view.scene, view.camera)
+  }
+}
+window.entityPreview = { renderer, scenes, missing, renderFrame }
+renderFrame(); window.ready = true
+document.querySelector('#status').textContent = `${page + 1}/${Math.ceil(fixtures.length / size)} 页 · ${fixtures.length} 项`
+renderer.setAnimationLoop(() => { if (!paused) renderFrame() })
+</script>
+</html>

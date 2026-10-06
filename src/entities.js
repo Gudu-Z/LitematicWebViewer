@@ -1,7 +1,7 @@
 // 实体渲染：把 .litematica 里的实体转成 Three.js 网格。
 // 目前支持：item_frame / glow_item_frame（物品展示框）、*_minecart（矿车，含漏斗/箱子/熔炉/TNT）、
 // armor_stand（盔甲架）、*_boat（船，含箱船）、以及带 Health 的生物实体——用原版实体模型
-// + 真实皮肤贴图渲染（约 60 种，见下方 MOB_TABLE；模型数据在 entityModelData.js）。
+// + 真实皮肤贴图渲染（85 种，见 entityAppearance.js；模型数据在 entityModelData.js）。
 //
 // 物品展示框严格按原版 ItemFrameEntityRenderer 的变换复现（1.21.11）：
 //   - 实体 Pos = 附着方块中心 − facing × 15/32（新版展示框位置移到支撑方块内，实测 NBT 印证）
@@ -16,6 +16,10 @@ import { BlockModelResolver } from './blocks.js'
 import { bakeModel } from './modelBaker.js'
 import { ENTITY_MODELS } from './entityModelData.js'
 import { EXTRA_MODELS } from './extraEntityModels.js'
+import { getMobAppearance } from './entityAppearance.js'
+import { applyIdlePose, IDLE_ANIMATED_MOBS } from './entityAnimations.js'
+import { compileModel, quadsToEntityMesh, createEntityRig, sortTransparentFaces } from './entityModel.js'
+export { compileModel, quadsToEntityMesh } from './entityModel.js'
 
 // Minecraft Direction 枚举：Facing 字节 -> 方向向量
 const FACING_DIRS = {
@@ -103,7 +107,7 @@ export async function buildEntityMesh(entity, assets, data) {
     return buildBoat(entity, id, assets)
   }
   if (entity.nbt && 'Health' in entity.nbt) {
-    return buildMob(entity, id, assets) // 生物实体（猪/牛/羊/村民等）
+    return buildMob(entity, id, assets, data) // 生物实体（猪/牛/羊/村民等）
   }
   return null
 }
@@ -655,125 +659,6 @@ async function buildMinecart(entity, id, assets, data) {
 // 模型数据由 scripts/parse-entity-models.mjs 从原版反编译源码自动生成。
 // 复刻 vanilla ModelPart.Cuboid 的 UV 布局与 ModelPart 的变换约定。
 
-// 单个 cuboid 的 6 个面（模型空间，Y 向下）
-function cuboidFaces(c, texW, texH) {
-  const { u, v, x, y, z, dx, dy, dz, mirror } = c
-  const [rx, ry, rz] = c.dil || [0, 0, 0]
-  let x0 = x - rx, y0 = y - ry, z0 = z - rz
-  let x1 = x + dx + rx, y1 = y + dy + ry, z1 = z + dz + rz
-  if (mirror) { const t = x0; x0 = x1; x1 = t }
-  const V = {
-    v0: [x0, y0, z0], v1: [x1, y0, z0], v2: [x1, y1, z0], v3: [x0, y1, z0],
-    v4: [x0, y0, z1], v5: [x1, y0, z1], v6: [x1, y1, z1], v7: [x0, y1, z1],
-  }
-  const uN = u + dz, uE = u + dz + dx, uE2 = u + dz + dx + dx
-  const uS = u + dz + dx + dz, uS2 = u + dz + dx + dz + dx
-  const vT = v, vM = v + dz, vB = v + dz + dy
-  const FACES = [
-    [['v5', 'v4', 'v0', 'v1'], [uN, vT, uE, vM], [0, 1, 0], dy === 0], // down(+y)：dy=0 时与 up 面重合，跳过
-    [['v2', 'v3', 'v7', 'v6'], [uE, vM, uE2, vT], [0, -1, 0], false], // up(-y)
-    [['v0', 'v4', 'v7', 'v3'], [u, vM, uN, vB], [-1, 0, 0], dx === 0], // west(-x)：dx=0 时与 east 面重合，跳过
-    [['v1', 'v0', 'v3', 'v2'], [uN, vM, uE, vB], [0, 0, -1], dz === 0], // north(-z)：dz=0 时与 south 面重合，跳过
-    [['v5', 'v1', 'v2', 'v6'], [uE, vM, uS, vB], [1, 0, 0], false], // east(+x)
-    [['v4', 'v5', 'v6', 'v7'], [uS, vM, uS2, vB], [0, 0, 1], false], // south(+z)
-  ]
-  // 平面（某维度为 0）的“背面”采样与“正面”相同的 UV，避免背面空白（如炽足兽刚毛、沼泽骷髅蘑菇）。
-  // 同时上面已经把这些与正面重合的背面标记为 skip，避免两个重合面（法线相反）z-fighting。
-  // 但背面与正面的顶点顺序相反，不能直接把正面的 UV 数组套到背面：套用后 V（弦向）会上下颠倒。
-  // 例如末影龙翼膜（u=-56）：顶面应采 U=u+dz..u+dz+dx、V=v+dz(前缘)..v(后缘)，即 [uN,vM,uE,vT]，
-  // 而不是 [uN,vT,uE,vM]——后者会让翼膜“反了”。故这里按顶面自身顶点顺序重排 V。
-  if (dy === 0) FACES[1][1] = [uN, vM, uE, vT]
-  if (dz === 0) FACES[5][1] = FACES[3][1].slice()
-  if (dx === 0) FACES[4][1] = FACES[2][1].slice()
-  const out = []
-  for (const [idx, [u1, v1, u2, v2], dir, skip] of FACES) {
-    if (skip) continue
-    const nuv = (uu, vv) => [uu / texW, vv / texH]
-    let pairs = [
-      [V[idx[0]], nuv(u2, v1)],
-      [V[idx[1]], nuv(u1, v1)],
-      [V[idx[2]], nuv(u1, v2)],
-      [V[idx[3]], nuv(u2, v2)],
-    ]
-    let d = dir
-    if (mirror && d[0] !== 0) d = [-d[0], d[1], d[2]]
-    if (mirror) pairs.reverse()
-    out.push({ verts: pairs.map((p) => p[0]), uvs: pairs.map((p) => p[1]), dir: d })
-  }
-  return out
-}
-
-// 旋转：Rz(roll)*Ry(yaw)*Rx(pitch)（vanilla rotationZYX）
-function rotPoint(pt, rot) {
-  const [x, y, z] = pt
-  const [pitch, yaw, roll] = rot
-  const cx = Math.cos(pitch), sx = Math.sin(pitch)
-  const y1 = y * cx - z * sx, z1 = y * sx + z * cx
-  const cy = Math.cos(yaw), sy = Math.sin(yaw)
-  const x2 = x * cy + z1 * sy, z2 = -x * sy + z1 * cy
-  const cr = Math.cos(roll), sr = Math.sin(roll)
-  return [x2 * cr - y1 * sr, x2 * sr + y1 * cr, z2]
-}
-const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
-
-// 编译实体模型为 world 坐标 quad 列表（Y 向上、脚底 y=0、前向 +z）
-export function compileModel(model) {
-  const { w, h, parts } = model
-  const quads = []
-  const walk = (node, toModel, toDir) => {
-    for (const name of Object.keys(node)) {
-      const p = node[name]
-      const R = p.rot || [0, 0, 0]
-      const pivot = p.pivot || [0, 0, 0]
-      const childToModel = (pt) => toModel(add3(pivot, rotPoint(pt, R)))
-      const childToDir = (d) => toDir(rotPoint(d, R))
-      for (const c of p.cuboids || []) {
-        for (const face of cuboidFaces(c, w, h)) {
-          const verts = face.verts.map(childToModel).map(([mx, my, mz]) => [mx / 16, (24 - my) / 16, -mz / 16])
-          const nd = childToDir(face.dir)
-          quads.push({ verts, uvs: face.uvs, normal: [nd[0], -nd[1], -nd[2]] })
-        }
-      }
-      walk(p.children || {}, childToModel, childToDir)
-    }
-  }
-  walk(parts, (p) => p, (d) => d)
-  return quads
-}
-
-// quads -> 单一材质网格
-export function quadsToEntityMesh(quads, mat) {
-  const n = quads.length
-  const positions = new Float32Array(n * 12)
-  const uvs = new Float32Array(n * 8)
-  const normals = new Float32Array(n * 12)
-  const indices = new Uint32Array(n * 6)
-  for (let i = 0; i < n; i++) {
-    const q = quads[i]
-    for (let k = 0; k < 4; k++) {
-      positions[i * 12 + k * 3] = q.verts[k][0]
-      positions[i * 12 + k * 3 + 1] = q.verts[k][1]
-      positions[i * 12 + k * 3 + 2] = q.verts[k][2]
-      uvs[i * 8 + k * 2] = q.uvs[k][0]
-      uvs[i * 8 + k * 2 + 1] = q.uvs[k][1]
-      normals[i * 12 + k * 3] = q.normal[0]
-      normals[i * 12 + k * 3 + 1] = q.normal[1]
-      normals[i * 12 + k * 3 + 2] = q.normal[2]
-    }
-    const b = i * 4
-    // 实体 quad 顶点是「周边顺序」（vanilla ModelPart.Quad），须用 0,1,2 + 0,2,3 三角化
-    // 才能让两个三角形绕向一致（否则其中一个三角形法线朝内、渲染发暗/消失）。
-    indices[i * 6] = b; indices[i * 6 + 1] = b + 1; indices[i * 6 + 2] = b + 2
-    indices[i * 6 + 3] = b; indices[i * 6 + 4] = b + 2; indices[i * 6 + 5] = b + 3
-  }
-  const geo = new THREE.BufferGeometry()
-  geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
-  geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
-  geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
-  geo.setIndex(new THREE.BufferAttribute(indices, 1))
-  return new THREE.Mesh(geo, mat)
-}
-
 // 铜傀儡雕像：BER 绘制（无 JSON 模型），用铜傀儡实体模型渲染成缩小雕像。
 // 实体模型约 1.5 格高，缩到 0.6 倍后脚底贴方块底部。返回的 mesh 前向为 +z。
 export function buildCopperGolemStatueMesh(tex) {
@@ -786,197 +671,118 @@ export function buildCopperGolemStatueMesh(tex) {
   return mesh
 }
 
-// 生物实体 id -> [模型键, 贴图键]
-const MOB_TABLE = {
-  pig: ['PigEntityModel', 'entity/pig/pig_temperate'],
-  cow: ['CowEntityModel', 'entity/cow/cow_temperate'],
-  mooshroom: ['CowEntityModel', 'entity/cow/mooshroom_red'],
-  sheep: ['SheepEntityModel', 'entity/sheep/sheep'],
-  goat: ['GoatEntityModel', 'entity/goat/goat'],
-  panda: ['PandaEntityModel', 'entity/panda/panda'],
-  polar_bear: ['PolarBearEntityModel', 'entity/bear/polarbear'],
-  wolf: ['WolfEntityModel', 'entity/wolf/wolf'],
-  cat: ['Feline', 'entity/cat/cat_tabby'],
-  ocelot: ['Feline', 'entity/cat/ocelot'],
-  fox: ['FoxEntityModel', 'entity/fox/fox'],
-  rabbit: ['AdultRabbitModel', 'entity/rabbit/rabbit_brown'],
-  horse: ['Horse', 'entity/horse/horse_brown'],
-  donkey: ['Horse', 'entity/horse/donkey'],
-  mule: ['Horse', 'entity/horse/mule'],
-  llama: ['LlamaEntityModel', 'entity/llama/llama_creamy'],
-  turtle: ['TurtleEntityModel', 'entity/turtle/turtle'],
-  chicken: ['ChickenEntityModel', 'entity/chicken/chicken_temperate'],
-  frog: ['FrogEntityModel', 'entity/frog/frog_temperate'],
-  axolotl: ['AxolotlEntityModel', 'entity/axolotl/axolotl_wild'],
-  camel: ['CamelEntityModel', 'entity/camel/camel'],
-  sniffer: ['SnifferEntityModel', 'entity/sniffer/sniffer'],
-  armadillo: ['ArmadilloEntityModel', 'entity/armadillo/armadillo'],
-  allay: ['AllayEntityModel', 'entity/allay/allay'],
-  hoglin: ['HoglinEntityModel', 'entity/hoglin/hoglin'],
-  zoglin: ['HoglinEntityModel', 'entity/hoglin/zoglin'],
-  strider: ['StriderEntityModel', 'entity/strider/strider'],
-  dolphin: ['DolphinEntityModel', 'entity/dolphin/dolphin'],
-  squid: ['SquidEntityModel', 'entity/squid/squid'],
-  glow_squid: ['SquidEntityModel', 'entity/squid/glow_squid'],
-  cod: ['CodEntityModel', 'entity/fish/cod'],
-  salmon: ['SalmonEntityModel', 'entity/fish/salmon'],
-  pufferfish: ['MediumPufferfishEntityModel', 'entity/fish/pufferfish'],
-  bat: ['BatEntityModel', 'entity/bat/bat'],
-  parrot: ['ParrotEntityModel', 'entity/parrot/parrot_red_blue'],
-  bee: ['BeeEntityModel', 'entity/bee/bee'],
-  zombie: ['Biped', 'entity/zombie/zombie'],
-  husk: ['Biped', 'entity/zombie/husk'],
-  drowned: ['DrownedEntityModel', 'entity/zombie/drowned', 1, ['entity/zombie/drowned_outer_layer']],
-  zombie_villager: ['ZombieVillagerEntityModel', 'entity/zombie_villager/zombie_villager'],
-  skeleton: ['SkeletonEntityModel', 'entity/skeleton/skeleton'],
-  stray: ['SkeletonEntityModel', 'entity/skeleton/stray', 1, ['entity/skeleton/stray_overlay']],
-  bogged: ['BoggedEntityModel', 'entity/skeleton/bogged', 1, ['entity/skeleton/bogged_overlay']],
-  wither_skeleton: ['SkeletonEntityModel', 'entity/skeleton/wither_skeleton'],
-  creeper: ['CreeperEntityModel', 'entity/creeper/creeper'],
-  spider: ['SpiderEntityModel', 'entity/spider/spider'],
-  cave_spider: ['SpiderEntityModel', 'entity/spider/cave_spider'],
-  enderman: ['EndermanEntityModel', 'entity/enderman/enderman'],
-  witch: ['WitchEntityModel', 'entity/witch/witch'],
-  blaze: ['BlazeEntityModel', 'entity/blaze/blaze'],
-  ghast: ['GhastEntityModel', 'entity/ghast/ghast'],
-  phantom: ['PhantomEntityModel', 'entity/phantom/phantom'],
-  slime: ['SlimeEntityModel', 'entity/slime/slime'],
-  magma_cube: ['MagmaCubeEntityModel', 'entity/slime/magmacube'],
-  silverfish: ['SilverfishEntityModel', 'entity/silverfish/silverfish'],
-  endermite: ['EndermiteEntityModel', 'entity/endermite/endermite'],
-  shulker: ['ShulkerEntityModel', 'entity/shulker/shulker'],
-  guardian: ['GuardianEntityModel', 'entity/guardian/guardian'],
-  elder_guardian: ['GuardianEntityModel', 'entity/guardian/guardian_elder', 2.35],
-  wither: ['WitherEntityModel', 'entity/wither/wither', 2],
-  ravager: ['RavagerEntityModel', 'entity/illager/ravager'],
-  vex: ['VexEntityModel', 'entity/illager/vex'],
-  warden: ['WardenEntityModel', 'entity/warden/warden'],
-  breeze: ['BreezeEntityModel', 'entity/breeze/breeze'],
-  creaking: ['CreakingEntityModel', 'entity/creaking/creaking'],
-  villager: ['Villager', 'entity/villager/villager'],
-  wandering_trader: ['Villager', 'entity/wandering_trader/wandering_trader'],
-  pillager: ['IllagerEntityModel', 'entity/illager/pillager'],
-  vindicator: ['IllagerEntityModel', 'entity/illager/vindicator'],
-  evoker: ['IllagerEntityModel', 'entity/illager/evoker'],
-  illusioner: ['IllagerEntityModel', 'entity/illager/illusioner'],
-  iron_golem: ['IronGolemEntityModel', 'entity/iron_golem/iron_golem'],
-  snow_golem: ['SnowGolemEntityModel', 'entity/snow_golem/snow_golem'],
-  piglin: ['Piglin', 'entity/piglin/piglin'],
-  piglin_brute: ['Piglin', 'entity/piglin/piglin_brute'],
-  zombified_piglin: ['Piglin', 'entity/piglin/zombified_piglin'],
-  // 之前漏掉的实体（26.3 新增/旧实体）：
-  ender_dragon: ['DragonEntityModel', 'entity/enderdragon/dragon'],
-  happy_ghast: ['HappyGhastEntityModel', 'entity/ghast/happy_ghast'],
-  copper_golem: ['CopperGolemEntityModel', 'entity/copper_golem/copper_golem'],
-  tadpole: ['TadpoleEntityModel', 'entity/tadpole/tadpole'],
-  tropical_fish: ['SmallTropicalFishEntityModel', 'entity/fish/tropical_a'],
-  trader_llama: ['LlamaEntityModel', 'entity/llama/llama_creamy', 1, ['entity/equipment/llama_body/trader_llama']],
-  skeleton_horse: ['Horse', 'entity/horse/horse_skeleton'],
-  zombie_horse: ['Horse', 'entity/horse/horse_zombie'],
-  giant: ['Biped', 'entity/zombie/zombie', 6],
-}
-
-// BreezeWindFeatureRenderer + RenderPipelines.BREEZE_WIND：独立旋风模型、
-// 双面半透明、alpha cutoff 0.1、无方向光明暗，U 每 tick 平移 0.02（20 ticks/s）。
-async function buildBreezeWind(assets) {
-  const sourceTex = await assets.getTexture('entity/breeze/breeze_wind')
-  if (!sourceTex) return null
-  // 纹理偏移和循环方式仅属于这一层，不能修改 AssetProvider 缓存中的共享贴图。
-  const tex = sourceTex.clone()
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-  tex.needsUpdate = true
-  const mat = new THREE.MeshBasicMaterial({
-    map: tex,
-    transparent: true,
-    alphaTest: 0.1,
-    side: THREE.DoubleSide,
-    forceSinglePass: true,
-  })
-  const quads = compileModel(EXTRA_MODELS.BreezeWindEntityModel)
-  const mesh = quadsToEntityMesh(quads, mat)
-  mesh.name = 'breeze_wind'
-
-  // 原版透明层会排序 quad；Three.js 只排序整个 mesh，因此这里按相机距离
-  // 重排 42 个面的索引，避免外壳先写深度后把内层风纹挡掉。仍只需一次 draw call。
-  const faces = quads.map((q, index) => ({
-    index,
-    center: new THREE.Vector3().fromArray(q.verts[0]).add(new THREE.Vector3().fromArray(q.verts[2])).multiplyScalar(0.5),
-    distance: 0,
-  }))
-  const cameraPos = new THREE.Vector3()
-  const worldCenter = new THREE.Vector3()
-  const startTime = performance.now()
-  mesh.onBeforeRender = (_renderer, _scene, camera) => {
-    tex.offset.x = ((performance.now() - startTime) * 0.0004) % 1
-    cameraPos.setFromMatrixPosition(camera.matrixWorld)
-    for (const face of faces) {
-      worldCenter.copy(face.center).applyMatrix4(mesh.matrixWorld)
-      face.distance = worldCenter.distanceToSquared(cameraPos)
-    }
-    faces.sort((a, b) => b.distance - a.distance || a.index - b.index)
-    const indices = mesh.geometry.index
-    for (let i = 0; i < faces.length; i++) {
-      const b = faces[i].index * 4
-      const offset = i * 6
-      indices.array[offset] = b; indices.array[offset + 1] = b + 1; indices.array[offset + 2] = b + 2
-      indices.array[offset + 3] = b; indices.array[offset + 4] = b + 2; indices.array[offset + 5] = b + 3
-    }
-    indices.needsUpdate = true
-  }
-  return mesh
-}
-
-// 生物实体：真实模型 + 皮肤贴图
-async function buildMob(entity, id, assets) {
-  const entry = MOB_TABLE[id]
-  const model = entry ? (ENTITY_MODELS[entry[0]] || EXTRA_MODELS[entry[0]]) : null
+// 生物层的材质/动画统一入口，主体与所有 feature layer 共享游戏时间。
+async function buildMob(entity, id, assets, data) {
+  const appearance = getMobAppearance(entity, id, data)
+  const tex = appearance ? await assets.getTexture(appearance.texture) : null
+  if (!appearance?.model || !tex) return buildMobFallback(entity, id)
+  const { model, scale, tint, layers, state } = appearance
   const group = new THREE.Group()
-  const [x, y, z] = entity.pos
-  const yaw = Number(entity.rotation?.[0]) || 0
-
-  const tex = entry ? await assets.getTexture(entry[1]) : null
-  if (!model || !tex) return buildMobFallback(entity, id)
-
-  const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
-  const quads = compileModel(model)
-  group.add(quadsToEntityMesh(quads, mat))
-
-  if (id === 'breeze') {
-    const wind = await buildBreezeWind(assets)
-    if (wind) group.add(wind)
+  const startTime = performance.now()
+  const animated = IDLE_ANIMATED_MOBS.has(id)
+  const attach = (definition, sourceTexture) => {
+    const mode = definition.mode || 'cutout'
+    const glowing = ['eyes', 'emissive', 'swirl', 'wind'].includes(mode) || (definition.name === 'body' && ['glow_squid', 'vex', 'allay'].includes(id))
+    const transparent = mode !== 'cutout'
+    const map = definition.offset ? sourceTexture.clone() : sourceTexture
+    if (definition.offset) { map.wrapS = map.wrapT = THREE.RepeatWrapping; map.needsUpdate = true }
+    const Material = glowing ? THREE.MeshBasicMaterial : THREE.MeshLambertMaterial
+    const material = new Material({
+      map, color: definition.tint ?? 0xffffff,
+      alphaTest: transparent ? 0.1 : 0.5,
+      side: THREE.DoubleSide, transparent, forceSinglePass: true,
+      depthWrite: !['eyes', 'emissive'].includes(mode),
+      blending: ['swirl', 'eyes'].includes(mode) ? THREE.AdditiveBlending : THREE.NormalBlending,
+      polygonOffset: definition.name !== 'body' && !['wind', 'swirl', 'translucent'].includes(mode),
+      polygonOffsetFactor: -1, polygonOffsetUnits: -1,
+      ...(!glowing ? { flatShading: true } : {}),
+    })
+    // EnergySwirlOverlayFeatureRenderer 的 vertex RGB=(0.5,0.5,0.5)。
+    if (mode === 'swirl') material.color.setRGB(0.5, 0.5, 0.5)
+    const mesh = createEntityRig(definition.model, material)
+    mesh.name = definition.name
+    const sort = ['wind', 'translucent', 'swirl'].includes(mode) ? sortTransparentFaces(mesh) : null
+    const update = age => {
+      mesh.userData.resetPose()
+      applyIdlePose(mesh.userData.parts, id, state, age)
+      if (definition.offset) map.offset.fromArray(definition.offset(age))
+      if (definition.opacity) material.opacity = definition.opacity(age)
+      if (definition.animatedTint) material.color.setHex(definition.animatedTint(age))
+      if (id === 'pufferfish') mesh.position.y = Math.cos(age * 0.05) * 0.08
+      if (['cod', 'salmon', 'tropical_fish'].includes(id)) {
+        mesh.rotation.y = 4.3 * Math.sin(age * 0.6) * Math.PI / 180
+        if (!state.touchingWater) { mesh.position.set(0.2, 0.1, 0); mesh.rotation.z = Math.PI / 2 }
+      }
+    }
+    mesh.userData.updateAnimation = update
+    update(0)
+    mesh.onBeforeRender = (_renderer, _scene, camera) => {
+      if (animated || definition.offset || definition.opacity || definition.animatedTint) {
+        update((performance.now() - startTime) / 50)
+        mesh.updateMatrixWorld(true)
+        mesh.skeleton.update()
+      }
+      if (sort) sort(camera)
+    }
+    group.add(mesh)
+    return mesh
   }
-
-  // 第二层贴图：叠在身体上的额外贴图层（如行商羊驼的地毯），透明部分不遮挡底层。
-  // 用 polygonOffset 让叠层略向相机偏移，避免与底层共面时闪烁。
-  const overlays = entry && entry[3]
-  if (Array.isArray(overlays)) {
-    for (const ovKey of overlays) {
-      const ovTex = await assets.getTexture(ovKey)
-      if (!ovTex) continue
-      const ovMat = new THREE.MeshLambertMaterial({
-        map: ovTex,
-        alphaTest: 0.5,
-        side: THREE.DoubleSide,
-        flatShading: true,
-        transparent: true,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -1,
-        polygonOffsetUnits: -1,
-      })
-      group.add(quadsToEntityMesh(quads, ovMat))
+  const body = attach({ name: 'body', model, tint }, tex)
+  for (const layer of layers) {
+    const layerTex = layer.texture === appearance.texture ? tex : await assets.getTexture(layer.texture)
+    if (layerTex) attach(layer, layerTex)
+  }
+  await attachMobBlocks(body, id, state, assets)
+  group.scale.setScalar(scale)
+  group.position.fromArray(entity.pos)
+  const yaw = Number(entity.rotation?.[0]) || 0
+  group.rotation.y = id === 'ender_dragon' ? yaw * Math.PI / 180 - Math.PI : -yaw * Math.PI / 180
+  if (id === 'shulker') {
+    // 吸附面绕方块中心旋转，DOWN 是默认立在地上的朝向。
+    const direction = FACING_DIRS[Number(entity.nbt?.AttachFace) || 0]
+    if (direction) {
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...direction).negate())
+      for (const child of group.children) {
+        child.position.sub(new THREE.Vector3(0, 0.5, 0)).applyQuaternion(q).add(new THREE.Vector3(0, 0.5, 0))
+        child.quaternion.premultiply(q)
+      }
     }
   }
-
-  const scale = (entry && entry[2]) || (model.scale) || 1
-  if (scale !== 1) group.scale.setScalar(scale)
-
-  group.position.set(x, y, z)
-  // 末影龙朝向特殊：原版 EnderDragonRenderer 用 rotateDegrees(Y, -yRot) + scale(-1,-1,1)
-  // （=绕 Z 转 180°），而其它生物用 rotateDegrees(Y, 180-yRot)。经换算，龙等效于
-  // 绕 Y 转 (yaw-180°)，而不是其它生物的 -yaw。
-  group.rotation.y = id === 'ender_dragon' ? (yaw * Math.PI) / 180 - Math.PI : -(yaw * Math.PI) / 180
+  group.userData.mobId = id
+  group.userData.appearance = appearance
   return group
+}
+
+// 原版 MooshroomMushroom / SnowGolemPumpkin feature。复用方块解析器，资源包同样生效。
+async function attachMobBlocks(body, id, state, assets) {
+  const n = state.nbt || {}
+  const mushroom = id === 'mooshroom' && !(Number(n.Age) < 0 || n.IsBaby)
+  const pumpkin = id === 'snow_golem' && (n.Pumpkin == null || !!n.Pumpkin)
+  if ((!mushroom && !pumpkin) || typeof assets.getJSON !== 'function') return
+  const resolver = new BlockModelResolver(assets)
+  const block = pumpkin ? 'carved_pumpkin' : n.Type === 'brown' ? 'brown_mushroom' : 'red_mushroom'
+  const baked = await resolver.resolve('minecraft:' + block, pumpkin ? { facing: 'north' } : {})
+  if (!baked?.quads?.length) return
+  const mats = new Map()
+  await Promise.all([...new Set(baked.quads.map(q => q.texKey))].map(async key => {
+    const map = await assets.getTexture(key)
+    if (map) mats.set(key, new THREE.MeshLambertMaterial({ map, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true }))
+  }))
+  const add = (parent, position, rotation, scale, second = false) => {
+    const pivot = new THREE.Group()
+    pivot.name = block
+    pivot.position.fromArray(position); pivot.rotation.y = rotation * DEG
+    const object = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], key => mats.get(key))
+    object.scale.fromArray(scale)
+    if (second) { object.position.set(1.6, 0, -9.6); object.rotation.y = -48 * DEG }
+    pivot.add(object); parent.add(pivot)
+  }
+  if (pumpkin) add(body.userData.parts.head, [0, -5.5, 0], 180, [10, -10, -10])
+  else {
+    add(body.skeleton.bones[0], [3.2, -5.6, 8], -48, [-16, -16, 16])
+    add(body.skeleton.bones[0], [3.2, -5.6, 8], 42, [-16, -16, 16], true)
+    add(body.userData.parts.head, [0, -11.2, -3.2], -78, [-16, -16, 16])
+  }
 }
 
 // 兜底：未知生物用纯色通用四足形状

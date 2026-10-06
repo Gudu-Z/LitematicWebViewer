@@ -39,6 +39,7 @@ const STRINGS = {
   sortAsc: ['少 → 多', 'Least → most'],
   hideUi: ['隐藏界面', 'Hide UI'],
   showUi: ['显示界面', 'Show UI'],
+  entityPreview: ['生物渲染检查（新标签页）', 'Entity render check (new tab)'],
   close: ['关闭', 'Close'],
   bgColor: ['背景颜色', 'Background color'],
   sectionDisplay: ['显示', 'Display'],
@@ -132,5 +133,8 @@ export function applyTranslations(root = document) {
   })
   root.querySelectorAll('[data-i18n-title]').forEach((el) => {
     el.setAttribute('title', t(el.getAttribute('data-i18n-title')))
+  })
+  root.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
+    el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria-label')))
   })
 }
