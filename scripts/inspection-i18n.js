@@ -5,7 +5,7 @@ import { language } from './inspection-catalog.js'
 const words = {
   '切换语言': 'Switch language',
   '正在加载模型目录…': 'Loading catalog…', '资源包下载失败': 'Resource pack download failed',
-  '渲染检查': 'Render inspection', '模型图鉴': 'Model catalog', '全部': 'All', '方块': 'Blocks', '生物': 'Mobs', '实体': 'Entities',
+  '模型图鉴': 'Model catalog', '全部': 'All', '方块': 'Blocks', '生物': 'Mobs', '实体': 'Entities',
   '分类': 'Category', '资源包': 'Resource pack', 'XK 材质包': 'XK resource pack', '原版材质': 'Vanilla textures',
   '暂停动画': 'Pause animations', '继续动画': 'Resume animations', '状态与变种': 'States and variants',
   '返回预览器': 'Back to viewer', '搜索中文名或 ID': 'Search names or IDs', '搜索方块、生物、实体或展示框物品': 'Search blocks, mobs, entities or frame items',
@@ -77,7 +77,7 @@ export function optionLabel(option) {
 }
 export function translateDocument() {
   document.documentElement.lang = language === 'en' ? 'en' : 'zh-CN'
-  document.title = t('渲染检查')
+  document.title = t('模型图鉴')
   for (const element of document.querySelectorAll('[data-i18n]')) element.textContent = t(element.dataset.i18n)
   for (const element of document.querySelectorAll('[placeholder], [aria-label]')) {
     for (const attribute of ['placeholder', 'aria-label']) {

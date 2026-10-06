@@ -1,8 +1,8 @@
 # LitematicWebViewer
 
-在浏览器里 3D 预览 Minecraft 的 `.litematic` / `.litematica` 投影文件（Litematica 模组保存的建筑蓝图），也可以通过渲染检查页查看方块、生物和实体的不同状态。纯前端运行，不需要后端服务器。代码主要由 AI 完成。
+在浏览器里 3D 预览 Minecraft 的 `.litematic` / `.litematica` 投影文件（Litematica 模组保存的建筑蓝图），也可以通过模型图鉴页查看方块、生物和实体的不同状态。纯前端运行，不需要后端服务器。代码主要由 AI 完成。
 
-**[在线预览器](https://gudu-z.github.io/LitematicWebViewer/)** · **[渲染检查](https://gudu-z.github.io/LitematicWebViewer/scripts/entity-preview.html)** · **[下载示例文件](samples/demo.litematic)**
+**[在线预览器](https://gudu-z.github.io/LitematicWebViewer/)** · **[模型图鉴](https://gudu-z.github.io/LitematicWebViewer/scripts/entity-preview.html)** · **[下载示例文件](samples/demo.litematic)**
 
 ![预览器打开示例建筑，左侧可切换渲染层级，右侧显示区域和材料清单](docs/images/viewer.png)
 
@@ -26,7 +26,7 @@
 - 区域显示 / 隐藏、层级切片渲染（全部 / 下方 / 上方 / 单层）
 - 材料清单：按方块统计数量、中文译名、多 ↔ 少排序
 - 中 / 英双语界面
-- 渲染检查：分类、双语搜索、状态组合，以及世界 / 物品 / 刷怪蛋 / 展示框视图
+- 模型图鉴：分类、双语搜索、状态组合，以及世界 / 物品 / 刷怪蛋 / 展示框视图
 - 设置面板：背景色、显示实体 / 区域线框 / 尺寸、水下雾、镜头灵敏度
 - 移动端适配：飞行模式下左下角虚拟摇杆移动、右下角上升 / 下降按钮
 
@@ -45,7 +45,7 @@ npm install        # 安装依赖
 npm run setup      # 下载官方客户端并提取贴图/模型，需要联网
 ```
 
-> 默认资源版本为 **26.3**，首次运行会下载完整的 `client.jar` 并提取所需资源。也可以运行 `node scripts/fetch-assets.mjs 1.21.1` 指定其他版本；检查目录和新版实体模型仍以 26.3 为基准。
+> 默认资源版本为 **26.3**，首次运行会下载完整的 `client.jar` 并提取所需资源。也可以运行 `node scripts/fetch-assets.mjs 1.21.1` 指定其他版本；图鉴目录和新版实体模型仍以 26.3 为基准。
 
 ## 二、启动预览器
 
@@ -70,16 +70,16 @@ npm run dev
 - **飞行模式**（按 W/A/S/D 自动切换）：左键原地转头 · W/A/S/D 沿视线移动 · 右键平移 · 滚轮调速 · 空格 / Shift 升降
 - **E / Q**：上一 / 下一层（配合左侧「渲染」下拉框的层级切片）
 - **「定位到此处」按钮**：把当前层设为摄像机所在高度
-- 右上角：**眼睛** 隐藏/显示界面 · **检查清单** 在新标签页打开渲染检查 · **地球** 切换语言 · **齿轮** 设置 · GitHub 链接
+- 右上角：**眼睛** 隐藏/显示界面 · **检查清单** 在新标签页打开模型图鉴 · **地球** 切换语言 · **齿轮** 设置 · GitHub 链接
 - **移动端**：飞行模式下左下角摇杆前后左右移动、右下角 ▲▼ 上升下降，单指划屏转头
 
-## 四、渲染检查
+## 四、模型图鉴
 
-无需加载投影文件，打开[在线渲染检查页](https://gudu-z.github.io/LitematicWebViewer/scripts/entity-preview.html)即可浏览模型。本地运行时，点击预览器右上角“隐藏界面”和“切换语言”之间的检查清单按钮，也可以直接打开 `http://localhost:5173/scripts/entity-preview.html`。
+无需加载投影文件，打开[在线模型图鉴页](https://gudu-z.github.io/LitematicWebViewer/scripts/entity-preview.html)即可浏览模型。本地运行时，点击预览器右上角“隐藏界面”和“切换语言”之间的检查清单按钮，也可以直接打开 `http://localhost:5173/scripts/entity-preview.html`。
 
 支持“全部 / 方块 / 生物 / 实体”分类、中英文名称或 ID 搜索、分页、暂停动画和中英界面切换。默认使用内置 XK 材质包，可通过顶部下拉框切换原版；语言、资源包和搜索条件保存在 URL 中，便于刷新或分享。
 
-![渲染检查页的生物分类，可按名称搜索并点击卡片查看状态](docs/images/render-catalog.png)
+![模型图鉴页的生物分类，可按名称搜索并点击卡片查看状态](docs/images/render-catalog.png)
 
 *先选分类或输入名称，再点击卡片。图鉴涵盖 1,289 个方块（合并为 1,167 张卡片）、85 种生物，以及船、矿车、展示框和盔甲架四类实体。*
 
@@ -103,11 +103,11 @@ npm run dev
 <details>
 <summary>开发说明：资源来源、渲染对照与验证命令</summary>
 
-方块选项合并资源包模型声明与 [26.3 游戏生成的状态报告（mcmeta 归档）](https://github.com/misode/mcmeta/blob/26.3-summary/blocks/data.json)，包含 505 种可含水方块（另兼容旧版 chain ID）以及墙的“不显示 / 低 / 高”连接状态。方块网格、流体与特殊方块实体共用主预览器的渲染路径。空气等不可见方块保留目录项并标明原因；检查页显示的是当前渲染器的能力，仍受下文已知外观差异的限制。
+方块选项合并资源包模型声明与 [26.3 游戏生成的状态报告（mcmeta 归档）](https://github.com/misode/mcmeta/blob/26.3-summary/blocks/data.json)，包含 505 种可含水方块（另兼容旧版 chain ID）以及墙的“不显示 / 低 / 高”连接状态。方块网格、流体与特殊方块实体共用主预览器的渲染路径。空气等不可见方块保留目录项并标明原因；图鉴页显示的是当前渲染器的能力，仍受下文已知外观差异的限制。
 
-名称来自 Minecraft 26.3 官方 `zh_cn.json` 和 `en_us.json`，检查页默认使用内置 XK 材质包，也可切换原版；语言与资源包选择通过 URL 保留。更新默认资源版本后运行 `node scripts/gen-inspection-data.mjs <版本>`，重新生成目录、状态报告与官方译名。
+名称来自 Minecraft 26.3 官方 `zh_cn.json` 和 `en_us.json`，图鉴页默认使用内置 XK 材质包，也可切换原版；语言与资源包选择通过 URL 保留。更新默认资源版本后运行 `node scripts/gen-inspection-data.mjs <版本>`，重新生成目录、状态报告与官方译名。
 
-特殊方块对照 26.3 的 `BellModel`、`BannerRenderer`、`TheEndPortalRenderer`、`TheEndGatewayRenderer`、附魔台及潮涌核心渲染器。钟补全钟体，旗面绕横杆摆动，展示框旗帜遵循物品固定视角变换；末地传送门使用上下水平面，折跃门使用六面体，二者使用[官方末地传送门着色器](https://github.com/misode/mcmeta/blob/26.3-assets/assets/minecraft/shaders/core/rendertype_end_portal.fsh)的投影采样与分层星空。通用动画纹理支持 `.mcmeta` 的帧顺序、逐帧时长、帧尺寸和颜色插值，因此水、岩浆、火焰、下界传送门等贴图按原版帧表播放。检查页暂停按钮同时暂停贴图、方块和实体动画。
+特殊方块对照 26.3 的 `BellModel`、`BannerRenderer`、`TheEndPortalRenderer`、`TheEndGatewayRenderer`、附魔台及潮涌核心渲染器。钟补全钟体，旗面绕横杆摆动，展示框旗帜遵循物品固定视角变换；末地传送门使用上下水平面，折跃门使用六面体，二者使用[官方末地传送门着色器](https://github.com/misode/mcmeta/blob/26.3-assets/assets/minecraft/shaders/core/rendertype_end_portal.fsh)的投影采样与分层星空。通用动画纹理支持 `.mcmeta` 的帧顺序、逐帧时长、帧尺寸和颜色插值，因此水、岩浆、火焰、下界传送门等贴图按原版帧表播放。图鉴页暂停按钮同时暂停贴图、方块和实体动画。
 
 ### 生物渲染对照记录
 
@@ -125,7 +125,7 @@ npm run dev
 
 幼年形态使用 26.3 的 27 套独立模型、专用贴图及美西螈/骆驼/犰狳待机关键帧；嗅探兽和快乐恶魂使用原版缩放规则，快乐恶魂保留幼体内芯。猫、狼、狐狸的幼年坐姿/睡姿也按新版模型处理。生成数据记录了[客户端源码镜像](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/model/animal/cow/babycowmodel/)的具体 URL 和 SHA-256；运行 `node scripts/gen-baby-models.mjs --fetch`、`node scripts/gen-baby-animations.mjs --fetch` 可重新获取并转录。
 
-仍确认存在的差异：寒冷/温暖牛、猪、鸡等变种目前只切换贴图，未切换专用几何；村民帽子尚未读取资源包的 hat 元数据；盔甲、鞍具、马铠、狼铠、手持物、末影人搬运方块、拴绳及乘骑组合尚未完整渲染。静态投影也不能复现游戏中的动态光照和实体之间的交互。检查页的敲钟、翻书和激活潮涌核心为显式演示选项；不模拟玩家靠近、潮涌核心框架检测、折跃门临时光束或粒子。
+仍确认存在的差异：寒冷/温暖牛、猪、鸡等变种目前只切换贴图，未切换专用几何；村民帽子尚未读取资源包的 hat 元数据；盔甲、鞍具、马铠、狼铠、手持物、末影人搬运方块、拴绳及乘骑组合尚未完整渲染。静态投影也不能复现游戏中的动态光照和实体之间的交互。图鉴页的敲钟、翻书和激活潮涌核心为显式演示选项；不模拟玩家靠近、潮涌核心框架检测、折跃门临时光束或粒子。
 
 验证命令（需先执行 `npm run setup` 安装默认资源）：
 
