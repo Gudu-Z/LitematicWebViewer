@@ -172,7 +172,7 @@ export function blockFields(blockstate, id) {
   const registry = BLOCK_STATES[id] || (id === 'chain' ? BLOCK_STATES.iron_chain : null)
   for (const [key, values] of Object.entries(registry?.[0] || {})) for (const value of values) add(key, value)
   if (['water', 'lava'].includes(id)) for (let i = 0; i < 16; i++) add('level', i)
-  const preferred = { facing: 'south', half: 'lower', type: 'single', axis: 'y', shape: 'straight', up: 'true', part: 'foot' }
+  const preferred = { facing: 'south', half: 'lower', type: 'single', axis: 'y', shape: 'straight', up: id === 'fire' ? 'false' : 'true', part: 'foot' }
   return [...props].map(([key, set]) => {
     if (key === 'half' && set.has('upper') && set.has('lower')) return field(key, '显示部分', [['all', '全部'], ['upper', '上半'], ['lower', '下半']])
     if (key === 'part' && set.has('head') && set.has('foot')) return field(key, '显示部分', [['all', '全部'], ['head', '床头'], ['foot', '床尾']])
