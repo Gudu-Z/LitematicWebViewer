@@ -1,13 +1,26 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { submissionPayload, submitIndexNow } from './submit-indexnow.mjs'
 
 const payload = await submissionPayload()
 assert.deepEqual(payload.urlList, [
-  'https://gudu-z.github.io/LitematicWebViewer/',
-  'https://gudu-z.github.io/LitematicWebViewer/scripts/entity-preview.html',
+  'https://lwv.loafing.club/',
+  'https://lwv.loafing.club/scripts/entity-preview.html',
 ])
-assert.equal(new URL(payload.keyLocation).pathname, '/LitematicWebViewer/indexnow-key.txt')
-assert.equal(payload.host, 'gudu-z.github.io')
+assert.equal(payload.keyLocation, 'https://lwv.loafing.club/indexnow-key.txt')
+assert.equal(payload.host, 'lwv.loafing.club')
+// Keep HTML, structured data, robots and submissions on the same canonical host.
+for (const [file, url] of [['index.html', payload.urlList[0]], ['scripts/entity-preview.html', payload.urlList[1]]]) {
+  const html = await readFile(new URL('../' + file, import.meta.url), 'utf8')
+  assert.equal(html.match(/rel="canonical" href="([^"]+)"/)[1], url)
+  assert.equal(html.match(/property="og:url" content="([^"]+)"/)[1], url)
+  const structured = JSON.parse(html.match(/<script type="application\/ld\+json">([\s\S]*?)<\/script>/)[1])
+  assert.equal(structured.url, url)
+  assert.ok(!html.includes('gudu-z.github.io'), 'stale canonical or sharing URL in ' + file)
+}
+const robots = await readFile(new URL('../public/robots.txt', import.meta.url), 'utf8')
+assert.ok(robots.includes('Sitemap: https://lwv.loafing.club/sitemap.xml'))
+assert.ok(!/^Disallow:\s*\/\s*$/m.test(robots), 'must allow crawling')
 const keyResponse = () => new Response(payload.key + '\n')
 
 for (const status of [200, 202]) {
@@ -48,4 +61,4 @@ for (const status of [403, 422, 429, 500]) {
   } }), new RegExp('HTTP ' + status))
   assert.equal(posts, 1, 'do not repeatedly send rejected submissions')
 }
-console.log('Passed sitemap submission scope, ownership validation, CDN retry, HTTP 200/202 receipts and rejection handling. No external submissions made.')
+console.log('Passed canonical custom domain, HTML/JSON-LD/robots/sitemap agreement, submission scope, ownership validation, CDN retry, HTTP 200/202 receipts and rejection handling. No external submissions made.')

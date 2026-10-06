@@ -4,7 +4,7 @@ import { readFile, appendFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
 import { setTimeout as delay } from 'node:timers/promises'
 
-const site = new URL('https://gudu-z.github.io/LitematicWebViewer/')
+const site = new URL('https://lwv.loafing.club/')
 const publicDir = new URL('../public/', import.meta.url)
 
 export async function submissionPayload() {
@@ -47,7 +47,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
       console.log('Dry run; no request sent. URLs:\n' + urlList.join('\n'))
     } else {
       const result = await submitIndexNow()
-      const message = `IndexNow received ${result.urls.length} URLs (HTTP ${result.status}${result.status === 202 ? ', key validation pending' : ''}). This is a submission receipt, not confirmation of indexing.`
+      const message = `IndexNow received ${result.urls.length} URLs for ${new URL(result.urls[0]).host} (HTTP ${result.status}${result.status === 202 ? ', key validation pending' : ''}). This is a submission receipt, not confirmation of indexing.`
       console.log(message)
       if (process.env.GITHUB_STEP_SUMMARY) await appendFile(process.env.GITHUB_STEP_SUMMARY, message + '\n')
     }

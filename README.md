@@ -4,7 +4,7 @@
 
 在浏览器里 3D 预览 Minecraft 的 `.litematic` / `.litematica` 投影文件（Litematica 模组保存的建筑蓝图），也可以通过模型图鉴页查看方块、生物和实体的不同状态。纯前端运行，不需要后端服务器。代码主要由 AI 完成。
 
-**[在线预览器](https://gudu-z.github.io/LitematicWebViewer/)** · **[模型图鉴](https://gudu-z.github.io/LitematicWebViewer/scripts/entity-preview.html)** · **[下载示例文件](samples/demo.litematic)**
+**[在线预览器](https://lwv.loafing.club/)** · **[模型图鉴](https://lwv.loafing.club/scripts/entity-preview.html)** · **[下载示例文件](samples/demo.litematic)**
 
 ![预览器打开示例建筑，左侧可切换渲染层级，右侧显示区域和材料清单](docs/images/viewer.png)
 
@@ -34,7 +34,7 @@
 - 设置面板：背景色、显示实体 / 区域线框 / 尺寸、水下雾、镜头灵敏度
 - 移动端适配：飞行模式下左下角虚拟摇杆移动、右下角上升 / 下降按钮
 
-日常使用直接打开[在线预览器](https://gudu-z.github.io/LitematicWebViewer/)即可；以下安装步骤适合本地运行或开发。
+日常使用直接打开[在线预览器](https://lwv.loafing.club/)即可；以下安装步骤适合本地运行或开发。
 
 ---
 
@@ -84,7 +84,7 @@ npm run dev
 
 ## 四、模型图鉴
 
-无需加载投影文件，打开[在线模型图鉴页](https://gudu-z.github.io/LitematicWebViewer/scripts/entity-preview.html)即可浏览模型。本地运行时，点击预览器右上角带方块的图鉴按钮，也可以直接打开 `http://localhost:5173/scripts/entity-preview.html`。
+无需加载投影文件，打开[在线模型图鉴页](https://lwv.loafing.club/scripts/entity-preview.html)即可浏览模型。本地运行时，点击预览器右上角带方块的图鉴按钮，也可以直接打开 `http://localhost:5173/scripts/entity-preview.html`。
 
 支持“全部 / 方块 / 生物 / 实体”分类、中英文名称或 ID 搜索、分页、暂停动画和中英界面切换。顶部“设置”可加载、卸载、排序材质包，并导入本地 ZIP；越靠上的包优先级越高，未覆盖的资源回退原版。首次打开默认加载内置 XK，卸载全部材质包即可使用原版。导入文件、加载顺序和趣味选项保存在当前浏览器；语言和搜索条件仍保存在 URL 中，兼容旧链接的 `pack=xk` / `pack=vanilla`。
 
@@ -221,7 +221,7 @@ docs/images/           README 的实际页面截图
 
 ### 搜索引擎收录与部署
 
-主预览器和模型图鉴提供独立的页面标题、简介、规范网址、分享元数据及 JSON-LD；[站点地图](https://gudu-z.github.io/LitematicWebViewer/sitemap.xml) 只列出这两个正式页面，搜索词、分页、资源包等参数不作为独立页面提交。
+主预览器和模型图鉴提供独立的页面标题、简介、规范网址、分享元数据及 JSON-LD；[站点地图](https://lwv.loafing.club/sitemap.xml) 只列出这两个正式页面，搜索词、分页、资源包等参数不作为独立页面提交。
 
 GitHub Pages 部署成功后，`notify-search` 会通过 [IndexNow](https://www.indexnow.org/documentation) 通知 Bing 等参与的搜索引擎。`public/indexnow-key.txt` 是公开的网站所有权验证文件，通知前会检查线上文件是否已发布。提交结果记录在 Actions 日志和步骤摘要；HTTP 200 表示已收到，202 表示已收到但验证仍在进行，均不代表已经收录。手动检查或重新提交：
 
@@ -230,9 +230,11 @@ node scripts/submit-indexnow.mjs --dry-run  # 只检查提交范围，不发请�
 node scripts/submit-indexnow.mjs            # 部署完成后提交
 ```
 
-Google 需在 [Search Console](https://search.google.com/search-console) 中添加网址前缀 `https://gudu-z.github.io/LitematicWebViewer/`，使用首页的 HTML 标记完成账号验证，然后在“站点地图”提交 `sitemap.xml`，并可通过“网址检查”请求抓取首页和模型图鉴。[Google 验证说明](https://support.google.com/webmasters/answer/9008080) · [站点地图说明](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)。
+Google 需在 [Search Console](https://search.google.com/search-console) 中添加网址前缀 `https://lwv.loafing.club/`，使用首页的 HTML 标记完成账号验证，然后在“站点地图”提交 `sitemap.xml`，并可通过“网址检查”请求抓取首页和模型图鉴。[Google 验证说明](https://support.google.com/webmasters/answer/9008080) · [站点地图说明](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)。
 
-当前站点部署在 `/LitematicWebViewer/` 子目录；搜索引擎只读取域名根目录的 `/robots.txt`，放在项目子目录中不会生效。当前域名根目录返回 404，并未禁止抓取，因此使用站长平台提交站点地图。[robots.txt 位置与 404 处理规则](https://developers.google.com/crawling/docs/robots-txt/robots-txt-spec)。迁移域名时须同步更新 HTML 规范网址与分享链接、结构化数据、站点地图和提交脚本；Fork 不会自动向原站点发送 IndexNow 通知。
+正式域名为 `https://lwv.loafing.club/`，GitHub Pages 已绑定此自定义域名；原 GitHub Pages 地址会跳转到此站点。[robots.txt](https://lwv.loafing.club/robots.txt) 位于域名根目录，允许抓取并声明站点地图。Cloudflare 可能在返回的文件中加入其托管说明，仓库只维护本站的抓取与站点地图规则。[robots.txt 位置规则](https://developers.google.com/crawling/docs/robots-txt/robots-txt-spec)。
+
+Search Console 应选择 `https://lwv.loafing.club/` 的网址前缀属性（或已验证的 `loafing.club` 网域属性），旧 GitHub Pages 属性不会自动改名为新域名。迁移域名时须同步更新 HTML 规范网址与分享链接、结构化数据、robots.txt、站点地图和提交脚本；Fork 不会自动向原站点发送 IndexNow 通知。
 
 ## 七、参考与致谢
 
