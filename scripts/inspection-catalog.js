@@ -63,7 +63,9 @@ const sitting = () => bool('Sitting', '姿态', '站立', '坐下')
 const environment = () => bool('OnGround', '环境', '水中 / 滞空', '地面')
 const owner = () => state('Owner', '驯服', [[null, '未驯服'], [[1, 2, 3, 4], '已驯服']])
 
-export function entityFields(entry) {
+export function entityFields(entry, values) {
+  const fixture = values === undefined ? null : createFixture(entry, values)
+  const gear = () => equipmentFields(entry, officialName, ITEM_IDS, fixture, values)
   const id = entry.id, f = []
   if (entry.kind === 'entity') {
     if (id === 'cushion') f.push(
@@ -84,13 +86,16 @@ export function entityFields(entry) {
       state('ItemRotation', '物品旋转', Array.from({ length: 8 }, (_, i) => [i, i * 45 + '°'])),
     )
     if (id === 'armor_stand') f.push(bool('ShowArms', '手臂', '隐藏', '显示'), bool('Small', '体型', '正常', '小型'), bool('NoBasePlate', '底座', '显示', '隐藏'))
-    return [...f, ...equipmentFields(entry, officialName, ITEM_IDS)]
+    return [...f, ...gear()]
   }
   if (BABY_MOBS.has(id)) f.push(state('Age', '年龄', [[0, '成年'], [-24000, '幼年']]))
   if (['pig', 'cow', 'chicken', 'frog'].includes(id)) f.push(climate())
   if (['cod', 'salmon', 'tropical_fish', 'pufferfish', 'axolotl', 'frog', 'chicken', 'bee', 'parrot'].includes(id)) f.push(environment())
   if (['cat', 'wolf', 'parrot'].includes(id)) f.push(sitting())
-  if (['cat', 'wolf'].includes(id)) f.push(owner(), colors('CollarColor', '项圈颜色'))
+  if (['cat', 'wolf'].includes(id)) {
+    f.push(owner())
+    if (!fixture || fixture.nbt?.Owner || fixture.nbt?.OwnerUUID) f.push(colors('CollarColor', '项圈颜色'))
+  }
   if (id === 'creeper') f.push(bool('powered', '状态', '普通苦力怕', '闪电苦力怕'))
   if (id === 'wither') f.push(state('Health', '护甲', [[300, '正常'], [140, '半血护甲']]), state('Invul', '生成状态', [[0, '正常'], [200, '无敌阶段']]))
   if (id === 'bat') f.push(state('BatFlags', '姿态', [[0, '飞行'], [1, '倒挂']]))
@@ -134,7 +139,7 @@ export function entityFields(entry) {
     field('fish.shape', '体型', [[0, '小型'], [1, '大型']]), field('fish.pattern', '花纹', Array.from({ length: 6 }, (_, i) => [i, '花纹 ' + (i + 1)])),
     field('fish.body', '身体颜色', dyeOptions), field('fish.color', '花纹颜色', dyeOptions),
   )
-  return [...f, ...equipmentFields(entry, officialName, ITEM_IDS)]
+  return [...f, ...gear()]
 }
 
 export function getPath(object, path) { return path.split('.').reduce((value, key) => value?.[key], object) }

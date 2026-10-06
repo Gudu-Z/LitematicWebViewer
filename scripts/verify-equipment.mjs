@@ -6,7 +6,7 @@ import { buildEntityMesh, buildEquippedItem } from '../src/entities.js'
 import { EQUIPMENT_MODELS } from '../src/equipmentModelData.js'
 import { armorModel } from '../src/equipment.js'
 import { readEquipment, equipmentDye, hasGlint } from '../src/equipmentState.js'
-import { CATALOG, createFixture } from './inspection-catalog.js'
+import { CATALOG, createFixture, entityFields } from './inspection-catalog.js'
 
 const root = 'public/assets/minecraft/', textures = new Map(), before = JSON.stringify(EQUIPMENT_MODELS)
 const assets = {
@@ -120,4 +120,50 @@ glint.userData.updateAnimation(30)
 assert.deepEqual(textures.get('misc/enchanted_glint_armor').offset.toArray(), [0, 0], 'Glint must not mutate shared texture')
 dispose(dyed)
 assert.equal(JSON.stringify(EQUIPMENT_MODELS), before, 'Equipment models must remain immutable')
+// 详情中的设置必须对当前穿戴物生效；混搭时只修改适用槽位。
+const entry = id => CATALOG.find(e => e.id === id)
+const paths = (id, values = {}) => new Set(entityFields(entry(id), values).map(f => f.path))
+const hasSetting = (id, values, key) => paths(id, values).has('preview.equipment_' + key)
+for (const key of ['dye', 'glint', 'trim', 'trim_material', 'damage']) assert.equal(hasSetting('armor_stand', {}, key), false, 'Empty stand: ' + key)
+assert.equal(paths('armor_stand').has('nbt.LeftHanded'), false)
+for (const id of ['cat', 'wolf']) {
+  assert.equal(paths(id).has('nbt.CollarColor'), false, 'Untamed animal has no collar')
+  assert.ok(paths(id, { 'nbt.Owner': [1, 2, 3, 4] }).has('nbt.CollarColor'))
+}
+assert.ok(paths('armor_stand', { 'nbt.equipment.mainhand': item('iron_sword') }).has('nbt.LeftHanded'))
+for (const material of ['leather', 'chainmail', 'copper', 'iron', 'golden', 'diamond', 'netherite']) for (const [i, slot] of slots.entries()) {
+  const values = { ['nbt.equipment.' + slot]: item(material + '_' + suffixes[i]) }
+  assert.equal(hasSetting('armor_stand', values, 'dye'), material === 'leather')
+  assert.ok(hasSetting('armor_stand', values, 'glint'))
+  assert.ok(hasSetting('armor_stand', values, 'trim'))
+  assert.equal(hasSetting('armor_stand', values, 'trim_material'), false)
+  assert.ok(hasSetting('armor_stand', { ...values, 'preview.equipment_trim': 'bolt' }, 'trim_material'))
+}
+const wings = { 'nbt.equipment.chest': item('elytra') }
+assert.ok(hasSetting('armor_stand', wings, 'glint'))
+assert.equal(hasSetting('armor_stand', wings, 'trim'), false)
+assert.equal(hasSetting('armor_stand', { 'nbt.equipment.head': item('piglin_head') }, 'glint'), false)
+for (const [id, stack, dye] of [['horse', 'leather_horse_armor', true], ['horse', 'diamond_horse_armor', false], ['wolf', 'wolf_armor', true], ['llama', 'red_carpet', false], ['happy_ghast', 'blue_harness', false]]) {
+  const values = { 'nbt.equipment.body': item(stack) }
+  assert.equal(hasSetting(id, values, 'dye'), dye, id + ' ' + stack)
+  assert.ok(hasSetting(id, values, 'glint'))
+}
+assert.equal(hasSetting('wolf', {}, 'damage'), false)
+assert.ok(hasSetting('wolf', { 'nbt.equipment.body': item('wolf_armor') }, 'damage'))
+assert.equal(hasSetting('wolf', { 'nbt.equipment.body': item('wolf_armor'), 'nbt.Age': -24000 }, 'damage'), false)
+for (const id of ['horse', 'pig', 'strider', 'camel']) assert.equal(paths(id, { 'nbt.Age': -24000 }).has('nbt.equipment.saddle'), false)
+for (const id of ['horse', 'wolf']) assert.equal(paths(id, { 'nbt.Age': -24000 }).has('nbt.equipment.body'), false)
+assert.ok(paths('llama', { 'nbt.Age': -24000 }).has('nbt.equipment.body'))
+assert.ok(hasSetting('pig', { 'nbt.equipment.saddle': item('saddle') }, 'glint'))
+assert.equal(hasSetting('zombie', { 'nbt.Age': -24000, 'nbt.equipment.chest': item('leather_chestplate') }, 'trim'), false)
+assert.ok(hasSetting('zombie', { 'nbt.Age': -24000, 'nbt.equipment.chest': item('leather_chestplate') }, 'dye'))
+const mix = createFixture(entry('armor_stand'), {
+  'nbt.equipment.head': item('iron_helmet'), 'nbt.equipment.chest': item('leather_chestplate'), 'nbt.equipment.mainhand': item('iron_sword'),
+  'preview.equipment_dye': 0xff0000, 'preview.equipment_glint': true, 'preview.equipment_damage': .8, 'preview.equipment_trim': 'bolt',
+}).nbt.equipment
+assert.equal(mix.head.components['minecraft:dyed_color'], undefined)
+assert.equal(mix.chest.components['minecraft:dyed_color'], 0xff0000)
+assert.equal(mix.head.components['minecraft:damage'], undefined)
+assert.deepEqual(mix.mainhand.components, {}, 'Settings must not leak into unsupported held items')
+console.log('Passed conditional equipment fields: dye, trim/material, glint, wolf cracks, baby gear and mixed-slot components')
 console.log(`Passed ${layers} armor layers, adult/baby/Small poses, legacy/modern slots, hand sides, animal equipment, dye, glint, cracks and model isolation`)

@@ -90,7 +90,7 @@ function animationTime(group) {
   group.traverse(o => { if (o.userData.updateAnimation) o.userData.animationAge = age })
 }
 async function defaultFields(entry, provider, values = {}) {
-  return entry.kind === 'block' ? fieldsFor(entry, provider, values) : entityFields(entry)
+  return entry.kind === 'block' ? fieldsFor(entry, provider, values) : entityFields(entry, values)
 }
 function initialValues(entry, fields) {
   return Object.fromEntries(fields.map(f => {
@@ -159,7 +159,7 @@ function fillFields() {
     select.value = String(Math.max(0, f.options.findIndex(o => JSON.stringify(o.value) === JSON.stringify(activeValues[f.path]))))
     select.onchange = () => {
       activeValues[f.path] = f.options[Number(select.value)].value
-      if (f.path === 'block') refreshBlockFields()
+      if (f.path === 'block' || activeEntry.kind !== 'block') refreshStateFields()
       else rebuildDetail()
     }
     row.append(label, select); $('state-fields').append(row)
@@ -203,15 +203,17 @@ async function openDetail(entry, item = '', block) {
     await rebuildDetail()
   } catch (error) { if (token === detailGeneration) $('model-message').textContent = t('加载失败：') + error.message }
 }
-async function refreshBlockFields(reset = false) {
+async function refreshStateFields(reset = false) {
   const token = ++detailGeneration, entry = activeEntry, previous = reset ? {} : { ...activeValues }
+  const focusedPath = document.activeElement?.dataset.path
   $('reset-state').disabled = true
   try {
     const fields = await defaultFields(entry, assets, previous)
     if (token !== detailGeneration || !$('detail').open) return
     activeFields = fields; activeValues = initialValues(entry, fields)
-    for (const field of fields) if (field.options.some(o => o.value === previous[field.path])) activeValues[field.path] = previous[field.path]
+    for (const field of fields) if (field.options.some(o => JSON.stringify(o.value) === JSON.stringify(previous[field.path]))) activeValues[field.path] = previous[field.path]
     fillFields(); $('reset-state').disabled = false
+    if (focusedPath) $('state-fields').querySelector(`[data-path="${focusedPath}"]`)?.focus({ preventScroll: true })
     await rebuildDetail()
   } catch (error) { if (token === detailGeneration) $('model-message').textContent = t('加载失败：') + error.message }
 }
@@ -259,8 +261,7 @@ $('detail').addEventListener('click', event => { if (event.target === $('detail'
 } })
 $('reset-view').onclick = resetCamera
 $('reset-state').onclick = () => {
-  if (activeEntry.kind === 'block') return refreshBlockFields(true)
-  activeValues = initialValues(activeEntry, activeFields); activeItem = ''; fillFields(); fillItems(); rebuildDetail()
+  activeItem = ''; fillItems(); refreshStateFields(true)
 }
 $('item-search').oninput = fillItems
 $('item-select').onchange = () => { activeItem = $('item-select').value; rebuildDetail() }
