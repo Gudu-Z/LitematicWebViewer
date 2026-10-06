@@ -17,7 +17,7 @@ a:hover { color: #d2e8ff; }
 #viewer canvas { display: block; }
 #app-header { position: absolute; inset: 0 0 auto; height: 72px; padding: 0 24px; display: flex; align-items: center; background: #101b2a; border-bottom: 1px solid #2b3a50; z-index: 10; }
 .brand { display: flex; align-items: center; gap: 12px; }
-.brand > svg { color: var(--accent); }
+.brand-logo { display: block; flex: none; }
 .brand h1 { font-size: 17px; font-weight: 650; letter-spacing: -.3px; }
 .brand p { margin-top: 4px; color: var(--muted); font-size: 11px; }
 .brand-short { display: none; }
@@ -164,7 +164,7 @@ body.has-model #welcome { display: none; }
   #app-header { height: 64px; padding: 0 12px; }
   #viewer, #dropOverlay { top: 64px; }
   .brand { gap: 7px; }
-  .brand > svg { width: 23px; }
+  .brand-logo { width: 24px; height: 24px; }
   .brand h1 { font-size: 14px; }
   .brand p, .brand-full { display: none; }
   .brand-short { display: inline; }
@@ -174,7 +174,7 @@ body.has-model #welcome { display: none; }
   .lang-badge { right: 3px; bottom: 2px; font-size: 8px; }
   #welcome { top: calc(50% + 32px); }
   .welcome-mark { width: 86px; height: 86px; margin-bottom: 20px; border-radius: 23px; }
-  .welcome-mark svg { width: 50px; height: 50px; }
+  .welcome-mark img { width: 60px; height: 60px; }
   #welcome h2 { font-size: 23px; }
   .welcome-description { font-size: 13px; }
   .welcome-actions { gap: 8px; margin-top: 23px; }
@@ -190,6 +190,6 @@ body.has-model #welcome { display: none; }
   .setting-row { gap: 12px; }
   .setting-row label { max-width: 55%; }
 }
-@media(max-width:350px) { .brand > svg { display: none; } #topbar { gap: 3px; } .icon-btn { width: 32px; } }
+@media(max-width:350px) { .brand-logo { display: none; } #topbar { gap: 3px; } .icon-btn { width: 32px; } }
 @media(max-height:570px) { #welcome { max-height: calc(100dvh - 90px); overflow-y: auto; } .welcome-mark { display: none; } }
 @media(prefers-reduced-motion:reduce) { *, *::before { transition: none !important; } }

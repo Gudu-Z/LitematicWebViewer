@@ -1,3 +1,5 @@
+<p align="center"><img src="public/brand/logo.svg" alt="LitematicWebViewer Logo" width="96" height="96"></p>
+
 # LitematicWebViewer
 
 在浏览器里 3D 预览 Minecraft 的 `.litematic` / `.litematica` 投影文件（Litematica 模组保存的建筑蓝图），也可以通过模型图鉴页查看方块、生物和实体的不同状态。纯前端运行，不需要后端服务器。代码主要由 AI 完成。

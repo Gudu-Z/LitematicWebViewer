@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" fill="none">
+  <title>LitematicWebViewer</title>
+  <desc>Three blue voxels form an L, with a wireframe voxel completing the schematic.</desc>
+  <!-- Solid voxels: a two-block column and a one-block foot. -->
+  <path fill="#48A9EF" d="m12 18 24 12v48L12 66Z"/>
+  <path fill="#347BC6" d="m36 30 24-12v24L36 54Z"/>
+  <path fill="#B5EDFF" d="M36 6 60 18 36 30 12 18Z"/>
+  <path fill="#48A9EF" d="m36 54 24 12v24L36 78Z"/>
+  <path fill="#2563A6" d="m60 66 24-12v24L60 90Z"/>
+  <path fill="#B5EDFF" d="m36 54 24-12 24 12-24 12Z"/>
+  <path stroke="#D4F5FF" stroke-opacity=".55" stroke-width="1.5" d="m12 42 24 12v24m0-24 24 12v24M12 18l24 12v24"/>
+  <!-- The fourth voxel is still a projection. -->
+  <path fill="#8EDBFF" fill-opacity=".1" d="m60 18 24 12v24L60 66 36 54V30Z"/>
+  <path stroke="#89D5FF" stroke-width="2.5" stroke-linejoin="round" d="m60 18 24 12v24L60 66M36 30l24 12 24-12M60 42v24"/>
+  <path stroke="#D9F5FF" stroke-width="2.5" stroke-linecap="square" d="m76 26 8 4v8"/>
+</svg>
