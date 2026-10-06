@@ -723,7 +723,8 @@ async function buildMob(entity, id, assets, data) {
     update(0)
     mesh.onBeforeRender = (_renderer, _scene, camera) => {
       if (animated || definition.offset || definition.opacity || definition.animatedTint) {
-        update((performance.now() - startTime) / 50)
+        // 检查页可提供统一的动画时间，以便暂停后仍能旋转模型、切换状态。
+        update(mesh.userData.animationAge ?? (performance.now() - startTime) / 50)
         mesh.updateMatrixWorld(true)
         mesh.skeleton.update()
       }

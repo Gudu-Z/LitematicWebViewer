@@ -39,7 +39,7 @@ const STRINGS = {
   sortAsc: ['少 → 多', 'Least → most'],
   hideUi: ['隐藏界面', 'Hide UI'],
   showUi: ['显示界面', 'Show UI'],
-  entityPreview: ['生物渲染检查（新标签页）', 'Entity render check (new tab)'],
+  entityPreview: ['渲染检查（新标签页）', 'Render check (new tab)'],
   close: ['关闭', 'Close'],
   bgColor: ['背景颜色', 'Background color'],
   sectionDisplay: ['显示', 'Display'],

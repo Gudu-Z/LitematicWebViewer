@@ -207,6 +207,35 @@ function makeAxisLine(origin, dx, dy, dz, color) {
 }
 
 export class Renderer {
+  // 检查页与主预览器共用网格、流体染色和方块实体路径，但不为每张卡片创建 WebGL 上下文。
+  // 这里只初始化网格构建方法需要的容器；相机、控件、画布和事件仍由检查页统一管理。
+  static async buildBlockPreview(data, assets) {
+    const builder = Object.create(Renderer.prototype)
+    const root = new THREE.Group()
+    for (const key of ['group', 'headsGroup', 'bannersGroup', 'statuesGroup', 'potsGroup']) {
+      builder[key] = new THREE.Group()
+      root.add(builder[key])
+    }
+    try {
+      await builder._buildBlockMeshes(data, assets)
+      await builder.renderPlayerHeads(data.heads, assets)
+      await builder.renderBanners(data.banners, assets)
+      await builder.renderStatues(data.statues, assets)
+      await builder.renderDecoratedPots(data.pots, assets)
+      // 主预览器共用的旗面/陶罐几何不能被检查卡片的释放操作销毁。
+      root.traverse(o => {
+        if (o.geometry === BANNER_FLAG_GEO || POT_SIDE_GEO.includes(o.geometry)) o.geometry = o.geometry.clone()
+      })
+      return root
+    } catch (error) {
+      root.traverse(o => {
+        if (o.geometry && o.geometry !== BANNER_FLAG_GEO && !POT_SIDE_GEO.includes(o.geometry)) o.geometry.dispose()
+        o.material?.dispose()
+      })
+      throw error
+    }
+  }
+
   constructor(container) {
     this.container = container
     this.scene = new THREE.Scene()
