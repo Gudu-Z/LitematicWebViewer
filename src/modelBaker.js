@@ -90,6 +90,7 @@ export function bakeModel(model, variant, texSize = 16) {
       quads.push({
         texKey,
         cullface,
+        shade: element.shade !== false,
         normal: computeNormal(finalVerts),
         verts: finalVerts.map((v) => [v[0] / 16, v[1] / 16, v[2] / 16]),
         uvs,

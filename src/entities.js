@@ -128,20 +128,22 @@ function quadGeometry(w, h) {
 }
 
 // 把一组烘焙好的 quads（verts/uvs/texKey，局部坐标 0..1）转成 Three.js 网格。
-// offset 统一加到顶点上（展示框传 -0.5，使模型居中于方块）；materialFor 按 texKey 取材质。
+// offset 统一加到顶点上（展示框传 -0.5，使模型居中于方块）；materialFor 按 texKey、shade 取材质。
+const quadMaterialKey = (texKey, shade) => `${texKey}|${shade !== false}`
 function quadsToMesh(quads, offset, materialFor) {
   const byTex = new Map()
   for (const q of quads) {
-    let a = byTex.get(q.texKey)
+    const key = quadMaterialKey(q.texKey, q.shade)
+    let a = byTex.get(key)
     if (!a) {
       a = []
-      byTex.set(q.texKey, a)
+      byTex.set(key, a)
     }
     a.push(q)
   }
   const group = new THREE.Group()
-  for (const [texKey, qs] of byTex) {
-    const mat = materialFor(texKey)
+  for (const qs of byTex.values()) {
+    const mat = materialFor(qs[0].texKey, qs[0].shade !== false)
     if (!mat) continue
     const n = qs.length
     const positions = new Float32Array(n * 12)
@@ -351,23 +353,6 @@ async function buildFrameItem(item, resolver, assets) {
     }
   }
 
-  // 铜傀儡雕像：无 JSON 模型，用实体模型渲染。原版 item 模型 template_copper_golem_statue 的
-  // fixed 显示变换是 translation[0,3,0]（=3/16=0.1875 上移）+ scale 0.5。方块模型居中（-0.5）后
-  // 雕像脚底在 -0.5，上移 0.1875 → -0.3125；再乘展示框 0.5 缩放。实体模型本身已缩 0.6（BER）。
-  if (name.endsWith('copper_golem_statue')) {
-    const tex = await assets.getTexture('entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : ''))
-    if (tex) {
-      const golem = buildCopperGolemStatueMesh(tex)
-      if (golem) {
-        golem.position.y = -0.3125
-        holder.add(golem)
-        holder.scale.setScalar(0.5)
-        holder.userData.fixedRot = Q_FLIP
-        return holder
-      }
-    }
-  }
-
   // 方块物品：3D 方块模型（原版展示框 scale 0.5 = 8px，方块是 3D 立方体显得偏大，这里用 0.4 略缩）。
   // 26.3 的物品模型定义在 items/NAME.json，指向具体的方块模型（如 block/piston_inventory、
   // block/anvil），其几何朝向与 display.fixed 变换是烘焙好的——和 blockstate 的 registerDefaultState
@@ -379,6 +364,7 @@ async function buildFrameItem(item, resolver, assets) {
   let fixedRot = null
   let fixedTrans = null
   let fixedScale = null
+  let usesItemModel = false
   if (modelDefs.length) {
     const parts = []
     let fixed = null
@@ -402,6 +388,7 @@ async function buildFrameItem(item, resolver, assets) {
       // offset = 复合平移 + (-0.5,-0.5,-0.5)，不再二次居中。
       for (const p of parts) for (const q of p.quads) quads.push({ ...q, verts: q.verts.map((v) => [v[0] + p.ox - 0.5, v[1] + p.oy - 0.5, v[2] + p.oz - 0.5]) })
       baked = { quads, center: [0, 0, 0] }
+      usesItemModel = true
       if (fixed) {
         fixedRot = fixedRotQuaternion(fixed.rotation)
         const t = fixed.translation || [0, 0, 0]
@@ -411,6 +398,21 @@ async function buildFrameItem(item, resolver, assets) {
     }
   }
   if (!baked || !baked.quads || !baked.quads.length) {
+    // 原版铜傀儡雕像由特殊渲染器绘制；资源包若提供普通物品模型，应优先使用上面解析的模型。
+    // 无 JSON 几何时才回退到实体模型：fixed 上移 3/16、居中 -0.5，总位移 -0.3125。
+    if (name.endsWith('copper_golem_statue')) {
+      const tex = await assets.getTexture('entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : ''))
+      if (tex) {
+        const golem = buildCopperGolemStatueMesh(tex)
+        if (golem) {
+          golem.position.y = -0.3125
+          holder.add(golem)
+          holder.scale.setScalar(0.5)
+          holder.userData.fixedRot = Q_FLIP
+          return holder
+        }
+      }
+    }
     // 特殊方块（箱子/头颅/旗帜/潜影盒/装饰罐等 BER，无 JSON 几何）走 SPECIAL_MODELS
     const props = await defaultItemProps(name, assets)
     baked = await resolver.resolve('minecraft:' + name, props)
@@ -438,25 +440,28 @@ async function buildFrameItem(item, resolver, assets) {
     }
   }
   if (baked && baked.quads && baked.quads.length) {
-    const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
+    const materialQuads = new Map(baked.quads.map(q => [quadMaterialKey(q.texKey, q.shade), q]))
     const mats = new Map()
     // 旗帜旗面（entity/banner/base 灰度遮罩）按底色上色
     const bannerColor = name.endsWith('_banner') || name.endsWith('_wall_banner')
       ? DYE_COLORS[name.replace(/_wall_banner$/, '').replace(/_banner$/, '')]
       : null
     await Promise.all(
-      texKeys.map(async (tk) => {
+      [...materialQuads].map(async ([key, q]) => {
+        const tk = q.texKey
         const tex = await assets.getTexture(tk)
-        // DoubleSide：玻璃/植物等十字模型与透明方块背面也要可见（原版 cutout 不剔除背面）
         if (tex) {
-          const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
+          // BasicItemModel 的 entityCutout/itemTranslucentCull 都会剔除背面。
+          // XK 用 from > to 的反向外壳描边；双面渲染会把黄色描边变成遮住本体的实心壳。
+          const Material = q.shade === false ? THREE.MeshBasicMaterial : THREE.MeshLambertMaterial
+          const mat = new Material({ map: tex, alphaTest: 0.5, side: usesItemModel ? THREE.FrontSide : THREE.DoubleSide, ...(q.shade === false ? {} : { flatShading: true }) })
           if (bannerColor && tk === 'entity/banner/base') mat.color = new THREE.Color(bannerColor)
-          mats.set(tk, mat)
+          mats.set(key, mat)
         }
       }),
     )
     const center = baked.center || [-0.5, -0.5, -0.5]
-    holder.add(quadsToMesh(baked.quads, center, (tk) => mats.get(tk)))
+    holder.add(quadsToMesh(baked.quads, center, (tk, shade) => mats.get(quadMaterialKey(tk, shade))))
     // 展示框物品总缩放 = 框体 0.5 × 模型 display.fixed 缩放（方块/床/铁砧等 0.5 → 0.25；头颅/盾牌等 1 → 0.5）。
     // 特殊 BER 方块（SPECIAL_MODELS）几何已按原版外观手工定死，fixedScale 为 null 时保持 0.4 略缩。
     const fs = fixedScale || [1, 1, 1]

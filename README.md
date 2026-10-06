@@ -93,6 +93,7 @@ npm run dev
 node scripts/verify-entities.mjs  # 全部生物/状态、真实贴图、绑定姿态、动画无漂移、资源隔离及释放
 node scripts/verify-breeze.mjs   # 风层几何、UV、透明排序与滚动
 node scripts/verify-shulker.mjs  # 共用潜影盒几何回归
+node scripts/verify-waxed-items.mjs  # XK 的 60 种涂蜡物品、展示框描边与原版回退
 npm run build
 ```
 

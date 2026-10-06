@@ -4,6 +4,30 @@
 
 import * as THREE from 'three'
 
+// JsonUnbakedModel -> JsonHelper.deserialize 使用 Gson adapter 读取一个对象，
+// 不要求对象后立即 EOF。XK 的四个 waxed_*cut_copper 模型尾部多一个 }，
+// 原版仍能读取。仅为模型文件保留这一行为，正文错误仍由 JSON.parse 拒绝。
+function parseResourceJSON(text, path) {
+  const source = text.trimStart() // JSON Reader 同样接受 UTF-8 BOM。
+  try {
+    return JSON.parse(source)
+  } catch (error) {
+    if (!path.startsWith('models/') || source[0] !== '{') throw error
+    let depth = 0, quoted = false, escaped = false
+    for (let i = 0; i < source.length; i++) {
+      const char = source[i]
+      if (quoted) {
+        if (escaped) escaped = false
+        else if (char === '\\') escaped = true
+        else if (char === '"') quoted = false
+      } else if (char === '"') quoted = true
+      else if (char === '{') depth++
+      else if (char === '}' && --depth === 0) return JSON.parse(source.slice(0, i + 1))
+    }
+    throw error
+  }
+}
+
 export class AssetProvider {
   constructor() {
     this.packs = [] // 有序数组 [{name, zip}]，index 0 优先级最高
@@ -65,7 +89,7 @@ export class AssetProvider {
       const entry = p.zip.file('assets/minecraft/' + path)
       if (entry) {
         try {
-          return JSON.parse(await entry.async('string'))
+          return parseResourceJSON(await entry.async('string'), path)
         } catch {
           /* 忽略损坏条目，继续下一个资源包 */
         }
@@ -75,9 +99,9 @@ export class AssetProvider {
     try {
       const resp = await fetch(this.baseUrl + path)
       if (!resp.ok) return null
-      // dev 服务器下，缺失文件会返回 SPA 回退的 index.html（text/html），json() 会抛错
+      // dev 服务器下，缺失文件可能返回 SPA 回退的 index.html（text/html）。
       if ((resp.headers.get('content-type') || '').includes('text/html')) return null
-      return await resp.json()
+      return parseResourceJSON(await resp.text(), path)
     } catch {
       return null
     }
