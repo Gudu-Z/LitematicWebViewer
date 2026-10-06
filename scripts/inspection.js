@@ -5,6 +5,7 @@ import { AssetProvider } from '../src/assets.js'
 import { CATALOG, CATEGORY_NAMES, ITEM_OPTIONS, officialName, entityFields, getPath, filterCatalog, language, setLanguage } from './inspection-catalog.js'
 import { buildInspectionModel, disposeInspectionModel, fieldsFor, inspectionItemId } from './inspection-models.js'
 import { t, optionLabel, translateDocument } from './inspection-i18n.js'
+import { createOrientationGizmo } from './orientation-gizmo.js'
 
 const $ = id => document.getElementById(id)
 const PAGE_SIZE = 24
@@ -27,7 +28,6 @@ let activeEntry = null, activeFields = [], activeValues = {}, activeItem = '', d
 let paused = false, age = 0, lastTime = performance.now(), packZip = null
 let route = readRoute()
 setLanguage(route.lang)
-translateDocument()
 let activeView = 'world'
 const entryName = entry => officialName(entry.id, entry.kind === 'block' ? 'block' : 'entity')
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
@@ -40,6 +40,8 @@ $('detail-stage').append(detailRenderer.domElement)
 const detailCamera = new THREE.PerspectiveCamera(35, 1, 0.01, 200)
 const controls = new OrbitControls(detailCamera, detailRenderer.domElement)
 controls.enableDamping = true
+const orientationGizmo = createOrientationGizmo($('detail-stage'))
+translateDocument()
 
 function readRoute() {
   const p = new URLSearchParams(location.search)
@@ -182,7 +184,7 @@ async function openDetail(entry, item = '', block) {
   activeView = 'world'; $('view-mode').value = 'world'
   $('view-mode').options[1].textContent = t(entry.kind === 'mob' ? '刷怪蛋' : '物品形态')
   if (detailView) dispose(detailView.group)
-  detailView = null; controls.enabled = false
+  detailView = null; controls.enabled = false; orientationGizmo.clear()
   $('detail-title').textContent = entryName(entry); $('detail-category').textContent = t(CATEGORY_NAMES[entry.kind])
   $('detail-id').textContent = 'minecraft:' + entry.id
   $('state-fields').replaceChildren(); $('item-fields').hidden = entry.key !== 'entity/item_frame'
@@ -248,6 +250,7 @@ $('detail').addEventListener('close', () => {
   ++detailGeneration; controls.enabled = false
   if (detailView) dispose(detailView.group)
   detailView = null; activeEntry = null; detailRenderer.renderLists.dispose()
+  orientationGizmo.clear()
 })
 $('close-detail').onclick = closeDetail
 $('detail').addEventListener('click', event => { if (event.target === $('detail')) {
@@ -331,7 +334,8 @@ function renderFrame(now) {
       animationTime(detailView.group); controls.update()
       detailCamera.aspect = width / height; detailCamera.updateProjectionMatrix()
       detailRenderer.render(detailView.scene, detailCamera)
-    } else { detailRenderer.setClearColor('#202f43'); detailRenderer.clear() }
+      orientationGizmo.update(detailCamera)
+    } else { detailRenderer.setClearColor('#202f43'); detailRenderer.clear(); orientationGizmo.clear() }
   }
 }
 renderer.setAnimationLoop(renderFrame)

@@ -4,6 +4,7 @@ import { language } from './inspection-catalog.js'
 
 const words = {
   '切换语言': 'Switch language',
+  '世界坐标轴：X 东，Y 上，Z 南': 'World axes: X east, Y up, Z south',
   '正在加载模型目录…': 'Loading catalog…', '资源包下载失败': 'Resource pack download failed',
   '模型图鉴': 'Model catalog', '全部': 'All', '方块': 'Blocks', '生物': 'Mobs', '实体': 'Entities',
   '分类': 'Category', '资源包': 'Resource pack', 'XK 材质包': 'XK resource pack', '原版材质': 'Vanilla textures',
