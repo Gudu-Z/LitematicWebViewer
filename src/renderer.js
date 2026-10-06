@@ -460,6 +460,8 @@ export class Renderer {
   }
 
   _key(e, down) {
+    // Dialogs and focused form controls own their keys; keyup must still release movement.
+    if (down && (document.querySelector('dialog[open]') || e.target?.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'A', 'SUMMARY'].includes(e.target?.tagName))) return
     if (MOVE_KEYS.includes(e.code)) {
       e.preventDefault()
       if (down) {
@@ -1004,7 +1006,7 @@ export class Renderer {
     this._bounds = bounds
     this._computeWaterSurface(data)
     const stats = await this._buildBlockMeshes(data, assets, onProgress, filter)
-    if (fit) this._fit(bounds)
+    if (fit) this.fitToBounds(bounds)
     this._updateOverlay(bounds)
     this._updateRegionWireframes(data)
     onProgress?.(1)
@@ -1199,17 +1201,25 @@ export class Renderer {
     return lines.join('\n')
   }
 
-  _fit(bounds) {
-    const cx = (bounds.minX + bounds.maxX) / 2
-    const cy = (bounds.minY + bounds.maxY) / 2
-    const cz = (bounds.minZ + bounds.maxZ) / 2
+  fitToBounds(bounds = this._bounds) {
+    if (!bounds) return
+    const cx = (bounds.minX + bounds.maxX + 1) / 2
+    const cy = (bounds.minY + bounds.maxY + 1) / 2
+    const cz = (bounds.minZ + bounds.maxZ + 1) / 2
     const w = bounds.width
     const h = bounds.height
     const d = bounds.depth
     const radius = Math.max(1, Math.sqrt(w * w + h * h + d * d) / 2)
     this.controls.target.set(cx, cy, cz)
-    const dist = radius * 1.3
-    this.camera.position.set(cx + dist * 0.8, cy + dist * 0.55, cz + dist * 0.8)
+    const inset = this.getViewportInsets?.() || {}
+    const width = this.container.clientWidth, height = this.container.clientHeight
+    // Fit inside the unobstructed viewport, including portrait screens and side panels.
+    const usableWidth = Math.max(width * .2, width - 2 * Math.max(inset.left || 0, inset.right || 0))
+    const usableHeight = Math.max(height * .2, height - 2 * Math.max(inset.top || 0, inset.bottom || 0))
+    const halfFov = Math.atan(Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * Math.min(usableHeight / height, usableWidth / height))
+    const dist = radius / Math.sin(halfFov) * 1.08
+    const direction = new THREE.Vector3(.8, .55, .8).normalize()
+    this.camera.position.copy(this.controls.target).addScaledVector(direction, dist)
     this.camera.near = Math.max(0.05, radius / 2000)
     this.camera.far = Math.max(200, radius * 200)
     this.camera.updateProjectionMatrix()

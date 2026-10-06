@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import JSZip from 'jszip'
 import { readFile } from 'node:fs/promises'
-import { readInspectionPack } from './inspection-packs.js'
+import { readResourcePack as readInspectionPack } from '../src/resourcePacks.js'
 import { AssetProvider } from '../src/assets.js'
 
 async function pack(value, prefix = '') {

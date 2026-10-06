@@ -1,7 +1,7 @@
 // 入口：串联文件读取、解析、模型解析、渲染、实体，以及资源包加载。
 
 import './styles.css'
-import JSZip from 'jszip'
+import { ViewerPacks } from './viewerPacks.js'
 import { parseLitematica } from './litematica.js'
 import { AssetProvider } from './assets.js'
 import { BlockModelResolver } from './blocks.js'
@@ -21,6 +21,15 @@ ui.setStatusKey('dragHint')
 let renderer = null
 try {
   renderer = new Renderer(container)
+  renderer.setBackgroundColor('#172332')
+  document.getElementById('bgColor').value = '#172332'
+  renderer.getViewportInsets = () => {
+    if (document.body.classList.contains('ui-hidden')) return {}
+    if (matchMedia('(max-width:900px)').matches) return { top: 16, bottom: 76 }
+    const left = document.getElementById('sidebar').getBoundingClientRect()
+    const right = document.getElementById('right-panel').getBoundingClientRect()
+    return { left: left.width ? left.right + 20 : 20, right: right.width ? innerWidth - right.left + 20 : 20, top: 20, bottom: 20 }
+  }
 } catch (e) {
   console.error(e)
   ui.showError(t('webglInitFailed') + (e.message || e))
@@ -28,7 +37,7 @@ try {
 
 let currentData = null
 let busy = false
-let packs = [] // 资源包清单 [{name, file}]
+let currentFileName = ''
 
 // 视图状态：渲染模式 / 当前层 / 可见区域 / 各显示开关
 const view = {
@@ -69,16 +78,20 @@ function checkCapabilities() {
 }
 checkCapabilities()
 loadPixelFont()
-loadPackList()
 
 const fileInput = document.getElementById('fileInput')
 const packInput = document.getElementById('packInput')
 
 document.getElementById('openBtn').addEventListener('click', () => fileInput.click())
+document.getElementById('welcomeOpenBtn').addEventListener('click', () => fileInput.click())
+document.getElementById('demoBtn').addEventListener('click', () => autoLoadDemo(true))
 document.getElementById('packBtn').addEventListener('click', () => packInput.click())
 document.getElementById('clearBtn').addEventListener('click', () => {
+  if (busy) return
   renderer?.clear()
   currentData = null
+  currentFileName = ''; document.body.classList.remove('has-model')
+  closeMobilePanels()
   resetViewForClear()
   ui.clearError()
   ui.showMetadata({})
@@ -100,19 +113,58 @@ document.getElementById('langBtn').addEventListener('click', () => {
   refreshLocalizedUI()
 })
 
-// 设置面板开关 + 背景色
-document.getElementById('settingsBtn').addEventListener('click', () => {
-  document.getElementById('settingsPanel').classList.toggle('hidden')
+// Native dialog provides focus management, Escape and a backdrop on desktop and mobile.
+const settingsPanel = document.getElementById('settingsPanel')
+function selectSettingsTab(name) {
+  for (const tab of document.querySelectorAll('[data-settings-tab]')) {
+    const selected = tab.dataset.settingsTab === name
+    tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1
+    document.getElementById(tab.getAttribute('aria-controls')).hidden = !selected
+  }
+}
+function openSettings(tab) {
+  if (tab) selectSettingsTab(tab)
+  renderer?.keys.clear()
+  if (!settingsPanel.open) settingsPanel.showModal()
+}
+document.getElementById('settingsBtn').addEventListener('click', () => openSettings())
+document.getElementById('packSummaryBtn').addEventListener('click', () => openSettings('packs'))
+for (const tab of document.querySelectorAll('[data-settings-tab]')) {
+  tab.onclick = () => selectSettingsTab(tab.dataset.settingsTab)
+  tab.onkeydown = event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+    event.preventDefault()
+    const name = event.key === 'Home' ? 'general' : event.key === 'End' ? 'packs' : tab.dataset.settingsTab === 'general' ? 'packs' : 'general'
+    selectSettingsTab(name); document.querySelector(`[data-settings-tab="${name}"]`).focus()
+  }
+}
+settingsPanel.addEventListener('click', event => {
+  if (event.target !== settingsPanel) return
+  const r = settingsPanel.getBoundingClientRect()
+  if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) settingsPanel.close()
 })
+function closeMobilePanels() {
+  for (const [button, panel] of [['controlsPanelBtn', 'sidebar'], ['infoPanelBtn', 'right-panel']]) {
+    document.getElementById(button).setAttribute('aria-expanded', 'false')
+    document.getElementById(panel).classList.remove('mobile-open')
+  }
+}
+for (const [button, panel] of [['controlsPanelBtn', 'sidebar'], ['infoPanelBtn', 'right-panel']]) document.getElementById(button).onclick = () => {
+  const open = document.getElementById(panel).classList.contains('mobile-open')
+  closeMobilePanels()
+  if (!open) { document.getElementById(panel).classList.add('mobile-open'); document.getElementById(button).setAttribute('aria-expanded', 'true') }
+}
 // 界面显示开关：隐藏时仅保留右上角按钮
 document.getElementById('uiToggleBtn').addEventListener('click', () => {
   const hidden = document.body.classList.toggle('ui-hidden')
   const btn = document.getElementById('uiToggleBtn')
   btn.title = hidden ? t('showUi') : t('hideUi')
   btn.setAttribute('aria-label', btn.title)
+  btn.setAttribute('aria-pressed', String(hidden))
+  renderer?._resize()
 })
 document.getElementById('settingsCloseBtn').addEventListener('click', () => {
-  document.getElementById('settingsPanel').classList.add('hidden')
+  settingsPanel.close()
 })
 document.getElementById('bgColor').addEventListener('input', (e) => {
   renderer?.setBackgroundColor(e.target.value)
@@ -120,6 +172,7 @@ document.getElementById('bgColor').addEventListener('input', (e) => {
 
 // —— 移动模式 / 速度 / 层级 / 设置项 / 区域 的接线 ——
 if (renderer) {
+  document.getElementById('fitViewBtn').onclick = () => renderer.fitToBounds(currentData?.bounds)
   renderer.onMoveModeChange = (mode) => ui.setMoveModeLabel(mode)
   renderer.onSpeedChange = (speed) => ui.setSpeed(speed)
   renderer.onSensitivityChange = (v) => ui.setSensitivity(v)
@@ -143,12 +196,15 @@ if (renderer) {
   document.getElementById('layerDownBtn').addEventListener('click', () => changeLayer(-1))
   // 左侧：定位到此处——把当前层设为摄像机所在高度
   document.getElementById('locateBtn').addEventListener('click', async () => {
-    if (!currentData) return
-    const b = currentData.bounds
-    const camY = Math.floor(renderer.camera.position.y)
-    view.layerY = Math.max(b.minY, Math.min(b.maxY, camY))
-    ui.setLayerLabel(view.layerY)
-    if (view.renderMode !== 'all') await reRenderBlocks()
+    if (busy || !currentData) return
+    setBusy(true)
+    try {
+      const b = currentData.bounds
+      const camY = Math.floor(renderer.camera.position.y)
+      view.layerY = Math.max(b.minY, Math.min(b.maxY, camY))
+      ui.setLayerLabel(view.layerY)
+      if (view.renderMode !== 'all') await reRenderBlocks()
+    } finally { setBusy(false) }
   })
 
   // 设置：显示实体 / 区域线框 / 尺寸
@@ -176,7 +232,7 @@ if (renderer) {
 
 // E / Q 调整渲染层级（E 上一层，Q 下一层；忽略输入框内的按键）
 window.addEventListener('keydown', (e) => {
-  if (isTypingTarget(e)) return
+  if (busy || settingsPanel.open || isTypingTarget(e)) return
   if (e.code === 'KeyE') {
     e.preventDefault()
     changeLayer(1)
@@ -191,7 +247,7 @@ fileInput.addEventListener('change', (e) => {
   e.target.value = ''
 })
 packInput.addEventListener('change', (e) => {
-  if (e.target.files[0]) loadPackFromFile(e.target.files[0])
+  if (e.target.files.length) loadPackFromFiles([...e.target.files])
   e.target.value = ''
 })
 
@@ -218,7 +274,7 @@ window.addEventListener('drop', (e) => {
   const files = e.dataTransfer?.files
   if (!files || !files.length) return
   const f = files[0]
-  if (f.name.toLowerCase().endsWith('.zip')) loadPackFromFile(f)
+  if (f.name.toLowerCase().endsWith('.zip')) loadPackFromFiles([...files].filter(file => file.name.toLowerCase().endsWith('.zip')))
   else openFile(f)
 })
 
@@ -228,7 +284,7 @@ async function openFile(file) {
     ui.showError(t('renderUnavailable'))
     return
   }
-  busy = true
+  setBusy(true)
   ui.clearError()
   try {
     ui.setStatusKey('parsingFile')
@@ -250,6 +306,9 @@ async function openFile(file) {
     ui.setProgress(0.35)
 
     currentData = data
+    currentFileName = file.name
+    document.getElementById('fileName').textContent = currentFileName
+    document.body.classList.add('has-model'); closeMobilePanels()
     resetViewForData(data)
     ui.setStatusKey('statusGeometry', { n: data.blocks.size.toLocaleString() })
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
@@ -271,21 +330,24 @@ async function openFile(file) {
     else ui.showError(t('loadFailed') + (e.message || e))
     ui.setProgress(0)
   } finally {
-    busy = false
+    setBusy(false)
   }
 }
 
-async function autoLoadDemo() {
+async function autoLoadDemo(sample = false) {
+  if (busy) return
+  setBusy(true); ui.clearError(); ui.setStatusKey('loadingDemo')
   try {
     const params = new URLSearchParams(location.search)
-    const name = params.get('file') || 'demo.litematic'
+    const name = sample ? 'demo.litematic' : params.get('file') || 'demo.litematic'
     const resp = await fetch(name)
-    if (!resp.ok) return
+    if (!resp.ok) throw Error(t('demoFailed'))
     const blob = await resp.blob()
+    setBusy(false)
     await openFile(new File([blob], name))
   } catch (e) {
-    console.error(e)
-  }
+    ui.showError(e.message || t('demoFailed'))
+  } finally { setBusy(false) }
 }
 
 // 重新解析方块贴图并重渲染当前已加载的结构
@@ -422,50 +484,60 @@ function resetViewForClear() {
 
 // 切换某个区域的可见性
 async function toggleRegion(name) {
-  if (!currentData) return
-  if (!view.visibleRegions) {
-    view.visibleRegions = new Set((currentData.regions || []).map((r) => r.name))
-  }
-  if (view.visibleRegions.has(name)) view.visibleRegions.delete(name)
-  else view.visibleRegions.add(name)
-  updateRegionUI()
-  await reRenderBlocks()
-  await renderCurrentSigns()
-  await renderCurrentPlayerHeads()
-  await renderCurrentBanners()
-  await renderCurrentStatues()
-  await renderCurrentPots()
-  await renderCurrentEntities()
+  if (busy || !currentData) return
+  setBusy(true)
+  try {
+    if (!view.visibleRegions) {
+      view.visibleRegions = new Set((currentData.regions || []).map((r) => r.name))
+    }
+    if (view.visibleRegions.has(name)) view.visibleRegions.delete(name)
+    else view.visibleRegions.add(name)
+    updateRegionUI()
+    await reRenderBlocks()
+    await renderCurrentSigns()
+    await renderCurrentPlayerHeads()
+    await renderCurrentBanners()
+    await renderCurrentStatues()
+    await renderCurrentPots()
+    await renderCurrentEntities()
+  } finally { setBusy(false) }
 }
 
 // 调整当前层（delta = ±1）
 async function changeLayer(delta) {
-  if (!currentData) return
-  const b = currentData.bounds
-  if (view.renderMode === 'all') {
-    // 在「全部渲染」模式下按上/下一层，自动切到「上方/下方」模式，
-    // 并从结构最远端开始：上方→最底层，下方→最高层（首次显示全貌）
-    view.renderMode = delta > 0 ? 'above' : 'below'
-    setRenderModeControl(view.renderMode)
-    view.layerY = delta > 0 ? b.minY : b.maxY
-  } else if (
-    (view.renderMode === 'below' && delta > 0 && view.layerY >= b.maxY) ||
-    (view.renderMode === 'above' && delta < 0 && view.layerY <= b.minY)
-  ) {
-    // 「下方/上方」达到最大/最小层时，自动还原为「全部渲染」
-    view.renderMode = 'all'
-    setRenderModeControl('all')
-  } else {
-    view.layerY = Math.max(b.minY, Math.min(b.maxY, view.layerY + delta))
-  }
-  ui.setLayerLabel(view.layerY)
-  await reRenderBlocks()
+  if (busy || !currentData) return
+  setBusy(true)
+  try {
+    const b = currentData.bounds
+    if (view.renderMode === 'all') {
+      // 在「全部渲染」模式下按上/下一层，自动切到「上方/下方」模式，
+      // 并从结构最远端开始：上方→最底层，下方→最高层（首次显示全貌）
+      view.renderMode = delta > 0 ? 'above' : 'below'
+      setRenderModeControl(view.renderMode)
+      view.layerY = delta > 0 ? b.minY : b.maxY
+    } else if (
+      (view.renderMode === 'below' && delta > 0 && view.layerY >= b.maxY) ||
+      (view.renderMode === 'above' && delta < 0 && view.layerY <= b.minY)
+    ) {
+      // 「下方/上方」达到最大/最小层时，自动还原为「全部渲染」
+      view.renderMode = 'all'
+      setRenderModeControl('all')
+    } else {
+      view.layerY = Math.max(b.minY, Math.min(b.maxY, view.layerY + delta))
+    }
+    ui.setLayerLabel(view.layerY)
+    await reRenderBlocks()
+  } finally { setBusy(false) }
 }
 
 // 渲染模式切换
 async function setRenderMode(mode) {
-  view.renderMode = mode
-  await reRenderBlocks()
+  if (busy) return
+  setBusy(true)
+  try {
+    view.renderMode = mode
+    await reRenderBlocks()
+  } finally { setBusy(false) }
 }
 
 // 同步「渲染模式」下拉框（不触发 change）
@@ -508,6 +580,7 @@ function refreshLocalizedUI() {
   updateRegionUI()
   updateMaterialList()
   updatePackPanels()
+  ui.refreshPackStatus()
   if (renderer) ui.setMoveModeLabel(renderer.getMoveMode())
   ui.setLayerLabel(currentData ? view.layerY : '-')
   // 界面显示开关的 title 依赖当前隐藏状态
@@ -520,7 +593,7 @@ function refreshLocalizedUI() {
 // 是否正在输入框里打字（避免 E/Q 等快捷键误触发）
 function isTypingTarget(e) {
   const t = e.target
-  return t && (t.tagName === 'INPUT' || t.tagName === 'SELECT' || t.tagName === 'TEXTAREA')
+  return t && (t.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA', 'BUTTON', 'A', 'SUMMARY'].includes(t.tagName))
 }
 
 // 从方块实体中提取玩家头颅：{x, y, z, rotation?, facing?, skinUrl}
@@ -691,104 +764,73 @@ function textComponentToString(c) {
 
 // —— 资源包管理 ——
 
+const packManager = new ViewerPacks({
+  translate: t,
+  apply: async packs => {
+    const previous = [...assets.packs]
+    const replace = values => {
+      assets.clearPacks()
+      for (const pack of values) assets.addPack(pack.zip, pack.id ?? pack.name)
+    }
+    replace(packs)
+    try { await reRenderCurrent() }
+    catch (error) {
+      replace(previous)
+      await reRenderCurrent()
+      throw error
+    }
+  },
+})
+
+function setBusy(on) {
+  busy = on
+  document.getElementById('app').setAttribute('aria-busy', String(on))
+  document.getElementById('packSettings').setAttribute('aria-busy', String(on))
+  for (const el of document.querySelectorAll('#openBtn, #clearBtn, #welcomeOpenBtn, #demoBtn, #fileInput, #packBtn, #packInput, #controlPanel button, #controlPanel select, #regionListBody button')) {
+    el.disabled = on || (el.id === 'clearBtn' && !currentData)
+  }
+  updatePackPanels()
+  if (!on && !currentData) document.getElementById('welcomeStatus').textContent = ''
+}
+
 function updatePackPanels() {
-  const loaded = assets.getPackNames()
-  ui.renderPackPanels(loaded, packs, {
-    onLoad: (pack) => loadPack(pack),
-    onUnload: (name) => unloadPack(name),
-    onMove: (name, delta) => movePack(name, delta),
-  })
+  ui.renderPackPanels(packManager.active, packManager.available, {
+    onLoad: id => runPackAction(() => packManager.load(id), 'packLoaded', { name: packManager.library.get(id).name }),
+    onUnload: id => runPackAction(() => packManager.unload(id), 'packUnloaded', { name: packManager.library.get(id).name }),
+    onMove: (id, delta) => runPackAction(() => packManager.move(id, delta), 'packOrderUpdated'),
+  }, busy)
 }
 
-// 从清单里的 URL 加载资源包
-async function loadPack(pack) {
+async function runPackAction(action, success = 'packUpdated', vars) {
   if (busy) return
-  busy = true
-  ui.clearError()
+  setBusy(true); ui.clearError(); ui.setPackStatus('packApplying'); ui.setStatusKey('packApplying'); ui.setProgress(0)
   try {
-    ui.setStatusKey('loadingPack', { name: pack.name })
-    const resp = await fetch('resourcepacks/' + encodeURIComponent(pack.file))
-    if (!resp.ok) throw new Error(t('packDownloadFailed', { status: resp.status }))
-    const zip = await JSZip.loadAsync(await resp.blob())
-    assets.addPack(zip, pack.name)
-    await reRenderCurrent()
-    updatePackPanels()
-    ui.setStatusKey('packLoaded', { name: pack.name })
-  } catch (e) {
-    console.error(e)
-    ui.showError(t('packLoadFailed') + (e.message || e))
-  } finally {
-    busy = false
-  }
+    const warning = await action()
+    ui.setPackStatus(warning || success, warning ? undefined : vars, !!warning)
+    ui.setStatusKey(success, vars); ui.setProgress(currentData ? 1 : 0)
+  } catch (error) {
+    ui.setPackStatus('packOperationFailed', { error: t(error.message || String(error)) }, true)
+    ui.setStatusKey('packOperationFailed', { error: t(error.message || String(error)) })
+    ui.setProgress(currentData ? 1 : 0)
+  } finally { setBusy(false) }
 }
 
-// 卸载资源包
-async function unloadPack(name) {
-  if (busy) return
-  busy = true
-  ui.clearError()
-  try {
-    assets.removePack(name)
-    await reRenderCurrent()
-    updatePackPanels()
-    ui.setStatusKey('packUnloaded', { name })
-  } catch (e) {
-    console.error(e)
-    ui.showError(t('packUnloadFailed') + (e.message || e))
-  } finally {
-    busy = false
-  }
+function loadPackFromFiles(files) {
+  if (busy || !files.length) return
+  openSettings('packs')
+  return runPackAction(() => packManager.importFiles(files))
 }
 
-// 调整资源包优先级（delta = -1 上移 / +1 下移）
-async function movePack(name, delta) {
-  if (busy) return
-  busy = true
-  try {
-    assets.movePack(name, delta)
-    await reRenderCurrent()
-    updatePackPanels()
-  } catch (e) {
-    console.error(e)
-    ui.showError(t('packMoveFailed') + (e.message || e))
-  } finally {
-    busy = false
-  }
-}
+document.getElementById('unloadAllPacks').onclick = () => runPackAction(() => packManager.unloadAll(), 'packAllUnloaded')
 
-// 从用户选择的文件加载资源包
-async function loadPackFromFile(file) {
-  if (busy) return
-  busy = true
-  ui.clearError()
+async function initializePacks() {
+  setBusy(true); ui.setPackStatus('loadingPackShort'); ui.setStatusKey('loadingPackShort')
   try {
-    ui.setStatusKey('loadingPackShort')
-    const zip = await JSZip.loadAsync(file)
-    assets.addPack(zip, file.name.replace(/\.zip$/i, ''))
-    await reRenderCurrent()
-    updatePackPanels()
-    ui.setStatusKey('packLoadedShort')
-  } catch (e) {
-    console.error(e)
-    ui.showError(t('packLoadFailed') + (e.message || e))
-  } finally {
-    busy = false
-  }
-}
-
-// 加载资源包清单并渲染两栏列表
-async function loadPackList() {
-  try {
-    const resp = await fetch('resourcepacks/manifest.json')
-    if (!resp.ok) return
-    packs = await resp.json()
-    updatePackPanels()
-    // 默认资源包：XK 红石显示（若存在则自动加载）
-    const def = packs.find((p) => /XK/i.test(p.name))
-    if (def) await loadPack(def)
-  } catch {
-    /* 没有清单时静默忽略 */
-  }
+    const warning = await packManager.init()
+    ui.setPackStatus(warning || 'packUpdated', undefined, !!warning)
+    ui.setStatusKey('dragHint')
+  } catch (error) { ui.setPackStatus('packOperationFailed', { error: t(error.message || String(error)) }, true) }
+  finally { setBusy(false) }
 }
 
 // 加载像素字体（供轴标签/告示牌文字使用）
@@ -803,6 +845,8 @@ async function loadPixelFont() {
 }
 
 // 调试/截图用：URL 带 ?demo 或 ?file=xxx 时自动加载文件
+await initializePacks()
+refreshLocalizedUI()
 const _sp = new URLSearchParams(location.search)
 if (_sp.has('demo') || _sp.has('file')) {
   autoLoadDemo()

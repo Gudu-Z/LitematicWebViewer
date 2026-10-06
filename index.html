@@ -4,28 +4,45 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>LitematicWebViewer</title>
+    <link rel="icon" href="data:," />
   </head>
   <body>
     <div id="app">
       <div id="viewer"></div>
 
+      <header id="app-header">
+        <div class="brand"><svg viewBox="0 0 32 32" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" aria-hidden="true"><path d="m16 2 13 7.5v13L16 30 3 22.5v-13Z"/><path d="m3 9.5 13 7.5 13-7.5M16 17v13M9.5 5.75l13 7.5v6.5"/></svg><div><h1><span class="brand-full">LitematicWebViewer</span><span class="brand-short">Litematic</span></h1><p data-i18n="viewerSubtitle">Minecraft 投影预览器</p></div></div>
+      </header>
+
+      <section id="welcome" aria-labelledby="welcomeTitle">
+        <div class="welcome-mark" aria-hidden="true"><svg viewBox="0 0 64 64" width="64" height="64" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"><path d="m32 5 23 13.5v27L32 59 9 45.5v-27Z"/><path d="m9 18.5 23 13.5 23-13.5M32 32v27M20.5 11.75l23 13.5v13.5M9 32l23 13.5L55 32M20.5 25.25v27M43.5 25.25v27"/></svg></div>
+        <p class="eyebrow">MINECRAFT · 3D VIEWER</p>
+        <h2 id="welcomeTitle" data-i18n="welcomeTitle">打开你的 Minecraft 投影</h2>
+        <p class="welcome-description" data-i18n="welcomeDescription">拖入投影文件，旋转查看建筑、逐层浏览，并统计所需材料。</p>
+        <div class="welcome-actions"><button id="welcomeOpenBtn" class="primary" data-i18n="openFile">打开投影文件</button><button id="demoBtn" data-i18n="openDemo">体验示例建筑</button></div>
+        <p class="file-formats">.litematic / .litematica / .nbt</p>
+        <a href="./scripts/entity-preview.html" target="_blank" rel="noopener" class="welcome-catalog" data-i18n="browseCatalog">浏览模型图鉴 ↗</a>
+        <p id="welcomeStatus" role="status"></p>
+      </section>
+
       <aside id="sidebar">
-        <div class="panel">
-          <h1>LitematicWebViewer</h1>
-          <div class="buttons">
-            <button id="openBtn" class="primary" data-i18n="openFile">打开 .litematica 文件</button>
+        <div class="panel file-panel">
+          <h2 data-i18n="currentFile">当前文件</h2>
+          <p id="fileName" class="file-name"></p>
+          <div class="buttons file-actions">
+            <button id="openBtn" class="primary" data-i18n="openFile">打开投影文件</button>
             <button id="clearBtn" data-i18n="clear">清除</button>
           </div>
           <input type="file" id="fileInput" accept=".litematic,.litematica,.nbt" hidden />
-          <input type="file" id="packInput" accept=".zip" hidden />
         </div>
 
         <div class="panel">
-          <div id="progressBar"><div id="progressFill"></div></div>
-          <div id="status">拖入 .litematica 文件开始预览</div>
+          <div id="progressBar" role="progressbar" aria-label="加载进度" data-i18n-aria-label="loadProgress" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><div id="progressFill"></div></div>
+          <div id="status" role="status">拖入 .litematica 文件开始预览</div>
         </div>
 
         <div class="panel" id="controlPanel">
+          <div class="control-heading"><h2 data-i18n="viewControls">视图控制</h2><button id="fitViewBtn" class="text-btn" data-i18n="fitView">适应窗口</button></div>
           <div class="control-row">
             <span class="control-label" data-i18n="move">移动</span>
             <button id="moveModeBtn">环绕模式</button>
@@ -44,7 +61,7 @@
               <option value="single" data-i18n="renderSingle">单层渲染</option>
             </select>
           </div>
-          <div class="control-row">
+          <div class="control-row layer-controls">
             <span class="control-label" data-i18n="layer">层级</span>
             <button id="layerDownBtn" data-i18n-title="layerDownTitle" title="下一层 (Q)">↓</button>
             <span id="layerValue" class="control-value">层 -</span>
@@ -53,11 +70,12 @@
           </div>
         </div>
 
-        <div class="hint">
+        <button id="packSummaryBtn" class="pack-summary" type="button" aria-haspopup="dialog" aria-controls="settingsPanel"><span data-i18n="resourcePacks">资源包</span><span id="packSummary"></span><span aria-hidden="true">›</span></button>
+        <details class="hint"><summary data-i18n="operationHelp">操作提示</summary>
           <p data-i18n="hint1">环绕模式：左键旋转 · 右键平移 · 滚轮缩放</p>
           <p data-i18n="hint2">飞行模式（按 WASD 切换）：左键转头 · WASD 移动 · 右键平移 · 滚轮调速</p>
           <p data-i18n="hint3">E / Q：上一 / 下一层</p>
-        </div>
+        </details>
       </aside>
 
       <div id="topbar">
@@ -86,7 +104,7 @@
           </svg>
           <span id="langLabel" class="lang-badge">中</span>
         </button>
-        <button id="settingsBtn" class="icon-btn" data-i18n-title="settings" title="设置" aria-label="设置">
+        <button id="settingsBtn" class="icon-btn" data-i18n-title="settings" data-i18n-aria-label="settings" title="设置" aria-label="设置" aria-haspopup="dialog" aria-controls="settingsPanel">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor">
             <path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58a.49.49 0 0 0 .12-.61l-1.92-3.32a.49.49 0 0 0-.59-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.48.48 0 0 0-.48-.41h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96a.49.49 0 0 0-.59.22L2.74 8.87a.48.48 0 0 0 .12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58a.49.49 0 0 0-.12.61l1.92 3.32c.13.23.38.32.59.22l2.39-.96c.49.37 1.03.7 1.62.94l.36 2.54c.04.24.24.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.57 1.62-.94l2.39.96c.21.1.46 0 .59-.22l1.92-3.32a.48.48 0 0 0-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z" />
           </svg>
@@ -133,12 +151,15 @@
         </div>
       </aside>
 
-      <div id="settingsPanel" class="hidden">
+      <dialog id="settingsPanel" aria-labelledby="settingsTitle">
         <div class="panel settings">
           <div class="settings-head">
-            <h2 data-i18n="settings">设置</h2>
-            <button id="settingsCloseBtn" class="icon-btn" data-i18n-title="close" title="关闭">×</button>
+            <div><p class="eyebrow" data-i18n="viewerSubtitle">Minecraft 投影预览器</p><h2 id="settingsTitle" data-i18n="settings">设置</h2></div>
+            <button id="settingsCloseBtn" class="icon-btn" data-i18n-title="close" data-i18n-aria-label="close" title="关闭">×</button>
           </div>
+
+          <div class="settings-tabs" role="tablist" aria-label="设置分类" data-i18n-aria-label="settingsCategories"><button id="generalTab" role="tab" aria-controls="generalSettings" aria-selected="true" data-settings-tab="general" data-i18n="generalSettings">显示与操作</button><button id="packsTab" role="tab" aria-controls="packSettings" aria-selected="false" tabindex="-1" data-settings-tab="packs" data-i18n="resourcePacks">资源包</button></div>
+          <section id="generalSettings" class="settings-section" role="tabpanel" aria-labelledby="generalTab" tabindex="0">
 
           <div class="setting-row">
             <label for="bgColor" data-i18n="bgColor">背景颜色</label>
@@ -170,26 +191,31 @@
             <span id="sensitivityValue" class="control-value">0.007</span>
           </div>
 
-          <div class="settings-section-title" data-i18n="resourcePacks">资源包</div>
+          </section>
+          <section id="packSettings" class="settings-section" role="tabpanel" aria-labelledby="packsTab" tabindex="0" hidden>
+          <input type="file" id="packInput" accept=".zip,application/zip" multiple hidden />
+          <div class="pack-toolbar"><p class="settings-note" data-i18n="packPriorityHint">越靠上优先级越高，未覆盖的资源使用原版材质。</p><button id="packBtn" class="primary" data-i18n="loadPack">本地导入 .zip</button></div>
           <div class="pack-cols">
             <div class="pack-col">
-              <div class="pack-col-title" data-i18n="loadedPacks">已加载（越靠上优先级越高）</div>
+              <div class="pack-col-head"><h3 class="pack-col-title"><span data-i18n="loadedPacks">已加载</span><span id="loadedPackCount" class="count-badge">0</span></h3><button id="unloadAllPacks" class="text-btn" data-i18n="unloadAllPacks" disabled>全部卸载</button></div>
               <ul id="loadedPackList" class="packlist"></ul>
             </div>
             <div class="pack-col">
-              <div class="pack-col-title" data-i18n="availablePacks">可加载</div>
+              <div class="pack-col-head"><h3 class="pack-col-title"><span data-i18n="availablePacks">可用资源包</span><span id="availablePackCount" class="count-badge">0</span></h3></div>
               <ul id="availablePackList" class="packlist"></ul>
             </div>
           </div>
 
-          <div class="buttons" style="margin-top: 12px">
-            <button id="packBtn" data-i18n="loadPack">从文件加载资源包 (.zip)</button>
-          </div>
+          <p id="packStatus" role="status" aria-live="polite"></p>
+          <p class="settings-note pack-storage-note" data-i18n="packStorageHint">本地文件和加载顺序保存在当前浏览器。卸载后可从右侧重新加载。</p>
+          </section>
         </div>
-      </div>
+      </dialog>
 
-      <div id="dropOverlay"><div>松开以打开文件</div></div>
-      <div id="errorBanner" class="hidden"></div>
+      <nav id="mobilePanels" aria-label="预览面板" data-i18n-aria-label="previewPanels"><button id="controlsPanelBtn" aria-controls="sidebar" aria-expanded="false" data-i18n="viewControls">视图控制</button><button id="infoPanelBtn" aria-controls="right-panel" aria-expanded="false" data-i18n="info">结构信息</button></nav>
+
+      <div id="dropOverlay"><div data-i18n="dropHint">松开以打开投影或导入资源包</div></div>
+      <div id="errorBanner" class="hidden" role="alert"></div>
 
       <!-- 移动端触摸控制：飞行模式下的虚拟摇杆（左下）+ 上升/下降按钮（右下） -->
       <div id="touchControls">

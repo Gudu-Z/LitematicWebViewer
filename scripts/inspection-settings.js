@@ -1,5 +1,5 @@
 import { t } from './inspection-i18n.js'
-import { readInspectionPack, readLocalPacks, saveLocalPack } from './inspection-packs.js'
+import { readResourcePack as readInspectionPack, readLocalPacks, saveLocalPack } from '../src/resourcePacks.js'
 
 const PREFERENCES = 'model-catalog-settings-v1'
 export function createInspectionSettings({ onPacksChange, onOptionsChange }) {

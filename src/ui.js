@@ -61,6 +61,7 @@ export class UI {
 
   setStatus(text) {
     this.statusEl.textContent = text
+    document.getElementById('welcomeStatus').textContent = document.getElementById('app').getAttribute('aria-busy') === 'true' ? text : ''
   }
 
   // 记录状态来源（key + 插值变量），语言切换后能重新翻译
@@ -76,6 +77,7 @@ export class UI {
 
   setProgress(p) {
     this.progressFill.style.width = Math.round(Math.min(1, Math.max(0, p)) * 100) + '%'
+    this.progressFill.parentElement.setAttribute('aria-valuenow', String(Math.round(Math.min(1, Math.max(0, p)) * 100)))
   }
 
   showMetadata(meta) {
@@ -138,8 +140,8 @@ export class UI {
         const on = !visible || visible.has(r.name)
         return `
         <li data-name="${escapeHtml(r.name)}">
-          <button class="eye-btn" data-action="toggle" title="${on ? t('hide') : t('show')}">
-            ${on ? '👁' : '🚫'}
+          <button class="eye-btn" data-action="toggle" title="${on ? t('hide') : t('show')}" aria-label="${on ? t('hide') : t('show')} ${escapeHtml(r.name)}" aria-pressed="${on}">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>${on ? '' : '<path d="m3 3 18 18"/>'}</svg>
           </button>
           <span class="region-name">${escapeHtml(r.name)}</span>
         </li>`
@@ -171,70 +173,48 @@ export class UI {
       .join('')
   }
 
-  // 渲染资源包两栏：loaded=已加载（按优先级顺序，名字数组），available=可加载 [{name, file}]
-  // callbacks: { onLoad(pack), onUnload(name), onMove(name, delta) }
-  renderPackPanels(loaded, available, callbacks) {
-    this._renderLoadedPacks(loaded, callbacks)
-    this._renderAvailablePacks(loaded, available, callbacks)
+  // Both lists use stable IDs, keeping local and built-in packs with the same name separate.
+  renderPackPanels(loaded, available, callbacks, busy = false) {
+    for (const [el, packs, active] of [[this.loadedPackListEl, loaded, true], [this.availablePackListEl, available, false]]) {
+      el.replaceChildren()
+      if (!packs.length) {
+        const row = document.createElement('li'); row.className = 'pack-empty'
+        row.textContent = t(active ? 'packNoneLoaded' : 'packNoneAvailable'); el.append(row)
+      }
+      packs.forEach((pack, index) => {
+        const row = document.createElement('li'); row.dataset.packId = pack.id
+        const name = document.createElement('span'); name.className = 'pack-name'; name.textContent = pack.name
+        const origin = document.createElement('span'); origin.className = 'pack-origin'; origin.textContent = t(pack.file ? 'packBuiltIn' : 'packLocal')
+        const actions = document.createElement('div'); actions.className = 'pack-actions'
+        const add = (action, key, handler, disabled = false, label = t(key)) => {
+          const button = document.createElement('button'); button.type = 'button'; button.dataset.action = action
+          button.textContent = label; button.title = t(key); button.setAttribute('aria-label', t(key) + ' · ' + pack.name)
+          button.disabled = busy || disabled; button.onclick = handler; actions.append(button)
+        }
+        if (active) {
+          add('up', 'packUp', () => callbacks.onMove(pack.id, -1), index === 0, '↑')
+          add('down', 'packDown', () => callbacks.onMove(pack.id, 1), index === packs.length - 1, '↓')
+          add('unload', 'packUnload', () => callbacks.onUnload(pack.id))
+        } else add('load', 'packLoad', () => callbacks.onLoad(pack.id))
+        row.append(name, origin, actions); el.append(row)
+      })
+    }
+    document.getElementById('loadedPackCount').textContent = loaded.length
+    document.getElementById('availablePackCount').textContent = available.length
+    document.getElementById('unloadAllPacks').disabled = busy || !loaded.length
+    document.getElementById('packSummary').textContent = loaded.length ? t('packCount', { n: loaded.length }) : t('packVanilla')
   }
 
-  _renderLoadedPacks(loaded, callbacks) {
-    const el = this.loadedPackListEl
-    if (!el) return
-    if (!loaded || !loaded.length) {
-      el.innerHTML = `<li class="pack-empty">${t('packNoneLoaded')}</li>`
-      return
-    }
-    el.innerHTML = loaded
-      .map(
-        (name, i) => `
-        <li data-name="${escapeHtml(name)}">
-          <span class="pack-name">${escapeHtml(name)}</span>
-          <span class="pack-actions">
-            <button data-action="up" title="${t('packUp')}" ${i === 0 ? 'disabled' : ''}>↑</button>
-            <button data-action="down" title="${t('packDown')}" ${i === loaded.length - 1 ? 'disabled' : ''}>↓</button>
-            <button data-action="unload" class="unload-btn" title="${t('packUnload')}">${t('packUnload')}</button>
-          </span>
-        </li>`
-      )
-      .join('')
-    el.querySelectorAll('button').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const name = btn.closest('li').getAttribute('data-name')
-        const action = btn.getAttribute('data-action')
-        if (action === 'up') callbacks.onMove(name, -1)
-        else if (action === 'down') callbacks.onMove(name, 1)
-        else if (action === 'unload') callbacks.onUnload(name)
-      })
-    })
+  setPackStatus(key, vars, error = false) {
+    this._packStatus = { key, vars, error }
+    const el = document.getElementById('packStatus')
+    el.textContent = t(key, vars); el.dataset.error = String(error)
   }
 
-  _renderAvailablePacks(loaded, available, callbacks) {
-    const el = this.availablePackListEl
-    if (!el) return
-    const loadedSet = new Set(loaded || [])
-    const avail = (available || []).filter((p) => !loadedSet.has(p.name))
-    if (!avail.length) {
-      el.innerHTML = `<li class="pack-empty">${t('packNoneAvailable')}</li>`
-      return
-    }
-    el.innerHTML = avail
-      .map(
-        (p) => `
-        <li data-name="${escapeHtml(p.name)}">
-          <span class="pack-name">${escapeHtml(p.name)}</span>
-          <button data-action="load" class="unload-btn">${t('packLoad')}</button>
-        </li>`
-      )
-      .join('')
-    el.querySelectorAll('button[data-action="load"]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const name = btn.closest('li').getAttribute('data-name')
-        const pack = available.find((p) => p.name === name)
-        if (pack) callbacks.onLoad(pack)
-      })
-    })
+  refreshPackStatus() {
+    if (this._packStatus) this.setPackStatus(this._packStatus.key, this._packStatus.vars, this._packStatus.error)
   }
+
 }
 
 function escapeHtml(s) {
