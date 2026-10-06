@@ -69,13 +69,17 @@ npm run dev
 
 项目里自带一个测试文件 `samples/demo.litematic`（一个小房子），可以直接拖进网页测试。
 
-点击预览器工具栏中“隐藏界面”和“切换语言”之间的检查清单按钮，即可在新标签页打开[渲染检查页](http://127.0.0.1:5173/scripts/entity-preview.html)。支持“全部 / 方块 / 生物 / 实体”分类、中文名或 ID 搜索、分页和暂停动画；本地和 GitHub Pages 发布版均可使用。
+点击预览器工具栏中“隐藏界面”和“切换语言”之间的检查清单按钮，即可在新标签页打开[渲染检查页](http://127.0.0.1:5173/scripts/entity-preview.html)。支持“全部 / 方块 / 生物 / 实体”分类、中英文名称或 ID 搜索、分页、暂停动画和中英界面切换；本地和 GitHub Pages 发布版均可使用。
 
-目录包含当前原版资源的 1,289 个方块、85 种已支持生物，以及船、矿车、物品展示框、盔甲架四类实体。点击卡片打开可旋转、缩放的模型详情；同一种生物的颜色、皮肤、姿态和持续特效可组合切换，船包含 22 种木材与箱船组合，展示框可筛选 1,658 种物品。门、床和双层植物默认显示全部，可切换单独部分；插蜡烛蛋糕合并到蛋糕卡片，挂墙旗帜合并到对应颜色的旗帜卡片。盔甲架默认隐藏手臂。
+目录包含当前原版资源的 1,289 个方块（合并为 1,167 张卡片）、85 种已支持生物，以及船、矿车、物品展示框、盔甲架四类实体。点击卡片打开可旋转、缩放的模型详情；同一种生物的颜色、皮肤、姿态和持续特效可组合切换，船包含 22 种木材与箱船组合，展示框可筛选 1,658 种物品。门、床和双层植物默认显示全部，可切换单独部分；蜡烛蛋糕、告示牌/悬挂式告示牌/旗帜/头颅/火把/珊瑚扇的挂墙形态、炼药锅内容物、所有盆栽分别合并到对应卡片。盔甲架默认隐藏手臂。
+
+每张卡片可切换世界形态、对应物品（生物为刷怪蛋）和展示框视图；40 种支持幼年形态的生物可切换年龄。没有对应物品或刷怪蛋的对象会显示说明。物品视图与展示框共用资源包物品模型及 `display.fixed` 变换。水/岩浆提供自动、静止和八个水平流向；钟提供敲钟演示，附魔台可展开书本，潮涌核心可切换激活状态和眼睛。
 
 方块选项合并资源包模型声明与 [26.3 游戏生成的状态报告（mcmeta 归档）](https://github.com/misode/mcmeta/blob/26.3-summary/blocks/data.json)，包含 505 种可含水方块（另兼容旧版 chain ID）以及墙的“不显示 / 低 / 高”连接状态。方块网格、流体与特殊方块实体共用主预览器的渲染路径。空气等不可见方块保留目录项并标明原因；检查页显示的是当前渲染器的能力，仍受下文已知外观差异的限制。
 
-名称来自 Minecraft 26.3 官方 `zh_cn.json`，检查页默认使用内置 XK 材质包，也可切换原版；显式选择原版后，刷新保留该选择。更新默认资源版本后运行 `node scripts/gen-inspection-data.mjs <版本>`，重新生成目录、状态报告与官方译名。
+名称来自 Minecraft 26.3 官方 `zh_cn.json` 和 `en_us.json`，检查页默认使用内置 XK 材质包，也可切换原版；语言与资源包选择通过 URL 保留。更新默认资源版本后运行 `node scripts/gen-inspection-data.mjs <版本>`，重新生成目录、状态报告与官方译名。
+
+特殊方块对照 26.3 的 `BellModel`、`BannerRenderer`、`TheEndPortalRenderer`、`TheEndGatewayRenderer`、附魔台及潮涌核心渲染器。钟补全钟体，旗面绕横杆摆动，展示框旗帜遵循物品固定视角变换；末地传送门使用上下水平面，折跃门使用六面体，二者使用[官方末地传送门着色器](https://github.com/misode/mcmeta/blob/26.3-assets/assets/minecraft/shaders/core/rendertype_end_portal.fsh)的投影采样与分层星空。通用动画纹理支持 `.mcmeta` 的帧顺序、逐帧时长、帧尺寸和颜色插值，因此水、岩浆、火焰、下界传送门等贴图按原版帧表播放。检查页暂停按钮同时暂停贴图、方块和实体动画。
 
 ### 生物渲染对照记录
 
@@ -91,7 +95,9 @@ npm run dev
 
 时间按每秒 20 tick 推进；从已保存 NBT 和结构中的水方块选择姿态。随机待机的起点使用稳定种子，无法还原存档中未保存的客户端动画相位。没有持续待机动作的生物保持原版静止姿态；不模拟 AI、移动、攻击、粒子、临时事件或末影龙的历史飞行轨迹。
 
-仍确认存在的差异：幼体目前沿用成年模型；寒冷/温暖牛、猪、鸡等变种目前只切换贴图，未切换专用几何；村民帽子尚未读取资源包的 hat 元数据；盔甲、鞍具、马铠、狼铠、手持物、末影人搬运方块、拴绳及乘骑组合尚未完整渲染。静态投影也不能复现游戏中的动态光照和实体之间的交互。这些项目不计为本轮已完成的持续特效/待机动画。
+幼年形态使用 26.3 的 27 套独立模型、专用贴图及美西螈/骆驼/犰狳待机关键帧；嗅探兽和快乐恶魂使用原版缩放规则，快乐恶魂保留幼体内芯。猫、狼、狐狸的幼年坐姿/睡姿也按新版模型处理。生成数据记录了[客户端源码镜像](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/model/animal/cow/babycowmodel/)的具体 URL 和 SHA-256；运行 `node scripts/gen-baby-models.mjs --fetch`、`node scripts/gen-baby-animations.mjs --fetch` 可重新获取并转录。
+
+仍确认存在的差异：寒冷/温暖牛、猪、鸡等变种目前只切换贴图，未切换专用几何；村民帽子尚未读取资源包的 hat 元数据；盔甲、鞍具、马铠、狼铠、手持物、末影人搬运方块、拴绳及乘骑组合尚未完整渲染。静态投影也不能复现游戏中的动态光照和实体之间的交互。检查页的敲钟、翻书和激活潮涌核心为显式演示选项；不模拟玩家靠近、潮涌核心框架检测、折跃门临时光束或粒子。
 
 验证命令（需先执行 `npm run setup` 安装默认资源）：
 
@@ -100,7 +106,8 @@ node scripts/verify-entities.mjs  # 全部生物/状态、真实贴图、绑定�
 node scripts/verify-breeze.mjs   # 风层几何、UV、透明排序与滚动
 node scripts/verify-shulker.mjs  # 共用潜影盒几何回归
 node scripts/verify-waxed-items.mjs  # XK 的 60 种涂蜡物品、展示框描边与原版回退
-node scripts/verify-render-inspection.mjs  # 目录与译名、525 个实体状态、多格组合、含水/墙、旗帜对齐和船桨
+node scripts/verify-render-inspection.mjs  # 目录与译名、605 个实体状态、多格组合、含水/墙、旗帜对齐和船桨
+node scripts/verify-special-rendering.mjs  # 特殊方块、分组、流向、40 种幼体及变种、1,227 个对应物品、中英文
 npm run build
 ```
 
@@ -129,6 +136,9 @@ src/
   entityAppearance.js  生物皮肤、NBT 状态和附加图层
   entityAnimations.js / entityAnimationData.js   原版待机公式与关键帧
   entityModelData.js / extraEntityModels.js   实体模型数据
+  entityBabies.js / babyEntityModels.js / babyAnimationData.js   26.3 幼年模型与动画
+  blockEffects.js      钟、附魔台、潮涌核心及末地传送门着色器
+  textureAnimation.js  原版动画贴图帧表与插值
   assets.js            资源提供者（默认资源 + 资源包覆盖）
   ui.js                界面更新
   i18n.js              中英双语字典

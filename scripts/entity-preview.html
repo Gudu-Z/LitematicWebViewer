@@ -9,27 +9,28 @@
 </head>
 <body>
   <header>
-    <div class="heading"><a href="../" aria-label="返回预览器">←</a><h1>渲染检查</h1><span class="tag">模型图鉴</span></div>
+    <div class="heading"><a href="../" aria-label="返回预览器">←</a><h1 data-i18n="渲染检查">渲染检查</h1><span class="tag" data-i18n="模型图鉴">模型图鉴</span></div>
     <div class="toolbar">
-      <label class="sr-only" for="scope">分类</label>
-      <select id="scope"><option value="all">全部</option><option value="block">方块</option><option value="mob">生物</option><option value="entity">实体</option></select>
+      <label class="sr-only" for="scope" data-i18n="分类">分类</label>
+      <select id="scope"><option value="all" data-i18n="全部">全部</option><option value="block" data-i18n="方块">方块</option><option value="mob" data-i18n="生物">生物</option><option value="entity" data-i18n="实体">实体</option></select>
       <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索中文名或 ID" aria-label="搜索方块、生物、实体或展示框物品" autocomplete="off"></label>
-      <label class="sr-only" for="pack">资源包</label>
-      <select id="pack"><option value="xk">XK 材质包</option><option value="vanilla">原版材质</option></select>
-      <button id="pause" type="button" aria-pressed="false">暂停动画</button>
+      <label class="sr-only" for="pack" data-i18n="资源包">资源包</label>
+      <select id="pack"><option value="xk" data-i18n="XK 材质包">XK 材质包</option><option value="vanilla" data-i18n="原版材质">原版材质</option></select>
+      <button id="language" type="button" aria-label="切换语言">English</button>
+      <button id="pause" type="button" aria-pressed="false" data-i18n="暂停动画">暂停动画</button>
     </div>
   </header>
   <main>
-    <div class="summary"><p id="status" role="status">正在加载模型目录…</p><span>点击卡片查看状态与变种</span></div>
+    <div class="summary"><p id="status" role="status" data-i18n="正在加载模型目录…">正在加载模型目录…</p><span data-i18n="点击卡片查看状态与变种">点击卡片查看状态与变种</span></div>
     <div id="grid" aria-label="渲染对象列表" aria-busy="true"></div>
-    <p id="empty" hidden>没有找到匹配的对象，请尝试其他名称或切换分类。</p>
-    <nav class="pagination" aria-label="分页"><button id="previous" type="button">← 上一页</button><span id="page-label"></span><button id="next" type="button">下一页 →</button></nav>
+    <p id="empty" hidden data-i18n="没有找到匹配的对象，请尝试其他名称或切换分类。">没有找到匹配的对象，请尝试其他名称或切换分类。</p>
+    <nav class="pagination" aria-label="分页"><button id="previous" type="button" data-i18n="← 上一页">← 上一页</button><span id="page-label"></span><button id="next" type="button" data-i18n="下一页 →">下一页 →</button></nav>
   </main>
   <dialog id="detail" aria-labelledby="detail-title">
     <div class="detail-heading"><div><span id="detail-category" class="eyebrow"></span><h2 id="detail-title"></h2><p id="detail-id"></p></div><button id="close-detail" type="button" aria-label="关闭详情">✕</button></div>
     <div class="detail-body">
-      <div class="model-column"><div id="detail-stage" aria-label="可旋转的模型预览"></div><p id="model-message" role="status"></p><div class="model-tools"><span>拖动旋转 · 滚轮缩放</span><button id="reset-view" type="button">重置视角</button></div></div>
-      <section class="state-panel" aria-label="模型状态"><h3>状态与变种</h3><div id="state-fields"></div><div id="item-fields" hidden><label for="item-search">展示框物品</label><input id="item-search" type="search" placeholder="筛选物品名称" aria-label="筛选展示框物品"><select id="item-select" aria-label="展示框物品"></select></div><button id="reset-state" type="button">恢复默认状态</button></section>
+      <div class="model-column"><div id="detail-stage" aria-label="可旋转的模型预览"></div><p id="model-message" role="status"></p><div class="model-tools"><span data-i18n="拖动旋转 · 滚轮缩放">拖动旋转 · 滚轮缩放</span><button id="reset-view" type="button" data-i18n="重置视角">重置视角</button></div></div>
+      <section class="state-panel" aria-label="模型状态"><h3 data-i18n="状态与变种">状态与变种</h3><div class="state-field"><label for="view-mode" data-i18n="查看方式">查看方式</label><select id="view-mode"><option value="world" data-i18n="世界形态">世界形态</option><option value="item" data-i18n="物品形态">物品形态</option><option value="frame" data-i18n="展示框内">展示框内</option></select></div><div id="state-fields"></div><div id="item-fields" hidden><label for="item-search" data-i18n="展示框物品">展示框物品</label><input id="item-search" type="search" placeholder="筛选物品名称" aria-label="筛选展示框物品"><select id="item-select" aria-label="展示框物品"></select></div><button id="reset-state" type="button" data-i18n="恢复默认状态">恢复默认状态</button></section>
     </div>
   </dialog>
   <script type="module" src="./inspection.js"></script>

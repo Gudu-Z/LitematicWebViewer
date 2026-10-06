@@ -141,7 +141,8 @@ for (const [facing, dx, dz] of [['north', 0, -1], ['south', 0, 1], ['west', -1, 
   const delta = flagCenter.clone().sub(bar.getCenter(new THREE.Vector3()))
   assert.ok(Math.abs(box.max.y - 20.5 / 24) < 1e-6)
   assert.ok(Math.abs(box.max.y - bar.max.y) < 1e-6)
-  assert.ok(Math.abs(delta.x * dx + delta.z * dz - 1.5 / 24) < 1e-6)
+  const restingPitch = -.0025 * Math.PI
+  assert.ok(Math.abs(delta.x * dx + delta.z * dz - (1.5 / 24 - 5 / 6 * Math.sin(restingPitch))) < 1e-6)
   target.bannersGroup.traverse(o => o.material?.dispose()); flagTexture.dispose()
 }
 

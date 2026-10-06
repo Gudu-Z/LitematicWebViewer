@@ -381,21 +381,19 @@ function potBaseModel() {
 }
 SPECIAL_MODELS.decorated_pot = (p) => ({ model: potBaseModel(), variant: { y: FACING_Y[String(p.facing || 'north')] || 0 }, texSize: 32 })
 
-// 末地传送门/末地折跃门（BER，无 JSON 几何）：原版 AbstractEndPortalRenderer.submitCube
-// 就是一个满覆盖立方体（FROM(0,0,0)..TO(1,1,1)），六个面都贴 entity/end_portal/end_portal
-// 星空贴图（256×256，透明感由原版着色器实现，这里用不透明整张贴图近似）。
-// 折跃门的「光束」是瞬态特效（实体穿过时才有），此处略去，只画门体。
-function endPortalModel() {
+// EndPortalBlockEntity 仅绘制 y=3/8 和 3/4 的下/上表面；折跃门绘制完整立方体。
+// special 材质标记交给 renderer 使用原版屏幕投影多层星空着色器。
+function endPortalModel(gateway = false) {
   const f = { uv: [0, 0, 16, 16], texture: '#portal' }
   return {
-    textures: { portal: 'entity/end_portal/end_portal' },
+    textures: { portal: gateway ? 'special/end_gateway' : 'special/end_portal' },
     elements: [
-      { from: [0, 0, 0], to: [16, 16, 16], faces: { up: f, down: f, north: f, south: f, west: f, east: f } },
+      { from: [0, gateway ? 0 : 6, 0], to: [16, gateway ? 16 : 12, 16], faces: gateway ? { up: f, down: f, north: f, south: f, west: f, east: f } : { up: f, down: f } },
     ],
   }
 }
 SPECIAL_MODELS.end_portal = () => ({ model: endPortalModel(), variant: {}, texSize: 16 })
-SPECIAL_MODELS.end_gateway = () => ({ model: endPortalModel(), variant: {}, texSize: 16 })
+SPECIAL_MODELS.end_gateway = () => ({ model: endPortalModel(true), variant: {}, texSize: 16 })
 
 // 移动中的活塞（moving_piston 方块实体，BER）：只在活塞动画约 2 tick 内存在，几乎不会出现在
 // 投影里。这里至少画成可识别的活塞头——复刻原版 template_piston_head 几何（16×16×4 头板 +
@@ -458,7 +456,7 @@ function conduitModel() {
     ],
   }
 }
-SPECIAL_MODELS.conduit = () => ({ model: conduitModel(), variant: {}, texSize: [32, 16] })
+SPECIAL_MODELS.conduit = p => ({ model: p.preview_active === 'true' ? { elements: [], textures: {} } : conduitModel(), variant: {}, texSize: [32, 16] })
 
 // 盾牌（BER）：原版 ShieldModel 的 plate 是 12×22×1（addBox(-6,-11,-2,12,22,1)，texOffs 0,0，
 // 64×64 贴图），另有 2×6×6 手柄（texOffs 26,0，藏在板后、正面看不到，此处略去）。ModelPart.Cube

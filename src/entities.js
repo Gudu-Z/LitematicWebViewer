@@ -18,6 +18,7 @@ import { ENTITY_MODELS } from './entityModelData.js'
 import { EXTRA_MODELS } from './extraEntityModels.js'
 import { getMobAppearance } from './entityAppearance.js'
 import { applyIdlePose, IDLE_ANIMATED_MOBS } from './entityAnimations.js'
+import { applyBabyPose } from './entityBabies.js'
 import { compileModel, quadsToEntityMesh, createEntityRig, sortTransparentFaces } from './entityModel.js'
 export { compileModel, quadsToEntityMesh } from './entityModel.js'
 
@@ -398,6 +399,24 @@ async function buildFrameItem(item, resolver, assets) {
     }
   }
   if (!baked || !baked.quads || !baked.quads.length) {
+    if (name.endsWith('_banner')) {
+      // BannerModelRenderer.renderAsItem 使用立地旗模型，rotation=0；旗面不能遗漏，
+      // 也不能把方块实体的 rotation 默认值再次叠加到 display.fixed 的 180° 上。
+      const body = await resolver.resolve('minecraft:' + name, { rotation: '0' })
+      const canvas = bakeModel({ textures: { all: 'entity/banner/base' }, elements: [
+        cuboidElement([4 / 3, 8 / 3, 26 / 3], [44 / 3, 88 / 3, 28 / 3], 0, 0),
+      ] }, {}, 64)
+      // 原版旗面 UV 属于未缩放的 20×40×1 模型，几何才缩放 2/3。
+      const flag = bakeModel({ textures: { all: 'entity/banner/base' }, elements: [cuboidElement([-10, -40, 1], [10, 0, 2], 0, 0)] }, {}, 64)
+      canvas.quads.forEach((q, i) => { q.uvs = flag.quads[i].uvs })
+      baked = { quads: [...body.quads, ...canvas.quads] }
+      const base = await resolver.loadModel('item/template_banner')
+      fixedRot = fixedRotQuaternion(base?.display?.fixed?.rotation || [0, 180, 0])
+      fixedScale = base?.display?.fixed?.scale || [.5, .5, .5]
+      fixedTrans = (base?.display?.fixed?.translation || [0, 0, 0]).map(v => v / 16)
+    }
+  }
+  if (!baked || !baked.quads || !baked.quads.length) {
     // 原版铜傀儡雕像由特殊渲染器绘制；资源包若提供普通物品模型，应优先使用上面解析的模型。
     // 无 JSON 几何时才回退到实体模型：fixed 上移 3/16、居中 -0.5，总位移 -0.3125。
     if (name.endsWith('copper_golem_statue')) {
@@ -485,6 +504,18 @@ async function buildFrameItem(item, resolver, assets) {
     return holder
   }
   return null
+}
+
+// 单独检查物品也使用展示框同一条物品模型路径，保留资源包的物品模型与 display.fixed。
+export async function buildItemPreview(item, assets) {
+  const model = await buildFrameItem(item, new BlockModelResolver(assets), assets)
+  if (!model) return null
+  const root = new THREE.Group()
+  root.rotation.y = Math.PI
+  if (model.userData.fixedRot) model.quaternion.copy(model.userData.fixedRot)
+  if (model.userData.fixedTrans) model.position.fromArray(model.userData.fixedTrans).multiplyScalar(.5)
+  root.add(model)
+  return root
 }
 
 // 盔甲架的一个立方体部件：按原版 ModelPart.Cuboid 的 auto-UV 布局生成各面贴图。
@@ -710,6 +741,7 @@ async function buildMob(entity, id, assets, data) {
     const update = age => {
       mesh.userData.resetPose()
       applyIdlePose(mesh.userData.parts, id, state, age)
+      applyBabyPose(mesh, id, state.nbt || {})
       if (definition.offset) map.offset.fromArray(definition.offset(age))
       if (definition.opacity) material.opacity = definition.opacity(age)
       if (definition.animatedTint) material.color.setHex(definition.animatedTint(age))

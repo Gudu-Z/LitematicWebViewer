@@ -1,6 +1,7 @@
 // 原版实体的外观、NBT 变种与 feature layer 选择。
 import { ENTITY_MODELS } from './entityModelData.js'
 import { EXTRA_MODELS } from './extraEntityModels.js'
+import { babyModel, isBaby, BABY_MOBS } from './entityBabies.js'
 
 // 生物实体 id -> [模型键, 贴图键]
 export const MOB_TABLE = {
@@ -293,5 +294,34 @@ export function getMobAppearance(entity, id, data) {
     if ((name === 'left_horn' && n.HasLeftHorn != null && !n.HasLeftHorn) || (name === 'right_horn' && n.HasRightHorn != null && !n.HasRightHorn)) node.cuboids = []
   })
   if (id === 'armadillo' && state.rolledUp) model = transformEntityModel(model, (node, name) => { if (name === 'body') node.cuboids = [] })
+  if (BABY_MOBS.has(id) && isBaby(n)) {
+    const baby = babyModel(id)
+    state.babyModel = !!baby
+    const babyTexture = key => {
+      if (id === 'sniffer') return key
+      if (id === 'fox') key = key.replace('snow_fox', 'fox_snow')
+      if (id === 'cat') key = key.replace('/all_black', '/cat_all_black')
+      if (key.includes('/type/')) return key.replace('/type/', '/baby/')
+      return key + '_baby'
+    }
+    texture = babyTexture(texture)
+    if (baby) { model = structuredClone(baby); scale = baby.scale || 1 }
+    if (id === 'happy_ghast') {
+      model = structuredClone(model)
+      model.parts.body.children.inner_body = { pivot: [0, 8, 0], rot: [0, 0, 0], children: {},
+        cuboids: [{ u: 0, v: 32, x: -8, y: -16, z: -8, dx: 16, dy: 16, dz: 16, dil: [-.5, -.5, -.5] }] }
+    }
+    for (let i = layers.length - 1; i >= 0; i--) {
+      const layer = layers[i]
+      if (layer.name === 'undercoat') { layers.splice(i, 1); continue }
+      layer.texture = babyTexture(layer.texture)
+      layer.model = layer.name === 'outer_layer' ? dilateEntityModel(model, .25) : model
+      if (layer.name === 'wool') layer.model = dilateEntityModel(model, .01)
+      if (layer.name === 'collar' && id === 'cat') layer.model = dilateEntityModel(model, .01)
+    }
+    if (id === 'llama' || id === 'trader_llama') model = transformEntityModel(model, (node, name) => { if (name.endsWith('_chest') && !n.ChestedHorse) node.cuboids = [] })
+    if (id === 'armadillo') model = transformEntityModel(model, (node, name) => { if (name === (state.rolledUp ? 'body' : 'cube')) node.cuboids = [] })
+    if (id === 'goat') model = transformEntityModel(model, (node, name) => { if ((name.includes('left_horn') && n.HasLeftHorn === 0) || (name.includes('right_horn') && n.HasRightHorn === 0)) node.cuboids = [] })
+  }
   return { model, texture, scale, tint, layers, state }
 }

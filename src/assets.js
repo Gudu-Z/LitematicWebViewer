@@ -3,6 +3,7 @@
 // 加载资源包（.zip，通过 JSZip）后，资源包中的同名资源会覆盖默认资源（复刻 Minecraft 的覆盖规则）。
 
 import * as THREE from 'three'
+import { animateTexture } from './textureAnimation.js'
 
 // JsonUnbakedModel -> JsonHelper.deserialize 使用 Gson adapter 读取一个对象，
 // 不要求对象后立即 EOF。XK 的四个 waxed_*cut_copper 模型尾部多一个 }，
@@ -35,10 +36,12 @@ export class AssetProvider {
     this.baseUrl = 'assets/minecraft/'
     this.textureCache = new Map() // 纹理 key -> Promise<THREE.Texture|null>
     this.jsonCache = new Map() // 路径 -> Promise<object|null>
+    this.animatedTextures = new Set()
   }
 
   // 清空两个缓存（资源包集合变化时，需丢弃旧的模型/贴图缓存以便重新解析）
   clearCaches() {
+    this.animatedTextures.clear()
     this.textureCache.clear()
     this.jsonCache.clear()
   }
@@ -168,7 +171,9 @@ export class AssetProvider {
     // 图片解码失败（如大量并发展示框同时加载贴图时浏览器的瞬时失败）不应让整个实体渲染抛错，
     // 返回 null 让该贴图缺失、其余照常渲染。
     try {
-      return await textureFromBlob(blob, animated)
+      const texture = await textureFromBlob(blob, animated)
+      if (texture.userData.updateAnimation) this.animatedTextures.add(texture)
+      return texture
     } catch {
       return null
     }
@@ -180,16 +185,20 @@ export class AssetProvider {
     for (const p of this.packs) {
       const entry = p.zip.file('assets/minecraft/' + rel)
       if (entry) {
-        try { return !!JSON.parse(await entry.async('string')).animation } catch { return false }
+        try { return JSON.parse(await entry.async('string')).animation || false } catch { return false }
       }
     }
     try {
       const resp = await fetch(this.baseUrl + rel)
       if (!resp.ok) return null
-      return !!JSON.parse(await resp.text()).animation
+      return JSON.parse(await resp.text()).animation || false
     } catch {
       return null
     }
+  }
+
+  updateAnimations(age) {
+    for (const texture of this.animatedTextures) texture.userData.updateAnimation(age)
   }
 }
 
@@ -198,20 +207,10 @@ function textureFromBlob(blob, animated) {
     const url = URL.createObjectURL(blob)
     const img = new Image()
     img.onload = () => {
-      let source = img
-      // 动画贴图是「宽×宽 N 帧」的竖向长条（如 16×48 灯笼、16×512 水）；裁取第一帧，
-      // 避免整条被压到面上。优先按 .mcmeta 的 animation 字段判定；没有 .mcmeta 时用
-      // 宽高比启发式（>=4 帧）兜底，但 64×128 单张生物贴图（女巫/炽足兽）不误裁。
+      // 资源包可定义横向/竖向帧表、不同帧时长和颜色插值。
       const heuristic = img.height > img.width && img.height % img.width === 0 && img.height / img.width >= 4
-      if (img.height > img.width && (animated === true || (animated == null && heuristic))) {
-        const w = img.width
-        const c = document.createElement('canvas')
-        c.width = w
-        c.height = w
-        c.getContext('2d').drawImage(img, 0, 0, w, w, 0, 0, w, w)
-        source = c
-      }
-      const tex = new THREE.Texture(source)
+      const tex = new THREE.Texture(img)
+      if (animated || (animated == null && heuristic)) animateTexture(tex, img, animated || {})
       tex.magFilter = THREE.NearestFilter
       tex.minFilter = THREE.NearestFilter
       tex.generateMipmaps = false

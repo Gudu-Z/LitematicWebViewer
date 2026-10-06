@@ -1,31 +1,45 @@
 import { BLOCK_IDS, ITEM_IDS, ZH_NAMES } from './inspection-data.js'
 import { ALL_MOB_FIXTURES } from './entity-fixtures.mjs'
 import { BLOCK_STATES } from './inspection-block-states.js'
+import { EN_NAMES } from './inspection-english.js'
+import { BABY_MOBS } from '../src/entityBabies.js'
 
 export { BLOCK_IDS, ITEM_IDS }
 export const CATEGORY_NAMES = { block: '方块', mob: '生物', entity: '实体' }
-export function officialName(id, kind = 'block') {
+export let language = 'zh'
+export function setLanguage(lang) { language = lang === 'en' ? 'en' : 'zh' }
+export function officialName(id, kind = 'block', lang = language) {
   id = id.replace(/^minecraft:/, '')
   const alias = id.replace('_wall_banner', '_banner')
-  return ZH_NAMES[`${kind}.minecraft.${id}`] || ZH_NAMES[`block.minecraft.${alias}`]
-    || ZH_NAMES[`item.minecraft.${id}`] || ZH_NAMES[`entity.minecraft.${id}`] || '未命名对象'
+  const names = lang === 'en' ? EN_NAMES : ZH_NAMES
+  return names[`${kind}.minecraft.${id}`] || names[`block.minecraft.${alias}`]
+    || names[`item.minecraft.${id}`] || names[`entity.minecraft.${id}`] || (lang === 'en' ? id.replaceAll('_', ' ') : '未命名对象')
 }
 const entity = (id, nbt = {}) => ({ id: 'minecraft:' + id, pos: [0, 0, 0], rotation: [0, 0], nbt })
 const candleCakes = BLOCK_IDS.filter(id => id === 'candle_cake' || id.endsWith('_candle_cake'))
-const groupedBlocks = new Set([...candleCakes, ...BLOCK_IDS.filter(id => id.endsWith('_wall_banner'))])
+export function blockFamily(id) {
+  if (candleCakes.includes(id)) return 'cake'
+  if (id.startsWith('potted_')) return 'flower_pot'
+  if (id.endsWith('_cauldron')) return 'cauldron'
+  const wall = id.replace('_wall_hanging_sign', '_hanging_sign').replace('_wall_sign', '_sign')
+    .replace('_wall_banner', '_banner').replace('_wall_head', '_head').replace('_wall_skull', '_skull')
+    .replace('_wall_torch', '_torch').replace(/^wall_torch$/, 'torch').replace('_wall_fan', '_fan')
+  return BLOCK_IDS.includes(wall) ? wall : id
+}
+const families = new Map()
+for (const id of BLOCK_IDS) { const family = blockFamily(id); if (!families.has(family)) families.set(family, []); families.get(family).push(id) }
 export function blockVariants(id) {
-  if (id === 'cake') return ['cake', ...candleCakes]
-  if (id.endsWith('_banner') && !id.endsWith('_wall_banner')) return [id, id.replace('_banner', '_wall_banner')]
-  return [id]
+  return [id, ...(families.get(id) || []).filter(v => v !== id)]
 }
 export function blockIdFor(entry, values = {}) {
   return entry.variants?.includes(values.block) ? values.block : entry.id
 }
 export function blockVariantLabel(id) {
-  return id.endsWith('_banner') ? (id.endsWith('_wall_banner') ? '挂墙' : '立地') : officialName(id)
+  if (/(banner|sign|head|skull|torch|coral_fan)$/.test(id)) return id.includes('wall') ? '挂墙' : id.endsWith('hanging_sign') ? '悬挂' : '立地'
+  return officialName(id)
 }
 export const CATALOG = [
-  ...BLOCK_IDS.filter(id => !groupedBlocks.has(id)).map(id => ({ key: 'block/' + id, id, kind: 'block', name: officialName(id), variants: blockVariants(id) })),
+  ...BLOCK_IDS.filter(id => blockFamily(id) === id).map(id => ({ key: 'block/' + id, id, kind: 'block', name: officialName(id), variants: blockVariants(id) })),
   ...ALL_MOB_FIXTURES.map(fixture => ({ key: 'mob/' + fixture.id.slice(10), id: fixture.id.slice(10), kind: 'mob', name: officialName(fixture.id, 'entity'), fixture })),
   { key: 'entity/boat', id: 'boat', name: officialName('boat', 'entity'), kind: 'entity', fixture: entity('oak_boat') },
   { key: 'entity/minecart', id: 'minecart', name: officialName('minecart', 'entity'), kind: 'entity', fixture: entity('minecart') },
@@ -65,6 +79,7 @@ export function entityFields(entry) {
     if (id === 'armor_stand') f.push(bool('ShowArms', '手臂', '隐藏', '显示'), bool('Small', '体型', '正常', '小型'), bool('NoBasePlate', '底座', '显示', '隐藏'))
     return f
   }
+  if (BABY_MOBS.has(id)) f.push(state('Age', '年龄', [[0, '成年'], [-24000, '幼年']]))
   if (['pig', 'cow', 'chicken', 'frog'].includes(id)) f.push(climate())
   if (['cod', 'salmon', 'tropical_fish', 'pufferfish', 'axolotl', 'frog', 'chicken', 'bee', 'parrot'].includes(id)) f.push(environment())
   if (['cat', 'wolf', 'parrot'].includes(id)) f.push(sitting())
@@ -134,8 +149,8 @@ export function createFixture(entry, values = {}, item = '') {
   return fixture
 }
 
-const PROP_LABELS = { facing: '朝向', axis: '轴向', half: '半部', type: '类型', shape: '形状', open: '开启', powered: '供能', lit: '点亮', waterlogged: '含水', age: '生长阶段', level: '液面等级', power: '红石信号', rotation: '旋转', north: '北侧', south: '南侧', east: '东侧', west: '西侧', up: '上方连接', down: '下方连接', layers: '层数', bites: '食用次数', part: '部件', hinge: '门轴', face: '附着面', attached: '附着', persistent: '持续存在', distance: '距离', enabled: '启用', conditional: '条件制约', mode: '模式', candles: '蜡烛数量', honey_level: '蜂蜜等级', in_wall: '墙内', occupied: '占用', unstable: '不稳定', triggered: '触发', charges: '充能', eggs: '蛋数量', hatch: '孵化阶段', moisture: '湿润度', snowy: '覆雪', stage: '生长阶段', flower_amount: '花朵数量', orientation: '朝向组合', tilt: '倾斜', drag: '向下流动', hanging: '悬挂', vertical_direction: '垂直朝向', thickness: '粗细', sculk_sensor_phase: '感测阶段', shrieking: '尖啸', can_summon: '允许召唤', bloom: '绽放', berries: '浆果', bottom: '底部', delay: '延迟', locked: '锁定', inverted: '反相', note: '音高', instrument: '乐器', extended: '伸出', short: '缩短', has_book: '有书', has_record: '有唱片', has_bottle_0: '左侧药水', has_bottle_1: '中间药水', has_bottle_2: '右侧药水' }
-const VALUE_LABELS = { true: '是', false: '否', north: '北', south: '南', west: '西', east: '东', up: '上', down: '下', top: '上', bottom: '下', upper: '上半部', lower: '下半部', double: '双层', single: '单个', left: '左', right: '右', none: '无', low: '低', tall: '高', side: '侧面', straight: '直形', inner_left: '内左', inner_right: '内右', outer_left: '外左', outer_right: '外右', head: '头部', foot: '尾部', floor: '地面', wall: '墙面', ceiling: '顶面', x: '东西', y: '上下', z: '南北', compare: '比较', subtract: '减法', active: '激活', inactive: '静止', cooldown: '冷却' }
+const PROP_LABELS = { attachment: '安装方式', facing: '朝向', axis: '轴向', half: '半部', type: '类型', shape: '形状', open: '开启', powered: '供能', lit: '点亮', waterlogged: '含水', age: '生长阶段', level: '液面等级', power: '红石信号', rotation: '旋转', north: '北侧', south: '南侧', east: '东侧', west: '西侧', up: '上方连接', down: '下方连接', layers: '层数', bites: '食用次数', part: '部件', hinge: '门轴', face: '附着面', attached: '附着', persistent: '持续存在', distance: '距离', enabled: '启用', conditional: '条件制约', mode: '模式', candles: '蜡烛数量', honey_level: '蜂蜜等级', in_wall: '墙内', occupied: '占用', unstable: '不稳定', triggered: '触发', charges: '充能', eggs: '蛋数量', hatch: '孵化阶段', moisture: '湿润度', snowy: '覆雪', stage: '生长阶段', flower_amount: '花朵数量', orientation: '朝向组合', tilt: '倾斜', drag: '向下流动', hanging: '悬挂', vertical_direction: '垂直朝向', thickness: '粗细', sculk_sensor_phase: '感测阶段', shrieking: '尖啸', can_summon: '允许召唤', bloom: '绽放', berries: '浆果', bottom: '底部', delay: '延迟', locked: '锁定', inverted: '反相', note: '音高', instrument: '乐器', extended: '伸出', short: '缩短', has_book: '有书', has_record: '有唱片', has_bottle_0: '左侧药水', has_bottle_1: '中间药水', has_bottle_2: '右侧药水' }
+const VALUE_LABELS = { single_wall: '单墙', double_wall: '双墙', true: '是', false: '否', north: '北', south: '南', west: '西', east: '东', up: '上', down: '下', top: '上', bottom: '下', upper: '上半部', lower: '下半部', double: '双层', single: '单个', left: '左', right: '右', none: '无', low: '低', tall: '高', side: '侧面', straight: '直形', inner_left: '内左', inner_right: '内右', outer_left: '外左', outer_right: '外右', head: '头部', foot: '尾部', floor: '地面', wall: '墙面', ceiling: '顶面', x: '东西', y: '上下', z: '南北', compare: '比较', subtract: '减法', active: '激活', inactive: '静止', cooldown: '冷却' }
 export function blockFields(blockstate, id) {
   const props = new Map()
   const add = (key, value) => {
@@ -171,12 +186,13 @@ export function blockFields(blockstate, id) {
 export function filterCatalog(scope = 'all', query = '') {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const matches = text => terms.every(term => text.toLowerCase().includes(term))
-  const matchingItems = terms.length ? ITEM_OPTIONS.filter(item => matches(item.label + ' ' + item.value)) : []
+  const names = (id, kind) => officialName(id, kind, 'zh') + ' ' + officialName(id, kind, 'en')
+  const matchingItems = terms.length ? ITEM_OPTIONS.filter(item => matches(names(item.value, 'item') + ' ' + item.value)) : []
   return CATALOG.filter(entry => scope === 'all' || entry.kind === scope).filter(entry => {
-    const variantNames = entry.kind === 'block' ? entry.variants.map(id => officialName(id) + ' ' + blockVariantLabel(id) + ' ' + id + (id.endsWith('_wall_banner') ? ' 墙上' : '')).join(' ') : entityFields(entry).flatMap(f => f.options.map(o => o.label + ' ' + o.value)).join(' ')
-    return matches(entry.name + ' ' + entry.id + ' ' + variantNames) || (entry.key === 'entity/item_frame' && matchingItems.length > 0)
+    const variantNames = entry.kind === 'block' ? entry.variants.map(id => names(id, 'block') + ' ' + blockVariantLabel(id) + ' ' + id + (id.includes('wall') ? ' 墙上' : '')).join(' ') : entityFields(entry).flatMap(f => f.options.map(o => o.label + ' ' + o.value)).join(' ')
+    return matches(names(entry.id, entry.kind === 'block' ? 'block' : 'entity') + ' ' + entry.id + ' ' + variantNames) || (entry.key === 'entity/item_frame' && matchingItems.length > 0)
   }).map(entry => ({ entry,
-    matchedBlock: terms.length && entry.kind === 'block' ? entry.variants.find(id => matches(officialName(id) + ' ' + blockVariantLabel(id) + ' ' + id + (id.endsWith('_wall_banner') ? ' 墙上' : ''))) : undefined,
+    matchedBlock: terms.length && entry.kind === 'block' ? entry.variants.find(id => matches(names(id, 'block') + ' ' + blockVariantLabel(id) + ' ' + id + (id.includes('wall') ? ' 墙上' : ''))) : undefined,
     matchedItem: terms.length && entry.key === 'entity/item_frame' ? matchingItems[0]?.value : undefined,
   }))
 }

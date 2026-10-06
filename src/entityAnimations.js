@@ -1,6 +1,7 @@
 // 原版 *EntityModel.setAngles 的静止/待机分支，时间单位为游戏 tick。
 // 不模拟寻路、行走、攻击或临时客户端事件；关键帧来自 entityAnimationData.js。
 import { ENTITY_ANIMATIONS } from './entityAnimationData.js'
+import { BABY_ANIMATIONS } from './babyAnimationData.js'
 const PI = Math.PI, DEG = PI / 180
 const BIPEDS = new Set(['zombie', 'husk', 'drowned', 'zombie_villager', 'skeleton', 'stray', 'bogged', 'wither_skeleton', 'piglin', 'piglin_brute', 'zombified_piglin', 'giant', 'enderman'])
 export const IDLE_ANIMATED_MOBS = new Set([...BIPEDS,
@@ -13,7 +14,7 @@ export const IDLE_ANIMATED_MOBS = new Set([...BIPEDS,
 // 对齐 AnimationHelper/Transformation.Interpolations：平移 Y 翻转已由生成器完成；
 // CUBIC 使用与 MathHelper.catmullRom 相同的插值，并按原版夹取首尾帧。
 export function applyKeyframeAnimation(parts, name, seconds) {
-  const animation = ENTITY_ANIMATIONS[name]
+  const animation = ENTITY_ANIMATIONS[name] || BABY_ANIMATIONS[name]
   if (!animation) return
   const t = animation.loop ? seconds % animation.length : Math.min(seconds, animation.length)
   for (const track of animation.tracks) {
@@ -58,8 +59,9 @@ export function applyIdlePose(parts, id, state, age) {
       if (zombie) set(side + '_arm', 'y', -sign * 0.1)
     }
     if (id.includes('piglin')) {
-      set('left_ear', 'z', -PI / 6 - Math.cos(age * 0.12) * 0.08)
-      set('right_ear', 'z', PI / 6 + Math.cos(age * 0.1) * 0.08)
+      const earAngle = state.babyModel ? 5 * DEG : PI / 6
+      set('left_ear', 'z', -earAngle - Math.cos(age * 0.12) * 0.08)
+      set('right_ear', 'z', earAngle + Math.cos(age * 0.1) * 0.08)
     }
     if (id === 'enderman') for (const side of ['left', 'right']) {
       if (parts[side + '_arm']) parts[side + '_arm'].rotation.x *= 0.5
@@ -97,6 +99,12 @@ export function applyIdlePose(parts, id, state, age) {
       break
     }
     case 'cat': case 'ocelot':
+      if (state.babyModel && state.sitting) {
+        add('body', 'x', -0.43633232); move('body', 'y', 1.25); move('head', 'z', .75)
+        add('tail1', 'x', .5454154); move('tail1', 'y', 4); move('tail1', 'z', -.9)
+        move('left_hind_leg', 'z', -.9); move('right_hind_leg', 'z', -.9)
+        break
+      }
       set('tail2', 'x', 1.7278761)
       if (state.sitting) {
         set('body', 'x', PI / 4); move('body', 'y', -4); move('body', 'z', 5)
@@ -110,6 +118,16 @@ export function applyIdlePose(parts, id, state, age) {
       }
       break
     case 'wolf':
+      if (state.babyModel && state.sitting) {
+        // WolfModel.setSittingPose 的 ageScale=.5，再应用 BabyWolfModel 的躯干旋转。
+        move('body', 'y', 2); move('body', 'z', -1); set('body', 'x', -PI / 4)
+        move('tail', 'y', 4.5); move('tail', 'z', -1)
+        for (const [side, sign] of [['right', 1], ['left', -1]]) {
+          move(side + '_hind_leg', 'y', 3.35); move(side + '_hind_leg', 'z', -2.5); set(side + '_hind_leg', 'x', PI * 1.5)
+          move(side + '_front_leg', 'x', sign * .005); move(side + '_front_leg', 'y', .5); set(side + '_front_leg', 'x', 5.811947)
+        }
+        break
+      }
       if (state.sitting) {
         move('upper_body', 'y', 2); set('upper_body', 'x', PI * 2 / 5); set('upper_body', 'y', 0)
         move('body', 'y', 4); move('body', 'z', -2); set('body', 'x', PI / 4)
@@ -121,6 +139,25 @@ export function applyIdlePose(parts, id, state, age) {
       }
       break
     case 'fox':
+      if (state.babyModel) {
+        if (nbt.Sleeping) {
+          set('body', 'z', -PI / 2); set('body', 'x', -PI / 18)
+          move('body', 'y', 1.5); move('body', 'z', -1.5); move('body', 'x', -1.5)
+          set('tail', 'x', -2.1816616); move('tail', 'x', -.7); move('tail', 'z', .6); move('tail', 'y', .9)
+          move('head', 'x', -2); move('head', 'y', 2.8); move('head', 'z', -4)
+          set('head', 'x', 0); set('head', 'y', -PI * 2 / 3); set('head', 'z', Math.cos(age * .027) / 22)
+          for (const side of ['left', 'right']) { hide(side + '_front_leg'); hide(side + '_hind_leg') }
+        } else if (state.sitting) {
+          set('head', 'x', 0); set('head', 'y', 0); move('head', 'y', -.75)
+          set('body', 'x', -.959931); move('body', 'z', -2.25); move('body', 'y', 1.5)
+          set('tail', 'x', .95993114); move('tail', 'y', -.6); move('tail', 'z', -1)
+          for (const [side, sign] of [['right', 1], ['left', -1]]) {
+            set(side + '_front_leg', 'x', -PI / 12); move(side + '_front_leg', 'z', -1.5); move(side + '_front_leg', 'x', sign * .01)
+            move(side + '_hind_leg', 'z', -3.75); move(side + '_hind_leg', 'x', sign * .01)
+          }
+        }
+        break
+      }
       if (nbt.Sleeping) {
         set('body', 'z', -PI / 2); move('body', 'y', 5); set('tail', 'x', -PI * 5 / 6)
         move('head', 'x', 2); move('head', 'y', 2.99); set('head', 'x', 0); set('head', 'y', -PI * 2 / 3)
@@ -253,6 +290,10 @@ export function applyIdlePose(parts, id, state, age) {
       add('body', 'z', 0.025 * Math.sin(age * 0.1)); add('body', 'x', 0.025 * Math.cos(age * 0.1))
       break
     case 'axolotl': {
+      if (state.babyModel) {
+        applyKeyframeAnimation(parts, state.touchingWater ? 'IDLE_UNDERWATER' : 'BABY_AXOLOTL_IDLE_FLOOR', age / 20)
+        break
+      }
       if (state.touchingWater) {
         const c = Math.cos(age * 0.075), k = -0.15 + 0.075 * c
         add('body', 'x', k); move('body', 'y', -Math.sin(age * 0.075) * 0.15); add('head', 'x', -k)
@@ -273,8 +314,8 @@ export function applyIdlePose(parts, id, state, age) {
       break
     }
     case 'camel':
-      if (state.sitting) applyKeyframeAnimation(parts, 'Camel.SITTING', age / 20)
-      applyKeyframeAnimation(parts, 'Camel.IDLING', (age % (80 + state.seed % 40)) / 20)
+      if (state.sitting) applyKeyframeAnimation(parts, state.babyModel ? 'CAMEL_BABY_SIT_POSE' : 'Camel.SITTING', age / 20)
+      applyKeyframeAnimation(parts, state.babyModel ? 'CAMEL_BABY_IDLE' : 'Camel.IDLING', (age % (80 + state.seed % 40)) / 20)
       break
     case 'copper_golem': applyKeyframeAnimation(parts, 'CopperGolem.SPIN_HEAD', (age % (200 + state.seed % 41)) / 20); break
     case 'frog':
@@ -284,7 +325,7 @@ export function applyIdlePose(parts, id, state, age) {
     case 'armadillo':
       if (state.rolledUp) {
         for (const name of ['right_hind_leg', 'left_hind_leg', 'tail']) hide(name)
-        applyKeyframeAnimation(parts, 'Armadillo.SCARED', age / 20)
+        applyKeyframeAnimation(parts, state.babyModel ? 'ARMADILLO_BABY_PEEK' : 'Armadillo.SCARED', age / 20)
       } else hide('cube')
       break
     case 'parrot':

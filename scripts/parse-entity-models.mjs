@@ -2,7 +2,7 @@
 // 复刻 net.minecraft.client.model.ModelPart.Cuboid 的 UV 布局与 ModelPart 的变换约定。
 // 用法：node scripts/parse-entity-models.mjs
 import { readdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { join, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -268,10 +268,10 @@ function parseAddChilds(code, consts) {
     const p = { name, pivot: tf ? tf.pivot : [0, 0, 0], rot: tf ? tf.rot : [0, 0, 0], cuboids, children: {} }
     const receiver = (m[2] || '').trim()
     let parentPath = null
-    if (receiver === 'modelPartData' || receiver === 'root' || receiver === 'data' || /getRoot/.test(receiver)) {
-      parentPath = null
-    } else if (receiver in varPath) {
+    if (receiver in varPath) {
       parentPath = varPath[receiver]
+    } else if (receiver === 'modelPartData' || receiver === 'root' || receiver === 'data' || /getRoot/.test(receiver)) {
+      parentPath = null
     } else if (lastPath) {
       parentPath = lastPath
     }
@@ -610,6 +610,9 @@ function parsePiglin() {
 
 // ---------------------------------------------------------------- 入口
 
+// 新版 Mojang 命名模型生成器复用解析器，导入时不重写成年模型数据。
+export { parseAddChilds, extractConstants, findMethods, findTexSize, stripComments }
+if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
 const files = readdirSync(REF).filter((f) => f.endsWith('.java'))
 
 const models = {} // modelKey -> { w, h, parts }
@@ -650,4 +653,5 @@ writeFileSync(OUT, header + body, 'utf8')
 console.log('解析到的模型数量：', Object.keys(models).length)
 for (const k of Object.keys(models).sort()) {
   console.log(`  ${k}  ${models[k].w}x${models[k].h}  parts=${Object.keys(models[k].parts).join(',')}`)
+}
 }

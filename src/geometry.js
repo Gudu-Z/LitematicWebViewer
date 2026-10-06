@@ -319,7 +319,9 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
   if (topShown) {
     // 顶面：有水平流速时用 flow 贴图并按流向旋转（水源、流动水、岩浆都适用）；
     // 无流速（静止水体）用 still 贴图。原版正是按 getVelocity 的 x/z 分量是否为零来切换。
-    const angle = flowAngle(palette, fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible)
+    const previewFlow = palette[gi].properties?.preview_flow
+    const directions = { north: -Math.PI / 2, south: Math.PI / 2, east: 0, west: Math.PI, northeast: -Math.PI / 4, southeast: Math.PI / 4, southwest: Math.PI * .75, northwest: -Math.PI * .75 }
+    const angle = previewFlow && previewFlow !== 'auto' ? (directions[previewFlow] ?? null) : flowAngle(palette, fluidOf, blocks, lx, lz, ly, gi, grid, kind, visible)
     let topTex = stillTex
     let topUVs = [[0, 1], [1, 1], [0, 0], [1, 0]]
     if (angle !== null) {

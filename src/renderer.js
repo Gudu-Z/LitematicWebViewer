@@ -7,6 +7,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { buildFaceGroups, fluidOfEntry, fluidHeight } from './geometry.js'
 import { buildEntityMesh, buildCopperGolemStatueMesh } from './entities.js'
 import { bakeModel } from './modelBaker.js'
+import { addBlockEffects, portalMaterial, animateObject } from './blockEffects.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
 
@@ -485,6 +486,7 @@ export class Renderer {
     const dt = Math.min((now - this._lastTime) / 1000, 0.1)
     this._lastTime = now
     this._applyMovement(dt)
+    this._assets?.updateAnimations(now / 50)
     this._updateUnderwaterFog()
     // 飞行模式下不跑 OrbitControls.update()——它会 lookAt(target) 覆盖掉原地转头的旋转
     if (this.moveMode === 'orbit') this.controls.update()
@@ -601,13 +603,15 @@ export class Renderer {
   clearBlocks(disposeTextures = false) {
     while (this.group.children.length) {
       const child = this.group.children.pop()
-      child.geometry?.dispose()
-      const mats = Array.isArray(child.material) ? child.material : [child.material]
-      mats.forEach((m) => {
-        if (m) {
-          if (disposeTextures) m.map?.dispose()
-          m.dispose()
-        }
+      child.traverse(object => {
+        object.geometry?.dispose()
+        const mats = Array.isArray(object.material) ? object.material : [object.material]
+        mats.forEach((m) => {
+          if (m) {
+            if (disposeTextures) m.map?.dispose()
+            m.dispose()
+          }
+        })
       })
     }
   }
@@ -789,6 +793,13 @@ export class Renderer {
         group.rotation.y = (a * Math.PI) / 180
       }
       this.bannersGroup.add(group)
+      // BannerFlagBlockModel：旗面绕横杆处轻摆，位置相位由方块坐标决定。
+      const resting = mesh.position.clone(), pivot = resting.clone().add(new THREE.Vector3(0, 5 / 6, 0))
+      animateObject(mesh, age => {
+        const phase = ((b.x * 7 + b.y * 9 + b.z * 13 + age) % 100) / 100
+        mesh.rotation.x = (-.0125 + .01 * Math.cos(Math.PI * 2 * phase)) * Math.PI
+        mesh.position.copy(resting).sub(pivot).applyAxisAngle(new THREE.Vector3(1, 0, 0), mesh.rotation.x).add(pivot)
+      })
     }
   }
 
@@ -1046,6 +1057,8 @@ export class Renderer {
   }
 
   async _buildBlockMeshes(data, assets, onProgress, filter) {
+    this._assets = assets
+    await addBlockEffects(this.group, data, assets, filter)
     const { palette, blocks, bounds } = data
 
     const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45), filter)
@@ -1059,6 +1072,10 @@ export class Renderer {
     let loaded = 0
     await Promise.all(
       texKeys.map(async (gKey) => {
+        if (gKey.startsWith('special/end_')) {
+          materials.set(gKey, await portalMaterial(assets, gKey === 'special/end_gateway'))
+          return
+        }
         // 组键可能带强度后缀（如 redstone_dust_dot|p15）
         const sep = gKey.indexOf('|p')
         const texKey = sep >= 0 ? gKey.slice(0, sep) : gKey
@@ -1135,7 +1152,9 @@ export class Renderer {
       geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3))
       geo.setAttribute('uv', new THREE.BufferAttribute(g.uvs, 2))
       geo.setIndex(new THREE.BufferAttribute(g.indices, 1))
-      this.group.add(new THREE.Mesh(geo, mat))
+      const mesh = new THREE.Mesh(geo, mat)
+      if (mat.uniforms?.gameTime) animateObject(mesh, age => { mat.uniforms.gameTime.value = (age % 24000) / 24000 })
+      this.group.add(mesh)
       // 超大几何体上传 GPU 时也定期让出主线程，避免最后一段卡顿
       if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
     }

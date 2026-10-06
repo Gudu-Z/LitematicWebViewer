@@ -1,12 +1,20 @@
 import { BlockModelResolver } from '../src/blocks.js'
-import { buildEntityMesh } from '../src/entities.js'
+import { buildEntityMesh, buildItemPreview } from '../src/entities.js'
 import { Renderer } from '../src/renderer.js'
-import { blockFields, blockIdFor, blockVariantLabel, createFixture } from './inspection-catalog.js'
+import { blockFields, blockIdFor, blockVariantLabel, blockFamily, createFixture, ITEM_IDS } from './inspection-catalog.js'
 
 export async function fieldsFor(entry, assets, values = {}) {
   const id = blockIdFor(entry, values)
   const fields = blockFields(await assets.getJSON('blockstates/' + id + '.json'), id)
-  if (entry.variants?.length > 1) fields.unshift({ path: 'block', label: entry.id === 'cake' ? '种类' : '放置方式', options: entry.variants.map(value => ({ value, label: blockVariantLabel(value) })) })
+  if (entry.variants?.length > 1) fields.unshift({ path: 'block', label: ['cake', 'cauldron', 'flower_pot'].includes(entry.id) ? '内容' : '放置方式', options: entry.variants.map(value => ({ value, label: blockVariantLabel(value) })) })
+  const field = (path, label, options) => fields.push({ path, label, options: options.map(([value, label]) => ({ value, label })) })
+  if (['water', 'lava'].includes(id)) field('preview_flow', '流向', [['auto', '自动'], ['still', '静止'], ['north', '北'], ['south', '南'], ['east', '东'], ['west', '西'], ['northeast', '东北'], ['southeast', '东南'], ['southwest', '西南'], ['northwest', '西北']])
+  if (id === 'bell') field('preview_ringing', '敲钟演示', [['false', '关闭'], ['true', '播放']])
+  if (id === 'enchanting_table') field('preview_book', '书本', [['closed', '无人靠近'], ['open', '展开翻页']])
+  if (id === 'conduit') {
+    field('preview_active', '激活', [['false', '否'], ['true', '是']])
+    field('preview_eye', '眼睛', [['false', '闭合'], ['true', '睁开']])
+  }
   return fields
 }
 
@@ -45,7 +53,24 @@ export async function createBlockSampleData(entry, assets, values = {}) {
   return data
 }
 
-export async function buildInspectionModel(entry, assets, values = {}, item = '') {
+export function inspectionItemId(entry, values = {}) {
+  let id = entry.kind === 'block' ? blockIdFor(entry, values) : entry.kind === 'mob' ? entry.id + '_spawn_egg' : (values.id || entry.fixture.id).replace('minecraft:', '')
+  if (id.startsWith('potted_')) id = 'flower_pot'
+  else if (id.endsWith('_cauldron')) id = 'cauldron'
+  else if (id.endsWith('candle_cake')) id = 'cake'
+  else id = blockFamily(id)
+  const aliases = { water: 'water_bucket', lava: 'lava_bucket', bubble_column: 'water_bucket', tripwire: 'string', redstone_wire: 'redstone', wall_torch: 'torch', farmland: 'dirt', dirt_path: 'dirt', wheat: 'wheat_seeds', carrots: 'carrot', potatoes: 'potato', beetroots: 'beetroot_seeds', sweet_berry_bush: 'sweet_berries', cocoa: 'cocoa_beans', melon_stem: 'melon_seeds', pumpkin_stem: 'pumpkin_seeds' }
+  if (!ITEM_IDS.includes(id)) id = aliases[id] || id
+  return id !== 'air' && ITEM_IDS.includes(id) ? id : null
+}
+
+export async function buildInspectionModel(entry, assets, values = {}, item = '', view = 'world') {
+  if (view !== 'world') {
+    const id = inspectionItemId(entry, values)
+    if (!id) return null
+    if (view === 'frame') return buildEntityMesh({ id: 'minecraft:item_frame', pos: [0, 0, 0], rotation: [0, 0], nbt: { Facing: 3, Item: { id: 'minecraft:' + id, count: 1 } } }, assets)
+    return buildItemPreview({ id: 'minecraft:' + id, count: 1 }, assets)
+  }
   if (entry.kind !== 'block') return buildEntityMesh(createFixture(entry, values, item), assets)
   return Renderer.buildBlockPreview(await createBlockSampleData(entry, assets, values), assets)
 }

@@ -33,6 +33,7 @@ const PREFIXES = [
 // 额外单独下载的粒子贴图（气泡柱的气泡）
 const EXTRA_FILES = [
   'assets/minecraft/textures/particle/bubble.png',
+  'assets/minecraft/textures/environment/end_sky.png',
 ]
 
 async function main() {

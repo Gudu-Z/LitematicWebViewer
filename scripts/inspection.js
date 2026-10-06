@@ -2,8 +2,9 @@ import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import JSZip from 'jszip'
 import { AssetProvider } from '../src/assets.js'
-import { CATALOG, CATEGORY_NAMES, ITEM_OPTIONS, officialName, entityFields, getPath, filterCatalog } from './inspection-catalog.js'
-import { buildInspectionModel, disposeInspectionModel, fieldsFor } from './inspection-models.js'
+import { CATALOG, CATEGORY_NAMES, ITEM_OPTIONS, officialName, entityFields, getPath, filterCatalog, language, setLanguage } from './inspection-catalog.js'
+import { buildInspectionModel, disposeInspectionModel, fieldsFor, inspectionItemId } from './inspection-models.js'
+import { t, optionLabel, translateDocument } from './inspection-i18n.js'
 
 const $ = id => document.getElementById(id)
 const PAGE_SIZE = 24
@@ -25,6 +26,10 @@ let assets = makeAssets(), scenes = [], generation = 0, detailGeneration = 0
 let activeEntry = null, activeFields = [], activeValues = {}, activeItem = '', detailView = null
 let paused = false, age = 0, lastTime = performance.now(), packZip = null
 let route = readRoute()
+setLanguage(route.lang)
+translateDocument()
+let activeView = 'world'
+const entryName = entry => officialName(entry.id, entry.kind === 'block' ? 'block' : 'entity')
 const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true })
 renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5))
 renderer.domElement.className = 'grid-canvas'
@@ -39,12 +44,13 @@ controls.enableDamping = true
 function readRoute() {
   const p = new URLSearchParams(location.search)
   const raw = p.get('scope'), scope = raw === 'features' ? 'mob' : ['block', 'mob', 'entity'].includes(raw) ? raw : 'all'
-  return { scope, query: p.get('q') || '', page: Math.max(0, Math.floor(Number(p.get('page')) || 0)), pack: p.get('pack') === 'vanilla' ? 'vanilla' : 'xk' }
+  return { scope, query: p.get('q') || '', page: Math.max(0, Math.floor(Number(p.get('page')) || 0)), pack: p.get('pack') === 'vanilla' ? 'vanilla' : 'xk', lang: p.get('lang') === 'en' ? 'en' : 'zh' }
 }
 function writeRoute() {
   const p = new URLSearchParams({ scope: route.scope, page: route.page })
   if (route.query) p.set('q', route.query)
   if (route.pack === 'vanilla') p.set('pack', 'vanilla')
+  if (route.lang === 'en') p.set('lang', 'en')
   history.replaceState(null, '', '?' + p)
 }
 const dispose = group => disposeInspectionModel(group, sharedTextures)
@@ -58,7 +64,7 @@ function modelMessage(group, entry) {
   group?.traverse(o => { if (o.isMesh || o.isPoints) count++ })
   if (count) return ''
   return ['air', 'cave_air', 'void_air', 'barrier', 'light', 'structure_void'].includes(entry.id)
-    ? '此方块在世界中不可见' : '此对象当前没有可显示的模型'
+    ? t('此方块在世界中不可见') : t('此对象当前没有可显示的模型')
 }
 function createView(group, entry, slot) {
   const scene = new THREE.Scene()
@@ -102,7 +108,7 @@ async function renderPage() {
   const pages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE))
   route.page = Math.min(route.page, pages - 1); writeRoute()
   $('scope').value = route.scope; $('search').value = route.query; $('pack').value = route.pack
-  $('status').textContent = `${CATEGORY_NAMES[route.scope] || '全部'} · ${matches.length.toLocaleString()} 项`
+  $('status').textContent = `${t(CATEGORY_NAMES[route.scope] || '全部')} · ${matches.length.toLocaleString()} ${language === 'en' ? 'entries' : '项'}`
   $('page-label').textContent = `${route.page + 1} / ${pages}`
   $('previous').disabled = route.page === 0; $('next').disabled = route.page >= pages - 1
   $('empty').hidden = matches.length > 0
@@ -110,10 +116,10 @@ async function renderPage() {
   const jobs = entries.map(({ entry, matchedItem, matchedBlock }) => {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'cell'; button.dataset.key = entry.key
     const slot = document.createElement('div'); slot.className = 'model-slot'
-    const message = document.createElement('span'); message.className = 'cell-message'; message.textContent = '加载中…'; slot.append(message)
+    const message = document.createElement('span'); message.className = 'cell-message'; message.textContent = t('加载中…'); slot.append(message)
     const caption = document.createElement('div'); caption.className = 'caption'
-    const title = document.createElement('strong'); title.textContent = entry.name
-    const note = document.createElement('small'); note.textContent = matchedItem ? officialName(matchedItem, 'item') : CATEGORY_NAMES[entry.kind]
+    const title = document.createElement('strong'); title.textContent = entryName(entry)
+    const note = document.createElement('small'); note.textContent = matchedItem ? officialName(matchedItem, 'item') : t(CATEGORY_NAMES[entry.kind])
     caption.append(title, note); button.append(slot, caption); $('grid').append(button)
     button.onclick = () => openDetail(entry, matchedItem, matchedBlock)
     return async () => {
@@ -129,7 +135,7 @@ async function renderPage() {
         if (group) scenes.push(createView(group, entry, slot))
       } catch (error) {
         dispose(group)
-        if (token === generation) message.textContent = '模型加载失败'
+        if (token === generation) message.textContent = t('模型加载失败')
         failures.push(entry.key + ': ' + error.message)
       }
     }
@@ -145,9 +151,9 @@ function fillFields() {
   $('state-fields').replaceChildren()
   for (const [index, f] of activeFields.entries()) {
     const row = document.createElement('div'); row.className = 'state-field'
-    const label = document.createElement('label'); label.textContent = f.label; label.htmlFor = 'state-' + index
+    const label = document.createElement('label'); label.textContent = t(f.label, f.path); label.htmlFor = 'state-' + index
     const select = document.createElement('select'); select.id = label.htmlFor; select.dataset.path = f.path
-    f.options.forEach((o, i) => select.add(new Option(o.label, String(i))))
+    f.options.forEach((o, i) => select.add(new Option(optionLabel(o), String(i))))
     select.value = String(Math.max(0, f.options.findIndex(o => JSON.stringify(o.value) === JSON.stringify(activeValues[f.path]))))
     select.onchange = () => {
       activeValues[f.path] = f.options[Number(select.value)].value
@@ -157,30 +163,32 @@ function fillFields() {
     row.append(label, select); $('state-fields').append(row)
   }
   if (!activeFields.length) {
-    const note = document.createElement('p'); note.className = 'no-state'; note.textContent = '此对象使用默认外观。'; $('state-fields').append(note)
+    const note = document.createElement('p'); note.className = 'no-state'; note.textContent = t('此对象使用默认外观。'); $('state-fields').append(note)
   }
 }
 function fillItems() {
   const query = $('item-search').value.trim().toLowerCase()
-  const options = ITEM_OPTIONS.filter(o => (o.label + ' ' + o.value).toLowerCase().includes(query))
-  const select = $('item-select'); select.replaceChildren(new Option('空展示框', ''))
+  const options = ITEM_OPTIONS.filter(o => (officialName(o.value, 'item') + ' ' + o.label + ' ' + o.value).toLowerCase().includes(query))
+  const select = $('item-select'); select.replaceChildren(new Option(t('空展示框'), ''))
   // 筛选时保留当前选中项，避免浏览选项就意外更换模型。
   const selected = ITEM_OPTIONS.find(o => o.value === activeItem)
-  if (selected && !options.includes(selected)) select.add(new Option(selected.label, selected.value))
-  for (const o of options) select.add(new Option(o.label, o.value))
+  if (selected && !options.includes(selected)) select.add(new Option(officialName(selected.value, 'item'), selected.value))
+  for (const o of options) select.add(new Option(officialName(o.value, 'item'), o.value))
   select.value = activeItem
 }
 async function openDetail(entry, item = '', block) {
   const token = ++detailGeneration
   activeEntry = entry; activeItem = item || ''; activeFields = []; activeValues = {}
+  activeView = 'world'; $('view-mode').value = 'world'
+  $('view-mode').options[1].textContent = t(entry.kind === 'mob' ? '刷怪蛋' : '物品形态')
   if (detailView) dispose(detailView.group)
   detailView = null; controls.enabled = false
-  $('detail-title').textContent = entry.name; $('detail-category').textContent = CATEGORY_NAMES[entry.kind]
+  $('detail-title').textContent = entryName(entry); $('detail-category').textContent = t(CATEGORY_NAMES[entry.kind])
   $('detail-id').textContent = 'minecraft:' + entry.id
   $('state-fields').replaceChildren(); $('item-fields').hidden = entry.key !== 'entity/item_frame'
   $('reset-state').disabled = true
   $('item-search').value = ''; fillItems()
-  $('model-message').textContent = '正在加载模型…'
+  $('model-message').textContent = t('正在加载模型…')
   if (!$('detail').open) $('detail').showModal()
   try {
     const fields = await defaultFields(entry, assets, { block })
@@ -191,7 +199,7 @@ async function openDetail(entry, item = '', block) {
     fillFields()
     $('reset-state').disabled = false
     await rebuildDetail()
-  } catch (error) { if (token === detailGeneration) $('model-message').textContent = '加载失败：' + error.message }
+  } catch (error) { if (token === detailGeneration) $('model-message').textContent = t('加载失败：') + error.message }
 }
 async function refreshBlockFields(reset = false) {
   const token = ++detailGeneration, entry = activeEntry, previous = reset ? {} : { ...activeValues }
@@ -203,25 +211,26 @@ async function refreshBlockFields(reset = false) {
     for (const field of fields) if (field.options.some(o => o.value === previous[field.path])) activeValues[field.path] = previous[field.path]
     fillFields(); $('reset-state').disabled = false
     await rebuildDetail()
-  } catch (error) { if (token === detailGeneration) $('model-message').textContent = '加载失败：' + error.message }
+  } catch (error) { if (token === detailGeneration) $('model-message').textContent = t('加载失败：') + error.message }
 }
 async function rebuildDetail() {
   const token = ++detailGeneration, entry = activeEntry, provider = assets
   const values = structuredClone(activeValues), item = activeItem
-  $('model-message').textContent = '正在加载模型…'
+  $('model-message').textContent = t('正在加载模型…')
   let group
   try {
-    group = await buildInspectionModel(entry, provider, values, item)
+    group = await buildInspectionModel(entry, provider, values, item, activeView)
     if (token !== detailGeneration || !$('detail').open) { dispose(group); return }
     if (detailView) dispose(detailView.group)
     detailView = group ? createView(group, entry, $('detail-stage')) : null
-    $('model-message').textContent = modelMessage(group, entry) || (item ? officialName(item, 'item') : '切换状态可对照不同外观')
+    const viewedItem = activeView !== 'world' ? inspectionItemId(entry, values) : null
+    $('model-message').textContent = activeView !== 'world' && !viewedItem ? t('此对象没有对应的物品或刷怪蛋') : modelMessage(group, entry) || (viewedItem || item ? officialName(viewedItem || item, 'item') : t('切换状态可对照不同外观'))
     $('detail-id').textContent = values.id || 'minecraft:' + (values.block || entry.id)
     controls.enabled = !!detailView
     resetCamera()
   } catch (error) {
     dispose(group)
-    if (token === detailGeneration) { $('model-message').textContent = '加载失败：' + error.message; failures.push(entry.key + ': ' + error.message) }
+    if (token === detailGeneration) { $('model-message').textContent = t('加载失败：') + error.message; failures.push(entry.key + ': ' + error.message) }
   }
 }
 function resetCamera() {
@@ -252,6 +261,18 @@ $('reset-state').onclick = () => {
 }
 $('item-search').oninput = fillItems
 $('item-select').onchange = () => { activeItem = $('item-select').value; rebuildDetail() }
+$('view-mode').onchange = () => { activeView = $('view-mode').value; rebuildDetail() }
+$('language').onclick = async () => {
+  route.lang = language === 'en' ? 'zh' : 'en'; setLanguage(route.lang); translateDocument()
+  $('pause').textContent = t(paused ? '继续动画' : '暂停动画')
+  if ($('detail').open) {
+    $('detail-title').textContent = entryName(activeEntry); $('detail-category').textContent = t(CATEGORY_NAMES[activeEntry.kind])
+    $('view-mode').options[1].textContent = t(activeEntry.kind === 'mob' ? '刷怪蛋' : '物品形态')
+    activeFields = await defaultFields(activeEntry, assets, activeValues)
+    fillFields(); fillItems(); rebuildDetail()
+  }
+  renderPage()
+}
 $('scope').onchange = () => { route.scope = $('scope').value; route.page = 0; renderPage() }
 let searchTimer
 $('search').oninput = () => {
@@ -260,19 +281,19 @@ $('search').oninput = () => {
 }
 for (const [id, step] of [['previous', -1], ['next', 1]]) $(id).onclick = () => { route.page += step; renderPage(); window.scrollTo({ top: 0 }) }
 $('pause').onclick = () => {
-  paused = !paused; $('pause').textContent = paused ? '继续动画' : '暂停动画'; $('pause').setAttribute('aria-pressed', String(paused))
+  paused = !paused; $('pause').textContent = t(paused ? '继续动画' : '暂停动画'); $('pause').setAttribute('aria-pressed', String(paused))
 }
 let packGeneration = 0
 async function changePack() {
   const token = ++packGeneration
-  ++generation; clearViews(); $('status').textContent = '正在加载资源包…'; window.ready = false
+  ++generation; clearViews(); $('status').textContent = t('正在加载资源包…'); window.ready = false
   if ($('detail').open) closeDetail()
   const next = makeAssets()
   try {
     if (route.pack === 'xk') {
       if (!packZip) {
         const response = await fetch(new URL('../resourcepacks/XK redstone display 26.3.0.zip', location.href))
-        if (!response.ok) throw Error('资源包下载失败')
+        if (!response.ok) throw Error(t('资源包下载失败'))
         packZip = await JSZip.loadAsync(await response.arrayBuffer())
       }
       next.addPack(packZip, 'XK')
@@ -282,13 +303,14 @@ async function changePack() {
     for (const promise of assets.textureCache.values()) promise.then(texture => { if (texture) { sharedTextures.delete(texture); texture.dispose() } })
     assets = next
     await renderPage()
-  } catch (error) { $('status').textContent = '加载失败：' + error.message; failures.push(error.message) }
+  } catch (error) { $('status').textContent = t('加载失败：') + error.message; failures.push(error.message) }
 }
 $('pack').onchange = () => { route.pack = $('pack').value; changePack() }
 
 function renderFrame(now) {
   if (!paused) age += Math.min(100, now - lastTime) / 50
   lastTime = now
+  assets.updateAnimations(age)
   const width = document.documentElement.clientWidth
   renderer.setSize(width, innerHeight, false)
   renderer.setScissorTest(false); renderer.setClearColor('#131c29', 1); renderer.clear(); renderer.setScissorTest(true)

@@ -16,6 +16,9 @@ const index = await json(metadata.assetIndex.url)
 const { hash } = index.objects['minecraft/lang/zh_cn.json']
 const translations = await json(`https://resources.download.minecraft.net/${hash.slice(0, 2)}/${hash}`)
 const names = Object.fromEntries(Object.entries(translations).filter(([key]) => /^(block|item|entity)\.minecraft\./.test(key)))
+const englishUrl = `https://raw.githubusercontent.com/misode/mcmeta/${version}-assets/assets/minecraft/lang/en_us.json`
+const english = Object.fromEntries(Object.entries(await json(englishUrl)).filter(([key]) => /^(block|item|entity)\.minecraft\./.test(key)))
+await writeFile(new URL('./inspection-english.js', import.meta.url), `// Minecraft ${version} 官方 en_us：${englishUrl}\nexport const EN_NAMES = ${JSON.stringify(english)}\n`)
 const ids = async dir => (await readdir(new URL('../public/assets/minecraft/' + dir, import.meta.url)))
   .filter(f => f.endsWith('.json')).map(f => f.slice(0, -5)).sort()
 const blocks = await ids('blockstates/'), items = await ids('items/')
