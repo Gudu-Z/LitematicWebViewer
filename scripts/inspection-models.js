@@ -1,6 +1,7 @@
 import { BlockModelResolver } from '../src/blocks.js'
 import { buildEntityMesh, buildItemPreview } from '../src/entities.js'
 import { Renderer } from '../src/renderer.js'
+import { applyRidingPreview } from './inspection-riding.js'
 import { cushionColor } from '../src/cushion.js'
 import { blockFields, blockIdFor, blockVariantLabel, blockFamily, createFixture, ITEM_IDS } from './inspection-catalog.js'
 
@@ -73,7 +74,7 @@ export async function buildInspectionModel(entry, assets, values = {}, item = ''
     if (view === 'frame') return buildEntityMesh({ id: 'minecraft:item_frame', pos: [0, 0, 0], rotation: [0, 0], nbt: { Facing: 3, Item: { id: 'minecraft:' + id, count: 1 } } }, assets)
     return buildItemPreview({ id: 'minecraft:' + id, count: 1 }, assets)
   }
-  if (entry.kind !== 'block') return buildEntityMesh({ ...createFixture(entry, values, item), renderOptions }, assets)
+  if (entry.kind !== 'block') return buildEntityMesh({ ...applyRidingPreview(createFixture(entry, values, item), entry), renderOptions }, assets)
   return Renderer.buildBlockPreview(await createBlockSampleData(entry, assets, values), assets)
 }
 

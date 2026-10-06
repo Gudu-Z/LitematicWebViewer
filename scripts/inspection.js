@@ -82,7 +82,8 @@ function createView(group, entry, slot) {
   const center = box.getCenter(new THREE.Vector3()), extent = box.getSize(new THREE.Vector3())
   const radius = Math.max(extent.x, extent.y, extent.z, .6) * .76
   const camera = new THREE.OrthographicCamera(-radius, radius, radius, -radius, .01, 200)
-  const direction = entry.kind === 'block' ? new THREE.Vector3(.8, .6, 1) : new THREE.Vector3(.3, .18, 1)
+  const direction = entry.kind === 'block' ? new THREE.Vector3(.8, .6, 1)
+    : group.userData.vehicleId ? new THREE.Vector3(1, .45, .8) : new THREE.Vector3(.3, .18, 1)
   camera.position.copy(center).add(direction.clone().multiplyScalar(radius * 5)); camera.lookAt(center)
   return { scene, group, entry, slot, center, radius, camera, direction }
 }

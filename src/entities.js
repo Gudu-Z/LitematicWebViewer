@@ -16,7 +16,8 @@ import { BlockModelResolver } from './blocks.js'
 import { bakeModel } from './modelBaker.js'
 import { ENTITY_MODELS } from './entityModelData.js'
 import { EXTRA_MODELS } from './extraEntityModels.js'
-import { getMobAppearance } from './entityAppearance.js'
+import { getMobAppearance, MOB_TABLE } from './entityAppearance.js'
+import { createPassengerEntity, vehicleId } from './entityPassengers.js'
 import { applyIdlePose, IDLE_ANIMATED_MOBS } from './entityAnimations.js'
 import { applyBabyPose } from './entityBabies.js'
 import { buildCushion } from './cushion.js'
@@ -97,8 +98,34 @@ function resolveItemModelDef(def, out = [], context = 'fixed') {
 }
 
 // 把实体转成网格；不支持的实体返回 null
-export async function buildEntityMesh(entity, assets, data) {
-  const id = shortName(entity.id)
+export async function buildEntityMesh(entity, assets, data, ancestors = new Set()) {
+  // Passengers are nested NBT compounds, not independent entries in the region's entity list.
+  if (ancestors.size >= 32 || ancestors.has(entity.nbt)) return null
+  const next = new Set(ancestors).add(entity.nbt)
+  const model = await buildSingleEntityMesh(entity, assets, data)
+  if (!model) return null
+  const passengers = Array.isArray(entity.nbt?.Passengers) ? entity.nbt.Passengers.filter(p => p && typeof p.id === 'string') : []
+  if (!passengers.length) return model
+  // Keep each model's own orientation: the hull's -90° correction must not rotate its riders.
+  const group = new THREE.Group()
+  group.position.fromArray(entity.pos)
+  group.userData = { ...model.userData, vehicleId: vehicleId(entity) }
+  model.position.sub(group.position)
+  group.add(model)
+  for (const [index, nbt] of passengers.entries()) {
+    const passenger = createPassengerEntity(entity, nbt, index, passengers.length)
+    const child = await buildEntityMesh(passenger, assets, data, next)
+    if (!child) continue
+    child.position.sub(group.position)
+    child.name = 'passenger-' + index
+    child.userData.isPassenger = true
+    group.add(child)
+  }
+  return group
+}
+
+async function buildSingleEntityMesh(entity, assets, data) {
+  const id = vehicleId(entity)
   if (id === 'item_frame' || id === 'glow_item_frame') {
     return buildItemFrame(entity, id, assets)
   }
@@ -112,7 +139,7 @@ export async function buildEntityMesh(entity, assets, data) {
     return buildBoat(entity, id, assets)
   }
   if (id === 'cushion') return buildCushion(entity, assets)
-  if (entity.nbt && 'Health' in entity.nbt) {
+  if (MOB_TABLE[id] || (entity.nbt && 'Health' in entity.nbt)) {
     return buildMob(entity, id, assets, data) // 生物实体（猪/牛/羊/村民等）
   }
   return null

@@ -5,6 +5,7 @@ import { EN_NAMES } from './inspection-english.js'
 import { BABY_MOBS } from '../src/entityBabies.js'
 import { CUSHION_COLORS } from '../src/cushion.js'
 import { equipmentFields, applyEquipmentPreview } from './inspection-equipment.js'
+import { BOAT_IDS, ridingFields } from './inspection-riding.js'
 
 export { BLOCK_IDS, ITEM_IDS }
 export const CATEGORY_NAMES = { block: '方块', mob: '生物', entity: '实体' }
@@ -66,6 +67,7 @@ const owner = () => state('Owner', '驯服', [[null, '未驯服'], [[1, 2, 3, 4]
 export function entityFields(entry, values) {
   const fixture = values === undefined ? null : createFixture(entry, values)
   const gear = () => equipmentFields(entry, officialName, ITEM_IDS, fixture, values)
+  const riding = () => ridingFields(entry, values, officialName)
   const id = entry.id, f = []
   if (entry.kind === 'entity') {
     if (id === 'cushion') f.push(
@@ -73,11 +75,7 @@ export function entityFields(entry, values) {
       field('rotation', '朝向', [[[0, 0], '南'], [[90, 0], '西'], [[180, 0], '北'], [[270, 0], '东']]),
     )
     if (id === 'boat') {
-      const wood = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak', 'poplar', 'bamboo']
-      f.push(field('id', '材质与类型', wood.flatMap(w => ['', 'chest_'].map(chest => {
-        const type = w + '_' + chest + (w === 'bamboo' ? 'raft' : 'boat')
-        return ['minecraft:' + type, officialName(type, 'item')]
-      }))))
+      f.push(field('id', '材质与类型', BOAT_IDS.map(type => ['minecraft:' + type, officialName(type, 'item')])))
     }
     if (id === 'minecart') f.push(field('id', '类型', ['minecart', 'chest_minecart', 'furnace_minecart', 'hopper_minecart', 'tnt_minecart', 'command_block_minecart', 'spawner_minecart'].map(type => ['minecraft:' + type, officialName(type, 'entity')])))
     if (id === 'item_frame') f.push(
@@ -86,7 +84,7 @@ export function entityFields(entry, values) {
       state('ItemRotation', '物品旋转', Array.from({ length: 8 }, (_, i) => [i, i * 45 + '°'])),
     )
     if (id === 'armor_stand') f.push(bool('ShowArms', '手臂', '隐藏', '显示'), bool('Small', '体型', '正常', '小型'), bool('NoBasePlate', '底座', '显示', '隐藏'))
-    return [...f, ...gear()]
+    return [...f, ...riding(), ...gear()]
   }
   if (BABY_MOBS.has(id)) f.push(state('Age', '年龄', [[0, '成年'], [-24000, '幼年']]))
   if (['pig', 'cow', 'chicken', 'frog'].includes(id)) f.push(climate())
@@ -139,7 +137,7 @@ export function entityFields(entry, values) {
     field('fish.shape', '体型', [[0, '小型'], [1, '大型']]), field('fish.pattern', '花纹', Array.from({ length: 6 }, (_, i) => [i, '花纹 ' + (i + 1)])),
     field('fish.body', '身体颜色', dyeOptions), field('fish.color', '花纹颜色', dyeOptions),
   )
-  return [...f, ...gear()]
+  return [...f, ...riding(), ...gear()]
 }
 
 export function getPath(object, path) { return path.split('.').reduce((value, key) => value?.[key], object) }
@@ -204,7 +202,7 @@ export function filterCatalog(scope = 'all', query = '') {
     + (blockRegistry(id)?.[0]?.waterlogged?.includes('true') ? ' 含水 waterlogged' : '')
   const matchingItems = terms.length ? ITEM_OPTIONS.filter(item => matches(names(item.value, 'item') + ' ' + item.value)) : []
   return CATALOG.filter(entry => scope === 'all' || entry.kind === scope).filter(entry => {
-    const variantNames = entry.kind === 'block' ? entry.variants.map(blockText).join(' ') : entityFields(entry).flatMap(f => f.options.map(o => o.label + ' ' + o.value)).join(' ')
+    const variantNames = entry.kind === 'block' ? entry.variants.map(blockText).join(' ') : entityFields(entry).filter(f => !f.path.startsWith('ridingPreview.')).flatMap(f => f.options.map(o => o.label + ' ' + o.value)).join(' ')
     return matches(names(entry.id, entry.kind === 'block' ? 'block' : 'entity') + ' ' + entry.id + ' ' + variantNames) || (entry.key === 'entity/item_frame' && matchingItems.length > 0)
   }).map(entry => ({ entry,
     matchedBlock: terms.length && entry.kind === 'block' ? entry.variants.find(id => matches(blockText(id))) : undefined,

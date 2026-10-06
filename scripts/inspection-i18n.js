@@ -3,6 +3,8 @@ import { EN_NAMES } from './inspection-english.js'
 import { language } from './inspection-catalog.js'
 
 const words = {
+  '乘坐载具': 'Vehicle', '乘客': 'Passenger', '第二位乘客': 'Second passenger',
+  '乘客年龄': 'Passenger age', '第二位乘客年龄': 'Second passenger age', '坐垫颜色': 'Cushion color',
   '设置': 'Settings', '图鉴设置': 'Catalog settings', '关闭设置': 'Close settings', '材质包': 'Resource packs',
   '本地导入 .zip': 'Import local .zip', '选择本地材质包': 'Choose local resource packs',
   '越靠上的材质包优先级越高；未覆盖的资源使用原版材质。': 'Packs at the top take priority. Uncovered resources use vanilla textures.',

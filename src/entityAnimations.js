@@ -51,13 +51,27 @@ export function applyIdlePose(parts, id, state, age) {
   add(parts.head_parts ? 'head_parts' : 'head', 'x', pitch)
   // 独立帽子节点须随头部转动；模型中的父子帽子会自然继承。
   if (parts.hat?.parent === parts.head?.parent) add('hat', 'x', pitch)
+  // HumanoidModel / IllagerModel passenger pose; quadrupeds and villagers keep vanilla poses.
+  const illager = ['pillager', 'vindicator', 'evoker', 'illusioner'].includes(id)
+  if (state.riding && (BIPEDS.has(id) || illager)) {
+    for (const [side, sign] of [['right', 1], ['left', -1]]) {
+      set(side + '_leg', 'x', id === 'enderman' ? -.4 : -1.4137167)
+      set(side + '_leg', 'y', sign * PI / 10)
+      set(side + '_leg', 'z', sign * .07853982)
+      if (illager) {
+        set(side + '_arm', 'x', -PI / 5)
+        set(side + '_arm', 'y', 0)
+        set(side + '_arm', 'z', 0)
+      }
+    }
+  }
   if (BIPEDS.has(id)) {
     const equipment = readEquipment(nbt)
     const zombie = ['zombie', 'husk', 'drowned', 'zombie_villager', 'giant', 'zombified_piglin'].includes(id)
     const base = zombie ? -PI / 2.25 : 0
     for (const [side, sign] of [['right', 1], ['left', -1]]) {
       const held = equipment[(side === 'left') === !!nbt.LeftHanded ? 'mainhand' : 'offhand']
-      set(side + '_arm', 'x', (zombie ? base : held ? -PI / 10 : 0) + sign * Math.sin(age * 0.067) * 0.05)
+      set(side + '_arm', 'x', (zombie ? base : state.riding ? -PI / 5 : held ? -PI / 10 : 0) + sign * Math.sin(age * 0.067) * 0.05)
       set(side + '_arm', 'z', sign * (Math.cos(age * 0.09) * 0.05 + 0.05))
       if (zombie) set(side + '_arm', 'y', -sign * 0.1)
     }
