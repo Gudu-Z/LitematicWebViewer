@@ -16,7 +16,7 @@
 - 完整方块模型（楼梯、栅栏、门、红石线/元件、铁轨等），隐藏面剔除、按贴图合并
 - 草 / 树叶 / 水 / 岩浆染色；水与岩浆半透明渲染，并复刻原版的水下雾、水面流向、气泡柱
 - 特殊方块：钟、附魔台书本、潮涌核心、动态末地传送门 / 折跃门、飘动旗帜、陶罐（陶片图案）、雕文书架、铜傀儡雕像等
-- 实体渲染：矿车、船、告示牌文字、玩家头颅（真实皮肤）、物品展示框
+- 实体渲染：矿车、船、坐垫、告示牌文字、玩家头颅（真实皮肤）、物品展示框
 - 85 种生物：持续特效、骨骼待机动画，以及皮肤、羊毛、膨胀、坐姿等状态；其中 40 种支持幼年形态
 - 原版动画贴图帧表与插值；资源包可覆盖动画，例如内置 XK 的水贴图为单帧
 
@@ -81,7 +81,7 @@ npm run dev
 
 ![模型图鉴页的生物分类，可按名称搜索并点击卡片查看状态](docs/images/render-catalog.png)
 
-*先选分类或输入名称，再点击卡片。图鉴涵盖 1,289 个方块（合并为 1,167 张卡片）、85 种生物，以及船、矿车、展示框和盔甲架四类实体。*
+*先选分类或输入名称，再点击卡片。图鉴涵盖 1,289 个方块（合并为 1,167 张卡片）、85 种生物，以及船、矿车、展示框、盔甲架和坐垫五类实体。*
 
 ### 在同一卡片中切换状态
 
@@ -90,7 +90,7 @@ npm run dev
 | 生物 | 皮肤、颜色、姿态、持续特效，以及适用生物的成年 / 幼年形态，例如普通 / 闪电苦力怕、幼猫坐姿 |
 | 方块 | 原版方块状态，包括 505 种可含水方块、墙的“不显示 / 低 / 高”连接；门、床、双层植物默认完整显示 |
 | 同类变种 | 蜡烛蛋糕归入蛋糕，挂墙告示牌 / 旗帜 / 头颅 / 火把 / 珊瑚扇归入对应卡片，炼药锅内容物和所有盆栽分别合并 |
-| 船与其他实体 | 22 种木材与箱船组合、矿车类型、盔甲架手臂等；盔甲架默认隐藏手臂 |
+| 船与其他实体 | 22 种木材与箱船组合、矿车类型、16 色坐垫及朝向、盔甲架手臂等；盔甲架默认隐藏手臂 |
 | 物品与展示框 | 切换“查看方式”，检查对应物品、刷怪蛋或放入展示框后的样子；展示框卡片可筛选 1,658 种物品 |
 | 特殊效果 | 水 / 岩浆的静止与八向流动、敲钟演示、附魔台翻书、潮涌核心激活与眼睛状态 |
 
@@ -106,6 +106,8 @@ npm run dev
 方块选项合并资源包模型声明与 [26.3 游戏生成的状态报告（mcmeta 归档）](https://github.com/misode/mcmeta/blob/26.3-summary/blocks/data.json)，包含 505 种可含水方块（另兼容旧版 chain ID）以及墙的“不显示 / 低 / 高”连接状态。方块网格、流体与特殊方块实体共用主预览器的渲染路径。空气等不可见方块保留目录项并标明原因；图鉴页显示的是当前渲染器的能力，仍受下文已知外观差异的限制。
 
 名称来自 Minecraft 26.3 官方 `zh_cn.json` 和 `en_us.json`，图鉴页默认使用内置 XK 材质包，也可切换原版；语言与资源包选择通过 URL 保留。更新默认资源版本后运行 `node scripts/gen-inspection-data.mjs <版本>`，重新生成目录、状态报告与官方译名。
+
+坐垫按 26.3 的 [CushionModel](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/model/object/cushion/cushionmodel/) 和 [CushionRenderer](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/renderer/entity/cushionrenderer/) 渲染，读取实体 NBT 的 `color` 与朝向。图鉴将 16 色坐垫合并为一张实体卡片，可切换颜色、四个朝向，以及对应的物品和展示框视图；投影主预览器使用同一渲染实现。
 
 特殊方块对照 26.3 的 `BellModel`、`BannerRenderer`、`TheEndPortalRenderer`、`TheEndGatewayRenderer`、附魔台及潮涌核心渲染器。钟补全钟体，旗面绕横杆摆动，展示框旗帜遵循物品固定视角变换；末地传送门使用上下水平面，折跃门使用六面体，二者使用[官方末地传送门着色器](https://github.com/misode/mcmeta/blob/26.3-assets/assets/minecraft/shaders/core/rendertype_end_portal.fsh)的投影采样与分层星空。通用动画纹理支持 `.mcmeta` 的帧顺序、逐帧时长、帧尺寸和颜色插值，因此水、岩浆、火焰、下界传送门等贴图按原版帧表播放。图鉴页暂停按钮同时暂停贴图、方块和实体动画。
 
@@ -134,8 +136,9 @@ node scripts/verify-entities.mjs  # 全部生物/状态、真实贴图、绑定�
 node scripts/verify-breeze.mjs   # 风层几何、UV、透明排序与滚动
 node scripts/verify-shulker.mjs  # 共用潜影盒几何回归
 node scripts/verify-waxed-items.mjs  # XK 的 60 种涂蜡物品、展示框描边与原版回退
-node scripts/verify-render-inspection.mjs  # 目录与译名、605 个实体状态、多格组合、含水/墙、旗帜对齐和船桨
-node scripts/verify-special-rendering.mjs  # 特殊方块、分组、流向、40 种幼体及变种、1,227 个对应物品、中英文
+node scripts/verify-render-inspection.mjs  # 目录与译名、626 个实体状态、多格组合、含水/墙、旗帜对齐和船桨
+node scripts/verify-cushion.mjs  # 坐垫 16 色、原版尺寸/UV/朝向、NBT 和物品映射
+node scripts/verify-special-rendering.mjs  # 特殊方块、分组、流向、40 种幼体及变种、1,228 个对应物品、中英文
 npm run build
 ```
 

@@ -1,6 +1,6 @@
 // 实体渲染：把 .litematica 里的实体转成 Three.js 网格。
 // 目前支持：item_frame / glow_item_frame（物品展示框）、*_minecart（矿车，含漏斗/箱子/熔炉/TNT）、
-// armor_stand（盔甲架）、*_boat（船，含箱船）、以及带 Health 的生物实体——用原版实体模型
+// armor_stand（盔甲架）、*_boat（船，含箱船）、cushion（坐垫）、以及带 Health 的生物实体——用原版实体模型
 // + 真实皮肤贴图渲染（85 种，见 entityAppearance.js；模型数据在 entityModelData.js）。
 //
 // 物品展示框严格按原版 ItemFrameEntityRenderer 的变换复现（1.21.11）：
@@ -19,6 +19,7 @@ import { EXTRA_MODELS } from './extraEntityModels.js'
 import { getMobAppearance } from './entityAppearance.js'
 import { applyIdlePose, IDLE_ANIMATED_MOBS } from './entityAnimations.js'
 import { applyBabyPose } from './entityBabies.js'
+import { buildCushion } from './cushion.js'
 import { compileModel, quadsToEntityMesh, createEntityRig, sortTransparentFaces } from './entityModel.js'
 export { compileModel, quadsToEntityMesh } from './entityModel.js'
 
@@ -107,6 +108,7 @@ export async function buildEntityMesh(entity, assets, data) {
   if (id.endsWith('_boat') || id.endsWith('_raft')) {
     return buildBoat(entity, id, assets)
   }
+  if (id === 'cushion') return buildCushion(entity, assets)
   if (entity.nbt && 'Health' in entity.nbt) {
     return buildMob(entity, id, assets, data) // 生物实体（猪/牛/羊/村民等）
   }

@@ -1,6 +1,7 @@
 import { BlockModelResolver } from '../src/blocks.js'
 import { buildEntityMesh, buildItemPreview } from '../src/entities.js'
 import { Renderer } from '../src/renderer.js'
+import { cushionColor } from '../src/cushion.js'
 import { blockFields, blockIdFor, blockVariantLabel, blockFamily, createFixture, ITEM_IDS } from './inspection-catalog.js'
 
 export async function fieldsFor(entry, assets, values = {}) {
@@ -54,6 +55,7 @@ export async function createBlockSampleData(entry, assets, values = {}) {
 }
 
 export function inspectionItemId(entry, values = {}) {
+  if (entry.key === 'entity/cushion') return cushionColor(createFixture(entry, values).nbt) + '_cushion'
   let id = entry.kind === 'block' ? blockIdFor(entry, values) : entry.kind === 'mob' ? entry.id + '_spawn_egg' : (values.id || entry.fixture.id).replace('minecraft:', '')
   if (id.startsWith('potted_')) id = 'flower_pot'
   else if (id.endsWith('_cauldron')) id = 'cauldron'

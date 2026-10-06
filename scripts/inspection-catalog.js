@@ -3,6 +3,7 @@ import { ALL_MOB_FIXTURES } from './entity-fixtures.mjs'
 import { BLOCK_STATES } from './inspection-block-states.js'
 import { EN_NAMES } from './inspection-english.js'
 import { BABY_MOBS } from '../src/entityBabies.js'
+import { CUSHION_COLORS } from '../src/cushion.js'
 
 export { BLOCK_IDS, ITEM_IDS }
 export const CATEGORY_NAMES = { block: '方块', mob: '生物', entity: '实体' }
@@ -45,6 +46,7 @@ export const CATALOG = [
   { key: 'entity/minecart', id: 'minecart', name: officialName('minecart', 'entity'), kind: 'entity', fixture: entity('minecart') },
   { key: 'entity/item_frame', id: 'item_frame', name: officialName('item_frame', 'entity'), kind: 'entity', fixture: entity('item_frame', { Facing: 3 }) },
   { key: 'entity/armor_stand', id: 'armor_stand', name: officialName('armor_stand', 'entity'), kind: 'entity', fixture: entity('armor_stand', { ShowArms: 0 }) },
+  { key: 'entity/cushion', id: 'cushion', name: officialName('cushion', 'entity'), kind: 'entity', fixture: entity('cushion', { color: 'white' }) },
 ]
 export const ITEM_OPTIONS = ITEM_IDS.map(id => ({ value: id, label: officialName(id, 'item') }))
 const DYES = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black']
@@ -63,6 +65,10 @@ const owner = () => state('Owner', '驯服', [[null, '未驯服'], [[1, 2, 3, 4]
 export function entityFields(entry) {
   const id = entry.id, f = []
   if (entry.kind === 'entity') {
+    if (id === 'cushion') f.push(
+      state('color', '颜色', CUSHION_COLORS.map(color => [color, officialName(color + '_cushion', 'item')])),
+      field('rotation', '朝向', [[[0, 0], '南'], [[90, 0], '西'], [[180, 0], '北'], [[270, 0], '东']]),
+    )
     if (id === 'boat') {
       const wood = ['oak', 'spruce', 'birch', 'jungle', 'acacia', 'dark_oak', 'mangrove', 'cherry', 'pale_oak', 'poplar', 'bamboo']
       f.push(field('id', '材质与类型', wood.flatMap(w => ['', 'chest_'].map(chest => {
