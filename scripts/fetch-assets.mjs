@@ -29,11 +29,15 @@ const PREFIXES = [
   'assets/minecraft/items/', // 物品模型定义（26.3 起：方块物品 → 具体 block 模型 / display.fixed 朝向）
   'assets/minecraft/textures/entity/', // 实体贴图（矿车等）
   'assets/minecraft/textures/item/', // 物品贴图（物品展示框内容）
+  'assets/minecraft/equipment/', // 装备层、染色与纹饰覆盖规则
+  'assets/minecraft/textures/trims/',
+  'assets/minecraft/textures/palettes/',
 ]
 // 额外单独下载的粒子贴图（气泡柱的气泡）
 const EXTRA_FILES = [
   'assets/minecraft/textures/particle/bubble.png',
   'assets/minecraft/textures/environment/end_sky.png',
+  'assets/minecraft/textures/misc/enchanted_glint_armor.png',
 ]
 
 async function main() {

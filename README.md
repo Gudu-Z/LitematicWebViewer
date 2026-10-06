@@ -91,6 +91,7 @@ npm run dev
 | 方块 | 原版方块状态，包括 505 种可含水方块、墙的“不显示 / 低 / 高”连接；门、床、双层植物默认完整显示 |
 | 同类变种 | 蜡烛蛋糕归入蛋糕，挂墙告示牌 / 旗帜 / 头颅 / 火把 / 珊瑚扇归入对应卡片，炼药锅内容物和所有盆栽分别合并 |
 | 船与其他实体 | 22 种木材与箱船组合、矿车类型、16 色坐垫及朝向、盔甲架手臂等；盔甲架默认隐藏手臂 |
+| 装备 | 盔甲架和适用生物的四个盔甲槽、主副手、惯用手、头部物品与鞘翅；马铠、狼铠、鞍具、羊驼地毯及快乐恶魂挽具；可组合染色、盔甲纹饰与附魔光效 |
 | 物品与展示框 | 切换“查看方式”，检查对应物品、刷怪蛋或放入展示框后的样子；展示框卡片可筛选 1,658 种物品 |
 | 特殊效果 | 水 / 岩浆的静止与八向流动、敲钟演示、附魔台翻书、潮涌核心激活与眼睛状态 |
 
@@ -108,6 +109,10 @@ npm run dev
 名称来自 Minecraft 26.3 官方 `zh_cn.json` 和 `en_us.json`，图鉴页默认使用内置 XK 材质包，也可切换原版；语言与资源包选择通过 URL 保留。更新默认资源版本后运行 `node scripts/gen-inspection-data.mjs <版本>`，重新生成目录、状态报告与官方译名。
 
 坐垫按 26.3 的 [CushionModel](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/model/object/cushion/cushionmodel/) 和 [CushionRenderer](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/renderer/entity/cushionrenderer/) 渲染，读取实体 NBT 的 `color` 与朝向。图鉴将 16 色坐垫合并为一张实体卡片，可切换颜色、四个朝向，以及对应的物品和展示框视图；投影主预览器使用同一渲染实现。
+
+![盔甲架穿戴钻石盔甲，手持钻石剑与盾牌](docs/images/equipment.png)
+
+装备按 26.3 的 [HumanoidArmorLayer](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/renderer/entity/layers/humanoidarmorlayer/)、`EquipmentLayerRenderer`、`ItemInHandLayer` 和动物专用模型实现。主预览器自动读取新版 `equipment`，同时兼容旧版 `ArmorItems`、`HandItems`、`ArmorItem`、`DecorItem` 和鞍具数据。图鉴中可逐槽选择装备；装备跟随骨骼姿态与待机动作，幼年生物使用新版专用盔甲模型，小型盔甲架保持原版缩放。手持物使用第三人称变换，三叉戟使用立体模型；皮革染色、狼铠损伤和盔甲纹饰读取物品组件及资源包。附魔光效使用原版贴图近似混合，目前用于穿戴装备。运行 `node scripts/gen-equipment-data.mjs --fetch` 可更新记录来源与 SHA-256 的模型数据和默认装备组件。
 
 特殊方块对照 26.3 的 `BellModel`、`BannerRenderer`、`TheEndPortalRenderer`、`TheEndGatewayRenderer`、附魔台及潮涌核心渲染器。钟补全钟体，旗面绕横杆摆动，展示框旗帜遵循物品固定视角变换；末地传送门使用上下水平面，折跃门使用六面体，二者使用[官方末地传送门着色器](https://github.com/misode/mcmeta/blob/26.3-assets/assets/minecraft/shaders/core/rendertype_end_portal.fsh)的投影采样与分层星空。通用动画纹理支持 `.mcmeta` 的帧顺序、逐帧时长、帧尺寸和颜色插值，因此水、岩浆、火焰、下界传送门等贴图按原版帧表播放。图鉴页暂停按钮同时暂停贴图、方块和实体动画。
 
@@ -127,12 +132,13 @@ npm run dev
 
 幼年形态使用 26.3 的 27 套独立模型、专用贴图及美西螈/骆驼/犰狳待机关键帧；嗅探兽和快乐恶魂使用原版缩放规则，快乐恶魂保留幼体内芯。猫、狼、狐狸的幼年坐姿/睡姿也按新版模型处理。生成数据记录了[客户端源码镜像](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/model/animal/cow/babycowmodel/)的具体 URL 和 SHA-256；运行 `node scripts/gen-baby-models.mjs --fetch`、`node scripts/gen-baby-animations.mjs --fetch` 可重新获取并转录。
 
-仍确认存在的差异：寒冷/温暖牛、猪、鸡等变种目前只切换贴图，未切换专用几何；村民帽子尚未读取资源包的 hat 元数据；盔甲、鞍具、马铠、狼铠、手持物、末影人搬运方块、拴绳及乘骑组合尚未完整渲染。静态投影也不能复现游戏中的动态光照和实体之间的交互。图鉴页的敲钟、翻书和激活潮涌核心为显式演示选项；不模拟玩家靠近、潮涌核心框架检测、折跃门临时光束或粒子。
+仍确认存在的差异：寒冷/温暖牛、猪、鸡等变种目前只切换贴图，未切换专用几何；村民帽子尚未读取资源包的 hat 元数据；狐狸叼物、熊猫进食等专用物品层、手持物附魔光效、自定义玩家头颅皮肤、拴绳及乘骑组合尚未完整渲染。手持物目前覆盖盔甲架、人形盔甲生物、掠夺者、悦灵和恼鬼，不模拟使用物品、攻击或拉弓过程。静态投影也不能复现游戏中的动态光照和实体之间的交互。图鉴页的敲钟、翻书和激活潮涌核心为显式演示选项；不模拟玩家靠近、潮涌核心框架检测、折跃门临时光束或粒子。
 
 验证命令（需先执行 `npm run setup` 安装默认资源）：
 
 ```bash
 node scripts/verify-entities.mjs  # 全部生物/状态、真实贴图、绑定姿态、动画无漂移、资源隔离及释放
+node scripts/verify-equipment.mjs # 装备槽、新旧 NBT、幼年/小型模型、姿态同步、染色与动物装备
 node scripts/verify-breeze.mjs   # 风层几何、UV、透明排序与滚动
 node scripts/verify-shulker.mjs  # 共用潜影盒几何回归
 node scripts/verify-waxed-items.mjs  # XK 的 60 种涂蜡物品、展示框描边与原版回退

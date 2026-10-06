@@ -4,6 +4,11 @@ import { language } from './inspection-catalog.js'
 
 const words = {
   '切换语言': 'Switch language',
+  '惯用手': 'Main arm', '右手': 'Right hand', '左手': 'Left hand', '轻度': 'Low', '中度': 'Medium', '重度': 'High',
+  '头部装备': 'Head equipment', '胸部装备': 'Chest equipment', '腿部装备': 'Leg equipment', '脚部装备': 'Feet equipment',
+  '主手': 'Main hand', '副手': 'Off hand', '身体装备': 'Body equipment', '鞍具': 'Saddle', '装备染色': 'Equipment dye',
+  '附魔光效': 'Enchantment glint', '盔甲纹饰': 'Armor trim', '纹饰材质': 'Trim material', '装备损伤': 'Equipment damage',
+  '盔甲架姿态': 'Armor stand pose', '举手': 'Raised arm', '持武器': 'Holding weapons', '默认': 'Default',
   '世界坐标轴：X 东，Y 上，Z 南': 'World axes: X east, Y up, Z south',
   '正在加载模型目录…': 'Loading catalog…', '资源包下载失败': 'Resource pack download failed',
   '模型图鉴': 'Model catalog', '全部': 'All', '方块': 'Blocks', '生物': 'Mobs', '实体': 'Entities',

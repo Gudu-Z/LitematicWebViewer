@@ -4,6 +4,7 @@ import { BLOCK_STATES } from './inspection-block-states.js'
 import { EN_NAMES } from './inspection-english.js'
 import { BABY_MOBS } from '../src/entityBabies.js'
 import { CUSHION_COLORS } from '../src/cushion.js'
+import { equipmentFields, applyEquipmentPreview } from './inspection-equipment.js'
 
 export { BLOCK_IDS, ITEM_IDS }
 export const CATEGORY_NAMES = { block: '方块', mob: '生物', entity: '实体' }
@@ -83,7 +84,7 @@ export function entityFields(entry) {
       state('ItemRotation', '物品旋转', Array.from({ length: 8 }, (_, i) => [i, i * 45 + '°'])),
     )
     if (id === 'armor_stand') f.push(bool('ShowArms', '手臂', '隐藏', '显示'), bool('Small', '体型', '正常', '小型'), bool('NoBasePlate', '底座', '显示', '隐藏'))
-    return f
+    return [...f, ...equipmentFields(entry, officialName, ITEM_IDS)]
   }
   if (BABY_MOBS.has(id)) f.push(state('Age', '年龄', [[0, '成年'], [-24000, '幼年']]))
   if (['pig', 'cow', 'chicken', 'frog'].includes(id)) f.push(climate())
@@ -91,7 +92,6 @@ export function entityFields(entry) {
   if (['cat', 'wolf', 'parrot'].includes(id)) f.push(sitting())
   if (['cat', 'wolf'].includes(id)) f.push(owner(), colors('CollarColor', '项圈颜色'))
   if (id === 'creeper') f.push(bool('powered', '状态', '普通苦力怕', '闪电苦力怕'))
-  if (id === 'pillager') f.push(state('HandItems', '手臂姿态', [[[], '空手'], [[{ id: 'minecraft:crossbow', count: 1 }], '持弩']]))
   if (id === 'wither') f.push(state('Health', '护甲', [[300, '正常'], [140, '半血护甲']]), state('Invul', '生成状态', [[0, '正常'], [200, '无敌阶段']]))
   if (id === 'bat') f.push(state('BatFlags', '姿态', [[0, '飞行'], [1, '倒挂']]))
   if (id === 'sheep') f.push(colors(), bool('Sheared', '羊毛', '未剪毛', '已剪毛'), state('CustomName', '特殊名称', [['', '普通'], ['jeb_', '彩虹羊毛（jeb_）']]))
@@ -134,7 +134,7 @@ export function entityFields(entry) {
     field('fish.shape', '体型', [[0, '小型'], [1, '大型']]), field('fish.pattern', '花纹', Array.from({ length: 6 }, (_, i) => [i, '花纹 ' + (i + 1)])),
     field('fish.body', '身体颜色', dyeOptions), field('fish.color', '花纹颜色', dyeOptions),
   )
-  return f
+  return [...f, ...equipmentFields(entry, officialName, ITEM_IDS)]
 }
 
 export function getPath(object, path) { return path.split('.').reduce((value, key) => value?.[key], object) }
@@ -152,7 +152,7 @@ export function createFixture(entry, values = {}, item = '') {
     delete fixture.fish
   }
   if (entry.id === 'item_frame' && item) fixture.nbt.Item = { id: 'minecraft:' + item, count: 1 }
-  return fixture
+  return applyEquipmentPreview(fixture)
 }
 
 const PROP_LABELS = { attachment: '安装方式', facing: '朝向', axis: '轴向', half: '半部', type: '类型', shape: '形状', open: '开启', powered: '供能', lit: '点亮', waterlogged: '含水', age: '生长阶段', level: '液面等级', power: '红石信号', rotation: '旋转', north: '北侧', south: '南侧', east: '东侧', west: '西侧', up: '上方连接', down: '下方连接', layers: '层数', bites: '食用次数', part: '部件', hinge: '门轴', face: '附着面', attached: '附着', persistent: '持续存在', distance: '距离', enabled: '启用', conditional: '条件制约', mode: '模式', candles: '蜡烛数量', honey_level: '蜂蜜等级', in_wall: '墙内', occupied: '占用', unstable: '不稳定', triggered: '触发', charges: '充能', eggs: '蛋数量', hatch: '孵化阶段', moisture: '湿润度', snowy: '覆雪', stage: '生长阶段', flower_amount: '花朵数量', orientation: '朝向组合', tilt: '倾斜', drag: '向下流动', hanging: '悬挂', vertical_direction: '垂直朝向', thickness: '粗细', sculk_sensor_phase: '感测阶段', shrieking: '尖啸', can_summon: '允许召唤', bloom: '绽放', berries: '浆果', bottom: '底部', delay: '延迟', locked: '锁定', inverted: '反相', note: '音高', instrument: '乐器', extended: '伸出', short: '缩短', has_book: '有书', has_record: '有唱片', has_bottle_0: '左侧药水', has_bottle_1: '中间药水', has_bottle_2: '右侧药水' }

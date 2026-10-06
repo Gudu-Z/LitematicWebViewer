@@ -2,6 +2,7 @@
 // 不模拟寻路、行走、攻击或临时客户端事件；关键帧来自 entityAnimationData.js。
 import { ENTITY_ANIMATIONS } from './entityAnimationData.js'
 import { BABY_ANIMATIONS } from './babyAnimationData.js'
+import { readEquipment } from './equipmentState.js'
 const PI = Math.PI, DEG = PI / 180
 const BIPEDS = new Set(['zombie', 'husk', 'drowned', 'zombie_villager', 'skeleton', 'stray', 'bogged', 'wither_skeleton', 'piglin', 'piglin_brute', 'zombified_piglin', 'giant', 'enderman'])
 export const IDLE_ANIMATED_MOBS = new Set([...BIPEDS,
@@ -51,10 +52,12 @@ export function applyIdlePose(parts, id, state, age) {
   // 独立帽子节点须随头部转动；模型中的父子帽子会自然继承。
   if (parts.hat?.parent === parts.head?.parent) add('hat', 'x', pitch)
   if (BIPEDS.has(id)) {
+    const equipment = readEquipment(nbt)
     const zombie = ['zombie', 'husk', 'drowned', 'zombie_villager', 'giant', 'zombified_piglin'].includes(id)
     const base = zombie ? -PI / 2.25 : 0
     for (const [side, sign] of [['right', 1], ['left', -1]]) {
-      set(side + '_arm', 'x', base + sign * Math.sin(age * 0.067) * 0.05)
+      const held = equipment[(side === 'left') === !!nbt.LeftHanded ? 'mainhand' : 'offhand']
+      set(side + '_arm', 'x', (zombie ? base : held ? -PI / 10 : 0) + sign * Math.sin(age * 0.067) * 0.05)
       set(side + '_arm', 'z', sign * (Math.cos(age * 0.09) * 0.05 + 0.05))
       if (zombie) set(side + '_arm', 'y', -sign * 0.1)
     }
@@ -70,11 +73,12 @@ export function applyIdlePose(parts, id, state, age) {
   }
   switch (id) {
     case 'pillager': {
-      const items = [...(nbt.HandItems || []), nbt.equipment?.mainhand, nbt.equipment?.offhand]
+      const items = Object.values(readEquipment(nbt))
       if (items.some(item => item?.id?.replace(/^minecraft:/, '') === 'crossbow')) {
         // IllagerEntityModel.CROSSBOW_HOLD -> ArmPosing.hold（静止持弩姿态）。
-        set('right_arm', 'y', -0.3); set('left_arm', 'y', 0.6)
-        set('right_arm', 'x', -PI / 2 + pitch + 0.1); set('left_arm', 'x', -1.5 + pitch)
+        const main = nbt.LeftHanded ? 'left_arm' : 'right_arm', off = nbt.LeftHanded ? 'right_arm' : 'left_arm', sign = nbt.LeftHanded ? -1 : 1
+        set(main, 'y', -0.3 * sign); set(off, 'y', 0.6 * sign)
+        set(main, 'x', -PI / 2 + pitch + 0.1); set(off, 'x', -1.5 + pitch)
       }
       break
     }
@@ -231,7 +235,7 @@ export function applyIdlePose(parts, id, state, age) {
     }
     case 'allay': {
       const wing = Math.cos(age * 20 * DEG) * PI * 0.15, j = age * 9 * DEG
-      const held = !!(nbt.HandItems?.[0]?.id || nbt.equipment?.mainhand?.id)
+      const held = !!readEquipment(nbt).mainhand
       set('right_wing', 'x', 0.43633232); set('left_wing', 'x', 0.43633232)
       set('right_wing', 'y', -PI / 4 + wing); set('left_wing', 'y', PI / 4 - wing)
       move('root', 'y', Math.cos(j) * 0.25)

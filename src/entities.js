@@ -20,6 +20,9 @@ import { getMobAppearance } from './entityAppearance.js'
 import { applyIdlePose, IDLE_ANIMATED_MOBS } from './entityAnimations.js'
 import { applyBabyPose } from './entityBabies.js'
 import { buildCushion } from './cushion.js'
+import { attachEquipment, applyArmorStandPose } from './equipment.js'
+import { EQUIPMENT_MODELS } from './equipmentModelData.js'
+import { equipmentDye } from './equipmentState.js'
 import { compileModel, quadsToEntityMesh, createEntityRig, sortTransparentFaces } from './entityModel.js'
 export { compileModel, quadsToEntityMesh } from './entityModel.js'
 
@@ -68,7 +71,7 @@ const DYE_COLORS = {
 // special（箱子/头颅/旗帜等）返回空，交由 SPECIAL_MODELS 处理。
 // 注意 composite 的 transformation.translation 单位是「方块」（床 foot 偏移 [0,0,1] 即 1 格），
 // 与 display 变换的 translation（单位像素 1/16）不同。
-function resolveItemModelDef(def, out = []) {
+function resolveItemModelDef(def, out = [], context = 'fixed') {
   if (!def || typeof def !== 'object') return out
   const t = def.type
   if (t === 'minecraft:model') {
@@ -76,19 +79,19 @@ function resolveItemModelDef(def, out = []) {
     return out
   }
   if (t === 'minecraft:composite') {
-    for (const m of def.models || []) resolveItemModelDef(m, out)
+    for (const m of def.models || []) resolveItemModelDef(m, out, context)
     return out
   }
-  if (t === 'minecraft:condition') return resolveItemModelDef(def.on_false, out)
-  if (t === 'minecraft:range_dispatch') return resolveItemModelDef(def.fallback, out)
+  if (t === 'minecraft:condition') return resolveItemModelDef(def.on_false, out, context)
+  if (t === 'minecraft:range_dispatch') return resolveItemModelDef(def.fallback, out, context)
   if (t === 'minecraft:select') {
     const cases = def.cases || []
     for (const c of cases) {
       const w = c.when
       const list = Array.isArray(w) ? w : [w]
-      if (list.includes('fixed') || list.includes('gui') || list.includes('ground')) return resolveItemModelDef(c.model, out)
+      if (list.includes(context)) return resolveItemModelDef(c.model, out, context)
     }
-    return resolveItemModelDef(def.fallback, out)
+    return resolveItemModelDef(def.fallback, out, context)
   }
   return out
 }
@@ -307,7 +310,7 @@ async function defaultItemProps(name, assets) {
 
 // 框内物品网格：先按物品模型判定——含 layer0 的 2D 物品（小麦/铁轨/箭/剑等）渲染成平面贴图；
 // 否则按方块模型渲染（游戏内方块图标即方块模型）。
-async function buildFrameItem(item, resolver, assets) {
+async function buildFrameItem(item, resolver, assets, context = 'fixed') {
   const name = shortName(item.id)
   const holder = new THREE.Group()
 
@@ -362,7 +365,7 @@ async function buildFrameItem(item, resolver, assets) {
   // 无关。这里直接解析该模型并应用 display.fixed（旋转+平移）；composite（床=头+脚）拆成多个
   // 子模型分别烘焙后按子模型 translation 偏移合并、整体居中。
   const itemDef = await assets.getJSON('items/' + name + '.json')
-  const modelDefs = resolveItemModelDef(itemDef?.model)
+  const modelDefs = resolveItemModelDef(itemDef?.model, [], context)
   let baked = null
   let fixedRot = null
   let fixedTrans = null
@@ -508,7 +511,62 @@ async function buildFrameItem(item, resolver, assets) {
   return null
 }
 
-// 单独检查物品也使用展示框同一条物品模型路径，保留资源包的物品模型与 display.fixed。
+// 装备读取 thirdperson/head 变换；几何和资源包解析复用物品路径。
+export async function buildEquippedItem(item, assets, context = 'thirdperson_righthand') {
+  const resolver = new BlockModelResolver(assets), name = shortName(item.id)
+  const definition = await assets.getJSON('items/' + name + '.json')
+  const defs = resolveItemModelDef(definition?.model, [], context)
+  // 原版三叉戟在手中使用专用立体模型，背包/展示框仍使用平面图标。
+  const trident = name === 'trident' && !defs.length
+  let object
+  if (trident) {
+    const map = await assets.getTexture('entity/trident/trident')
+    const mesh = quadsToEntityMesh(compileModel(EQUIPMENT_MODELS.Trident), new THREE.MeshLambertMaterial({ map }))
+    // ItemTransform 在 display 之后施加 T(-.5,-.5,-.5)；额外 -1.5 抵消实体编译器的脚底基准。
+    mesh.geometry.translate(-.5, -2, -.5); mesh.geometry.computeVertexNormals()
+    object = new THREE.Group(); object.add(mesh)
+  } else object = await buildFrameItem(item, resolver, assets, context)
+  if (!object) return null
+  const model = await resolver.loadModel(defs[0]?.path || 'item/' + (trident ? 'trident_in_hand' : name))
+  const transform = model?.display?.[context] || (context === 'thirdperson_lefthand' ? model?.display?.thirdperson_righthand : null) || {}
+  const rotation = [...(transform.rotation || [0, 0, 0])], translation = [...(transform.translation || [0, 0, 0])]
+  if (context === 'thirdperson_lefthand') { rotation[1] *= -1; rotation[2] *= -1; translation[0] *= -1 }
+  object.scale.fromArray(transform.scale || [1, 1, 1])
+  object.quaternion.copy(fixedRotQuaternion(rotation)); object.position.fromArray(translation).multiplyScalar(1 / 16)
+  if (name.startsWith('leather_') || name === 'wolf_armor') {
+    const color = equipmentDye(item)
+    if (object.children[0]?.material && color != null) object.children[0].material.color.setHex(color)
+    if (object.children[1]?.material) object.children[1].material.color.setHex(0xffffff)
+  }
+  // 原版 generated 物品有 1 像素厚的边缘；手持时不能退化成侧面看不见的纸片。
+  for (const mesh of [...object.children]) if (mesh.isMesh && mesh.geometry.attributes.position.count === 4) extrudeHeldSprite(mesh)
+  return object
+}
+
+function extrudeHeldSprite(mesh) {
+  const img = mesh.material.map?.image
+  if (!img || typeof document === 'undefined') return
+  const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = img.height
+  const ctx = canvas.getContext('2d', { willReadFrequently: true }); ctx.drawImage(img, 0, 0)
+  const { data } = ctx.getImageData(0, 0, canvas.width, canvas.height), w = canvas.width, h = canvas.height
+  const opaque = (x, y) => x >= 0 && x < w && y >= 0 && y < h && data[(y * w + x) * 4 + 3] >= 128
+  const points = [], uv = [], indices = []
+  const face = (corners, x, y) => { const i = points.length / 3; corners.forEach(v => { points.push(...v); uv.push((x + .5) / w, (y + .5) / h) }); indices.push(i, i + 1, i + 2, i, i + 2, i + 3) }
+  const z = 1 / 32
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) if (opaque(x, y)) {
+    const l = x / w - .5, r = (x + 1) / w - .5, t = .5 - y / h, b = .5 - (y + 1) / h
+    if (!opaque(x - 1, y)) face([[l, b, -z], [l, b, z], [l, t, z], [l, t, -z]], x, y)
+    if (!opaque(x + 1, y)) face([[r, b, z], [r, b, -z], [r, t, -z], [r, t, z]], x, y)
+    if (!opaque(x, y - 1)) face([[l, t, z], [r, t, z], [r, t, -z], [l, t, -z]], x, y)
+    if (!opaque(x, y + 1)) face([[l, b, -z], [r, b, -z], [r, b, z], [l, b, z]], x, y)
+  }
+  const geometry = new THREE.BufferGeometry()
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(points, 3)); geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geometry.setIndex(indices); geometry.computeVertexNormals()
+  const edges = new THREE.Mesh(geometry, mesh.material), back = new THREE.Mesh(mesh.geometry.clone(), mesh.material)
+  mesh.position.z += z; back.position.z = -2 * z; edges.position.z = -z
+  mesh.add(edges, back)
+}
+
 export async function buildItemPreview(item, assets) {
   const model = await buildFrameItem(item, new BlockModelResolver(assets), assets)
   if (!model) return null
@@ -543,44 +601,20 @@ function cuboidElement(from, to, texU, texV) {
   }
 }
 
-// 盔甲架：无 JSON 模型（Java 硬编码），按原版 ArmorStandEntityModel.getTexturedModelData
-// 的盒体尺寸/位置/UV 复现，用 bakeModel 烘焙 + entity/armorstand/armorstand.png 贴图。
-// 支持 ShowArms（双臂）、Small（缩小）、NoBasePlate（去底板）。
+// 盔甲架使用原版骨骼、默认姿态和 NBT Pose；装备与木架共用姿态。
 async function buildArmorStand(entity, assets) {
-  const group = new THREE.Group()
-  const [x, y, z] = entity.pos
-  const nbt = entity.nbt || {}
-  const yaw = Number(entity.rotation?.[0]) || 0
-  const small = Number(nbt.Small) === 1
-  const showArms = Number(nbt.ShowArms) === 1
-  const showBase = Number(nbt.NoBasePlate) !== 1
-
-  // 各部件（模型像素坐标，世界 Y 向上，脚底 y=0）：
-  const elements = []
-  if (showBase) elements.push(cuboidElement([-6, 0, -6], [6, 1, 6], 0, 32)) // 底板 12×1×12
-  elements.push(cuboidElement([-2.9, 1, -1], [-0.9, 12, 1], 8, 0)) // 右腿 2×11×2
-  elements.push(cuboidElement([0.9, 1, -1], [2.9, 12, 1], 40, 16)) // 左腿
-  elements.push(cuboidElement([-3, 14, -1], [-1, 21, 1], 16, 0)) // 右躯干竖条 2×7×2
-  elements.push(cuboidElement([1, 14, -1], [3, 21, 1], 48, 16)) // 左躯干竖条
-  elements.push(cuboidElement([-4, 12, -1], [4, 14, 1], 0, 48)) // 肩横条 8×2×2
-  elements.push(cuboidElement([-6, 21, -1.5], [6, 24, 1.5], 0, 26)) // 躯干 12×3×3
-  elements.push(cuboidElement([-1, 23, -1], [1, 30, 1], 0, 0)) // 头 2×7×2
-  if (showArms) {
-    elements.push(cuboidElement([-7, 12, -1], [-5, 24, 1], 24, 0)) // 右臂 2×12×2
-    elements.push(cuboidElement([5, 12, -1], [7, 24, 1], 32, 16)) // 左臂
-  }
-
-  const baked = bakeModel({ textures: { all: 'entity/armorstand/armorstand' }, elements }, {}, 64)
+  const nbt = entity.nbt || {}, model = structuredClone(EQUIPMENT_MODELS.ArmorStand)
+  if (!nbt.ShowArms) { model.parts.left_arm.cuboids = []; model.parts.right_arm.cuboids = [] }
+  if (nbt.NoBasePlate) model.parts.base_plate.cuboids = []
   const tex = await assets.getTexture('entity/armorstand/armorstand')
-  const mat = tex
-    ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, flatShading: true })
-    : new THREE.MeshLambertMaterial({ color: 0x9c7a4d, flatShading: true })
-  group.add(quadsToMesh(baked.quads, [0, 0, 0], () => mat))
-
-  if (small) group.scale.setScalar(0.5)
-
-  group.position.set(x, y, z)
-  group.rotation.y = -(yaw * Math.PI) / 180
+  const body = createEntityRig(model, new THREE.MeshLambertMaterial({ map: tex, alphaTest: .1, side: THREE.DoubleSide }))
+  body.geometry.computeVertexNormals(); body.name = 'body'; body.userData.model = model
+  body.userData.updateAnimation = () => applyArmorStandPose(body, nbt, entity.rotation?.[0])
+  body.userData.updateAnimation(0)
+  const group = new THREE.Group(); group.add(body)
+  group.position.fromArray(entity.pos); group.rotation.y = -(Number(entity.rotation?.[0]) || 0) * DEG
+  if (nbt.Invisible) body.material.visible = false
+  await attachEquipment(group, body, entity, assets, buildEquippedItem)
   return group
 }
 
@@ -758,7 +792,7 @@ async function buildMob(entity, id, assets, data) {
     mesh.onBeforeRender = (_renderer, _scene, camera) => {
       if (animated || definition.offset || definition.opacity || definition.animatedTint) {
         // 检查页可提供统一的动画时间，以便暂停后仍能旋转模型、切换状态。
-        update(mesh.userData.animationAge ?? (performance.now() - startTime) / 50)
+        mesh.userData.updateAnimation(mesh.userData.animationAge ?? (performance.now() - startTime) / 50)
         mesh.updateMatrixWorld(true)
         mesh.skeleton.update()
       }
@@ -768,12 +802,14 @@ async function buildMob(entity, id, assets, data) {
     return mesh
   }
   const body = attach({ name: 'body', model, tint }, tex)
+  body.userData.model = model
   for (const layer of layers) {
     const layerTex = layer.texture === appearance.texture ? tex : await assets.getTexture(layer.texture)
     if (layerTex) attach(layer, layerTex)
   }
   await attachMobBlocks(body, id, state, assets)
   group.scale.setScalar(scale)
+  await attachEquipment(group, body, entity, assets, buildEquippedItem)
   group.position.fromArray(entity.pos)
   const yaw = Number(entity.rotation?.[0]) || 0
   group.rotation.y = id === 'ender_dragon' ? yaw * Math.PI / 180 - Math.PI : -yaw * Math.PI / 180

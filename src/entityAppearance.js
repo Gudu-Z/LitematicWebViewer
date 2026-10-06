@@ -2,6 +2,7 @@
 import { ENTITY_MODELS } from './entityModelData.js'
 import { EXTRA_MODELS } from './extraEntityModels.js'
 import { babyModel, isBaby, BABY_MOBS } from './entityBabies.js'
+import { readEquipment } from './equipmentState.js'
 
 // 生物实体 id -> [模型键, 贴图键]
 export const MOB_TABLE = {
@@ -273,7 +274,7 @@ export function getMobAppearance(entity, id, data) {
     add('outer_layer', `entity/skeleton/${id}_overlay`, outer)
     if (id === 'bogged' && n.sheared) model = transformEntityModel(model, (node, name) => { if (name.includes('mushroom')) node.cuboids = [] })
   }
-  if (id === 'trader_llama') add('carpet', 'entity/equipment/llama_body/trader_llama')
+  if (id === 'trader_llama' && !readEquipment(n).body) add('carpet', 'entity/equipment/llama_body/trader_llama')
   if (id === 'villager' || id === 'zombie_villager') {
     const villager = n.VillagerData || {}, type = choice(villager.type, ['plains', 'desert', 'jungle', 'savanna', 'snow', 'swamp', 'taiga'])
     add('biome_clothes', `entity/${id}/type/${type}`)
