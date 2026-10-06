@@ -90,11 +90,13 @@
           </svg>
         </button>
         <button id="projectionBtn" class="icon-btn" title="当前：透视渲染 · 点击切换为正交渲染" aria-label="正交渲染" aria-pressed="false" data-i18n-aria-label="orthographicProjection">
-          <svg class="icon-perspective" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="M3 3h11v18H3zM14 3l7 4v10l-7 4M3 3l6 4h12M3 21l6-4h12M9 7v10" />
+          <!-- Blender-style VIEW_PERSPECTIVE / VIEW_ORTHO grids, redrawn with SVG strokes.
+               Reference: https://github.com/blender/blender/tree/main/release/datafiles/icons_svg -->
+          <svg class="icon-perspective" viewBox="0 0 18 15" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M4.75 1.5h8.5l3.25 12h-15zM7.78 1.5l-1.3 12M10.22 1.5l1.3 12M3.94 4.5h10.12M2.85 8.5h12.3" />
           </svg>
-          <svg class="icon-orthographic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-            <path d="m12 2 9 5v10l-9 5-9-5V7zM3 7l9 5 9-5M12 12v10" />
+          <svg class="icon-orthographic" viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M1.5 1.5h15v15h-15zM6.5 1.5v15M11.5 1.5v15M1.5 6.5h15M1.5 11.5h15" />
           </svg>
         </button>
         <a id="entityPreviewBtn" class="icon-btn" href="./scripts/entity-preview.html" target="_blank" rel="noopener" data-i18n-title="entityPreview" data-i18n-aria-label="entityPreview" title="模型图鉴（新标签页）" aria-label="模型图鉴（新标签页）">
