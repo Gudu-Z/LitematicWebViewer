@@ -876,6 +876,56 @@ const MOB_TABLE = {
   giant: ['Biped', 'entity/zombie/zombie', 6],
 }
 
+// BreezeWindFeatureRenderer + RenderPipelines.BREEZE_WIND：独立旋风模型、
+// 双面半透明、alpha cutoff 0.1、无方向光明暗，U 每 tick 平移 0.02（20 ticks/s）。
+async function buildBreezeWind(assets) {
+  const sourceTex = await assets.getTexture('entity/breeze/breeze_wind')
+  if (!sourceTex) return null
+  // 纹理偏移和循环方式仅属于这一层，不能修改 AssetProvider 缓存中的共享贴图。
+  const tex = sourceTex.clone()
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
+  tex.needsUpdate = true
+  const mat = new THREE.MeshBasicMaterial({
+    map: tex,
+    transparent: true,
+    alphaTest: 0.1,
+    side: THREE.DoubleSide,
+    forceSinglePass: true,
+  })
+  const quads = compileModel(EXTRA_MODELS.BreezeWindEntityModel)
+  const mesh = quadsToEntityMesh(quads, mat)
+  mesh.name = 'breeze_wind'
+
+  // 原版透明层会排序 quad；Three.js 只排序整个 mesh，因此这里按相机距离
+  // 重排 42 个面的索引，避免外壳先写深度后把内层风纹挡掉。仍只需一次 draw call。
+  const faces = quads.map((q, index) => ({
+    index,
+    center: new THREE.Vector3().fromArray(q.verts[0]).add(new THREE.Vector3().fromArray(q.verts[2])).multiplyScalar(0.5),
+    distance: 0,
+  }))
+  const cameraPos = new THREE.Vector3()
+  const worldCenter = new THREE.Vector3()
+  const startTime = performance.now()
+  mesh.onBeforeRender = (_renderer, _scene, camera) => {
+    tex.offset.x = ((performance.now() - startTime) * 0.0004) % 1
+    cameraPos.setFromMatrixPosition(camera.matrixWorld)
+    for (const face of faces) {
+      worldCenter.copy(face.center).applyMatrix4(mesh.matrixWorld)
+      face.distance = worldCenter.distanceToSquared(cameraPos)
+    }
+    faces.sort((a, b) => b.distance - a.distance || a.index - b.index)
+    const indices = mesh.geometry.index
+    for (let i = 0; i < faces.length; i++) {
+      const b = faces[i].index * 4
+      const offset = i * 6
+      indices.array[offset] = b; indices.array[offset + 1] = b + 1; indices.array[offset + 2] = b + 2
+      indices.array[offset + 3] = b; indices.array[offset + 4] = b + 2; indices.array[offset + 5] = b + 3
+    }
+    indices.needsUpdate = true
+  }
+  return mesh
+}
+
 // 生物实体：真实模型 + 皮肤贴图
 async function buildMob(entity, id, assets) {
   const entry = MOB_TABLE[id]
@@ -890,6 +940,11 @@ async function buildMob(entity, id, assets) {
   const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
   const quads = compileModel(model)
   group.add(quadsToEntityMesh(quads, mat))
+
+  if (id === 'breeze') {
+    const wind = await buildBreezeWind(assets)
+    if (wind) group.add(wind)
+  }
 
   // 第二层贴图：叠在身体上的额外贴图层（如行商羊驼的地毯），透明部分不遮挡底层。
   // 用 polygonOffset 让叠层略向相机偏移，避免与底层共面时闪烁。

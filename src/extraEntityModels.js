@@ -40,7 +40,7 @@ export const EXTRA_MODELS = {
 
   // ---------------------------------------------------------------------------
   // 旋风人（32×32）。原版用私有 createModelData() + resetChildrenExcept()，
-  // 解析器不支持，这里手写主体（头 + 三根棒子），略去半透明旋风层。
+  // 解析器不支持，这里分别转录主体和 getWindTexturedModelData() 的旋风层。
   BreezeEntityModel: {
     w: 32, h: 32,
     parts: {
@@ -64,6 +64,44 @@ export const EXTRA_MODELS = {
               { u: 0, v: 0, x: -4, y: -8, z: -4, dx: 8, dy: 8, dz: 8 },
             ],
             children: {},
+          },
+        },
+      },
+    },
+  },
+
+  // 旋风人外层（128×128）：wind_bottom → wind_mid → wind_top 的 pivot 逐级累加。
+  // 中段和顶段各有三重壳体，共 7 个 cuboid；必须使用独立的 breeze_wind 贴图。
+  BreezeWindEntityModel: {
+    w: 128, h: 128,
+    parts: {
+      wind_body: {
+        pivot: [0, 0, 0],
+        children: {
+          wind_bottom: {
+            pivot: [0, 24, 0],
+            cuboids: [{ u: 1, v: 83, x: -2.5, y: -7, z: -2.5, dx: 5, dy: 7, dz: 5 }],
+            children: {
+              wind_mid: {
+                pivot: [0, -7, 0],
+                cuboids: [
+                  { u: 74, v: 28, x: -6, y: -6, z: -6, dx: 12, dy: 6, dz: 12 },
+                  { u: 78, v: 32, x: -4, y: -6, z: -4, dx: 8, dy: 6, dz: 8 },
+                  { u: 49, v: 71, x: -2.5, y: -6, z: -2.5, dx: 5, dy: 6, dz: 5 },
+                ],
+                children: {
+                  wind_top: {
+                    pivot: [0, -6, 0],
+                    cuboids: [
+                      { u: 0, v: 0, x: -9, y: -8, z: -9, dx: 18, dy: 8, dz: 18 },
+                      { u: 6, v: 6, x: -6, y: -8, z: -6, dx: 12, dy: 8, dz: 12 },
+                      { u: 105, v: 57, x: -2.5, y: -8, z: -2.5, dx: 5, dy: 8, dz: 5 },
+                    ],
+                    children: {},
+                  },
+                },
+              },
+            },
           },
         },
       },
