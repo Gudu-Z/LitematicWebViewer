@@ -820,7 +820,7 @@ function buildMobFallback(entity, id) {
   return group
 }
 
-// 船：硬编码船体 + 箱子（箱船）。船体用木色近似（原版是 skin 贴图，这里只求形状）。
+// 船：原版模型与船皮贴图，桨应用 AbstractBoatEntityModel.setPaddleAngles 的静止相位。
 async function buildBoat(entity, id, assets) {
   const group = new THREE.Group()
   const [x, y, z] = entity.pos
@@ -834,7 +834,15 @@ async function buildBoat(entity, id, assets) {
   const isRaft = id.includes('_raft')
 
   // 船体：BoatEntityModel（船底 + 四壁 + 双桨）/ RaftModel（平底木筏 + 双桨）+ 船皮贴图
-  const model = isRaft ? EXTRA_MODELS.RaftModel : ENTITY_MODELS.BoatEntityModel
+  const model = structuredClone(isRaft ? EXTRA_MODELS.RaftModel : ENTITY_MODELS.BoatEntityModel)
+  // 未划船时 paddleAngle=0；setAngles 仍会覆盖绑定姿态的 pitch/yaw，roll 保留 π/16。
+  // 只编译绑定姿态会让双桨横着伸出、桨叶像竖板；普通船和竹筏使用同一公式。
+  const paddlePitch = (-Math.PI / 3 + -Math.PI / 12) / 2
+  const paddleYaw = Math.sin(1) * Math.PI / 4
+  for (const [name, right] of [['left_paddle', false], ['right_paddle', true]]) {
+    model.parts[name].rot[0] = paddlePitch
+    model.parts[name].rot[1] = right ? Math.PI - paddleYaw : paddleYaw
+  }
   const tex = await assets.getTexture('entity/boat/' + type)
   const hullMat = tex
     ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })

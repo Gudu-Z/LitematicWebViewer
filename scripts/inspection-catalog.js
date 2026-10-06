@@ -1,5 +1,6 @@
 import { BLOCK_IDS, ITEM_IDS, ZH_NAMES } from './inspection-data.js'
 import { ALL_MOB_FIXTURES } from './entity-fixtures.mjs'
+import { BLOCK_STATES } from './inspection-block-states.js'
 
 export { BLOCK_IDS, ITEM_IDS }
 export const CATEGORY_NAMES = { block: '方块', mob: '生物', entity: '实体' }
@@ -10,13 +11,26 @@ export function officialName(id, kind = 'block') {
     || ZH_NAMES[`item.minecraft.${id}`] || ZH_NAMES[`entity.minecraft.${id}`] || '未命名对象'
 }
 const entity = (id, nbt = {}) => ({ id: 'minecraft:' + id, pos: [0, 0, 0], rotation: [0, 0], nbt })
+const candleCakes = BLOCK_IDS.filter(id => id === 'candle_cake' || id.endsWith('_candle_cake'))
+const groupedBlocks = new Set([...candleCakes, ...BLOCK_IDS.filter(id => id.endsWith('_wall_banner'))])
+export function blockVariants(id) {
+  if (id === 'cake') return ['cake', ...candleCakes]
+  if (id.endsWith('_banner') && !id.endsWith('_wall_banner')) return [id, id.replace('_banner', '_wall_banner')]
+  return [id]
+}
+export function blockIdFor(entry, values = {}) {
+  return entry.variants?.includes(values.block) ? values.block : entry.id
+}
+export function blockVariantLabel(id) {
+  return id.endsWith('_banner') ? (id.endsWith('_wall_banner') ? '挂墙' : '立地') : officialName(id)
+}
 export const CATALOG = [
-  ...BLOCK_IDS.map(id => ({ key: 'block/' + id, id, kind: 'block', name: officialName(id) })),
+  ...BLOCK_IDS.filter(id => !groupedBlocks.has(id)).map(id => ({ key: 'block/' + id, id, kind: 'block', name: officialName(id), variants: blockVariants(id) })),
   ...ALL_MOB_FIXTURES.map(fixture => ({ key: 'mob/' + fixture.id.slice(10), id: fixture.id.slice(10), kind: 'mob', name: officialName(fixture.id, 'entity'), fixture })),
   { key: 'entity/boat', id: 'boat', name: officialName('boat', 'entity'), kind: 'entity', fixture: entity('oak_boat') },
   { key: 'entity/minecart', id: 'minecart', name: officialName('minecart', 'entity'), kind: 'entity', fixture: entity('minecart') },
   { key: 'entity/item_frame', id: 'item_frame', name: officialName('item_frame', 'entity'), kind: 'entity', fixture: entity('item_frame', { Facing: 3 }) },
-  { key: 'entity/armor_stand', id: 'armor_stand', name: officialName('armor_stand', 'entity'), kind: 'entity', fixture: entity('armor_stand', { ShowArms: 1 }) },
+  { key: 'entity/armor_stand', id: 'armor_stand', name: officialName('armor_stand', 'entity'), kind: 'entity', fixture: entity('armor_stand', { ShowArms: 0 }) },
 ]
 export const ITEM_OPTIONS = ITEM_IDS.map(id => ({ value: id, label: officialName(id, 'item') }))
 const DYES = ['white', 'orange', 'magenta', 'light_blue', 'yellow', 'lime', 'pink', 'gray', 'light_gray', 'cyan', 'purple', 'blue', 'brown', 'green', 'red', 'black']
@@ -56,6 +70,7 @@ export function entityFields(entry) {
   if (['cat', 'wolf', 'parrot'].includes(id)) f.push(sitting())
   if (['cat', 'wolf'].includes(id)) f.push(owner(), colors('CollarColor', '项圈颜色'))
   if (id === 'creeper') f.push(bool('powered', '状态', '普通苦力怕', '闪电苦力怕'))
+  if (id === 'pillager') f.push(state('HandItems', '手臂姿态', [[[], '空手'], [[{ id: 'minecraft:crossbow', count: 1 }], '持弩']]))
   if (id === 'wither') f.push(state('Health', '护甲', [[300, '正常'], [140, '半血护甲']]), state('Invul', '生成状态', [[0, '正常'], [200, '无敌阶段']]))
   if (id === 'bat') f.push(state('BatFlags', '姿态', [[0, '飞行'], [1, '倒挂']]))
   if (id === 'sheep') f.push(colors(), bool('Sheared', '羊毛', '未剪毛', '已剪毛'), state('CustomName', '特殊名称', [['', '普通'], ['jeb_', '彩虹羊毛（jeb_）']]))
@@ -137,13 +152,19 @@ export function blockFields(blockstate, id) {
     }
   }
   for (const part of blockstate?.multipart || []) visit(part.when)
+  // 游戏状态报告包含不影响模型选择的属性，尤其是 waterlogged 和墙连接的 none。
+  // 保留资源包额外声明的属性，同时用原版报告补全取值集合。
+  const registry = BLOCK_STATES[id] || (id === 'chain' ? BLOCK_STATES.iron_chain : null)
+  for (const [key, values] of Object.entries(registry?.[0] || {})) for (const value of values) add(key, value)
   if (['water', 'lava'].includes(id)) for (let i = 0; i < 16; i++) add('level', i)
   const preferred = { facing: 'south', half: 'lower', type: 'single', axis: 'y', shape: 'straight', up: 'true', part: 'foot' }
   return [...props].map(([key, set]) => {
+    if (key === 'half' && set.has('upper') && set.has('lower')) return field(key, '显示部分', [['all', '全部'], ['upper', '上半'], ['lower', '下半']])
+    if (key === 'part' && set.has('head') && set.has('foot')) return field(key, '显示部分', [['all', '全部'], ['head', '床头'], ['foot', '床尾']])
     const values = [...set].sort((a, b) => a.localeCompare(b, 'en', { numeric: true }))
-    const first = [preferred[key], 'false', 'none', 'bottom', '0'].find(v => set.has(v))
+    const first = [preferred[key], registry?.[1]?.[key], 'false', 'none', 'bottom', '0'].find(v => set.has(v))
     if (first) values.splice(values.indexOf(first), 1), values.unshift(first)
-    return field(key, PROP_LABELS[key] || key, values.map(v => [v, VALUE_LABELS[v] || v]))
+    return field(key, PROP_LABELS[key] || key, values.map(v => [v, v === 'none' && ['north', 'south', 'west', 'east'].includes(key) ? '不显示' : VALUE_LABELS[v] || v]))
   })
 }
 
@@ -152,7 +173,10 @@ export function filterCatalog(scope = 'all', query = '') {
   const matches = text => terms.every(term => text.toLowerCase().includes(term))
   const matchingItems = terms.length ? ITEM_OPTIONS.filter(item => matches(item.label + ' ' + item.value)) : []
   return CATALOG.filter(entry => scope === 'all' || entry.kind === scope).filter(entry => {
-    const variantNames = entry.kind === 'block' ? '' : entityFields(entry).flatMap(f => f.options.map(o => o.label + ' ' + o.value)).join(' ')
+    const variantNames = entry.kind === 'block' ? entry.variants.map(id => officialName(id) + ' ' + blockVariantLabel(id) + ' ' + id + (id.endsWith('_wall_banner') ? ' 墙上' : '')).join(' ') : entityFields(entry).flatMap(f => f.options.map(o => o.label + ' ' + o.value)).join(' ')
     return matches(entry.name + ' ' + entry.id + ' ' + variantNames) || (entry.key === 'entity/item_frame' && matchingItems.length > 0)
-  }).map(entry => ({ entry, matchedItem: terms.length && entry.key === 'entity/item_frame' ? matchingItems[0]?.value : undefined }))
+  }).map(entry => ({ entry,
+    matchedBlock: terms.length && entry.kind === 'block' ? entry.variants.find(id => matches(officialName(id) + ' ' + blockVariantLabel(id) + ' ' + id + (id.endsWith('_wall_banner') ? ' 墙上' : ''))) : undefined,
+    matchedItem: terms.length && entry.key === 'entity/item_frame' ? matchingItems[0]?.value : undefined,
+  }))
 }

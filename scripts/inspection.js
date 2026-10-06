@@ -39,12 +39,12 @@ controls.enableDamping = true
 function readRoute() {
   const p = new URLSearchParams(location.search)
   const raw = p.get('scope'), scope = raw === 'features' ? 'mob' : ['block', 'mob', 'entity'].includes(raw) ? raw : 'all'
-  return { scope, query: p.get('q') || '', page: Math.max(0, Math.floor(Number(p.get('page')) || 0)), pack: p.get('pack') === 'xk' ? 'xk' : 'vanilla' }
+  return { scope, query: p.get('q') || '', page: Math.max(0, Math.floor(Number(p.get('page')) || 0)), pack: p.get('pack') === 'vanilla' ? 'vanilla' : 'xk' }
 }
 function writeRoute() {
   const p = new URLSearchParams({ scope: route.scope, page: route.page })
   if (route.query) p.set('q', route.query)
-  if (route.pack === 'xk') p.set('pack', 'xk')
+  if (route.pack === 'vanilla') p.set('pack', 'vanilla')
   history.replaceState(null, '', '?' + p)
 }
 const dispose = group => disposeInspectionModel(group, sharedTextures)
@@ -81,8 +81,8 @@ function createView(group, entry, slot) {
 function animationTime(group) {
   group.traverse(o => { if (o.userData.updateAnimation) o.userData.animationAge = age })
 }
-async function defaultFields(entry, provider) {
-  return entry.kind === 'block' ? fieldsFor(entry, provider) : entityFields(entry)
+async function defaultFields(entry, provider, values = {}) {
+  return entry.kind === 'block' ? fieldsFor(entry, provider, values) : entityFields(entry)
 }
 function initialValues(entry, fields) {
   return Object.fromEntries(fields.map(f => {
@@ -107,7 +107,7 @@ async function renderPage() {
   $('previous').disabled = route.page === 0; $('next').disabled = route.page >= pages - 1
   $('empty').hidden = matches.length > 0
   const entries = matches.slice(route.page * PAGE_SIZE, (route.page + 1) * PAGE_SIZE)
-  const jobs = entries.map(({ entry, matchedItem }) => {
+  const jobs = entries.map(({ entry, matchedItem, matchedBlock }) => {
     const button = document.createElement('button'); button.type = 'button'; button.className = 'cell'; button.dataset.key = entry.key
     const slot = document.createElement('div'); slot.className = 'model-slot'
     const message = document.createElement('span'); message.className = 'cell-message'; message.textContent = '加载中…'; slot.append(message)
@@ -115,13 +115,15 @@ async function renderPage() {
     const title = document.createElement('strong'); title.textContent = entry.name
     const note = document.createElement('small'); note.textContent = matchedItem ? officialName(matchedItem, 'item') : CATEGORY_NAMES[entry.kind]
     caption.append(title, note); button.append(slot, caption); $('grid').append(button)
-    button.onclick = () => openDetail(entry, matchedItem)
+    button.onclick = () => openDetail(entry, matchedItem, matchedBlock)
     return async () => {
       let group
       try {
-        const fields = await defaultFields(entry, provider)
+        const fields = await defaultFields(entry, provider, { block: matchedBlock })
         if (token !== generation) return
-        group = await buildInspectionModel(entry, provider, initialValues(entry, fields), matchedItem)
+        const values = initialValues(entry, fields)
+        if (matchedBlock) values.block = matchedBlock
+        group = await buildInspectionModel(entry, provider, values, matchedItem)
         if (token !== generation) { dispose(group); return }
         message.textContent = modelMessage(group, entry)
         if (group) scenes.push(createView(group, entry, slot))
@@ -147,7 +149,11 @@ function fillFields() {
     const select = document.createElement('select'); select.id = label.htmlFor; select.dataset.path = f.path
     f.options.forEach((o, i) => select.add(new Option(o.label, String(i))))
     select.value = String(Math.max(0, f.options.findIndex(o => JSON.stringify(o.value) === JSON.stringify(activeValues[f.path]))))
-    select.onchange = () => { activeValues[f.path] = f.options[Number(select.value)].value; rebuildDetail() }
+    select.onchange = () => {
+      activeValues[f.path] = f.options[Number(select.value)].value
+      if (f.path === 'block') refreshBlockFields()
+      else rebuildDetail()
+    }
     row.append(label, select); $('state-fields').append(row)
   }
   if (!activeFields.length) {
@@ -164,7 +170,7 @@ function fillItems() {
   for (const o of options) select.add(new Option(o.label, o.value))
   select.value = activeItem
 }
-async function openDetail(entry, item = '') {
+async function openDetail(entry, item = '', block) {
   const token = ++detailGeneration
   activeEntry = entry; activeItem = item || ''; activeFields = []; activeValues = {}
   if (detailView) dispose(detailView.group)
@@ -177,11 +183,25 @@ async function openDetail(entry, item = '') {
   $('model-message').textContent = '正在加载模型…'
   if (!$('detail').open) $('detail').showModal()
   try {
-    const fields = await defaultFields(entry, assets)
+    const fields = await defaultFields(entry, assets, { block })
     if (token !== detailGeneration || !$('detail').open) return
     activeFields = fields
-    activeValues = initialValues(entry, activeFields); fillFields()
+    activeValues = initialValues(entry, activeFields)
+    if (block) activeValues.block = block
+    fillFields()
     $('reset-state').disabled = false
+    await rebuildDetail()
+  } catch (error) { if (token === detailGeneration) $('model-message').textContent = '加载失败：' + error.message }
+}
+async function refreshBlockFields(reset = false) {
+  const token = ++detailGeneration, entry = activeEntry, previous = reset ? {} : { ...activeValues }
+  $('reset-state').disabled = true
+  try {
+    const fields = await defaultFields(entry, assets, previous)
+    if (token !== detailGeneration || !$('detail').open) return
+    activeFields = fields; activeValues = initialValues(entry, fields)
+    for (const field of fields) if (field.options.some(o => o.value === previous[field.path])) activeValues[field.path] = previous[field.path]
+    fillFields(); $('reset-state').disabled = false
     await rebuildDetail()
   } catch (error) { if (token === detailGeneration) $('model-message').textContent = '加载失败：' + error.message }
 }
@@ -196,7 +216,7 @@ async function rebuildDetail() {
     if (detailView) dispose(detailView.group)
     detailView = group ? createView(group, entry, $('detail-stage')) : null
     $('model-message').textContent = modelMessage(group, entry) || (item ? officialName(item, 'item') : '切换状态可对照不同外观')
-    $('detail-id').textContent = values.id || 'minecraft:' + entry.id
+    $('detail-id').textContent = values.id || 'minecraft:' + (values.block || entry.id)
     controls.enabled = !!detailView
     resetCamera()
   } catch (error) {
@@ -226,7 +246,10 @@ $('detail').addEventListener('click', event => { if (event.target === $('detail'
   if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) closeDetail()
 } })
 $('reset-view').onclick = resetCamera
-$('reset-state').onclick = () => { activeValues = initialValues(activeEntry, activeFields); activeItem = ''; fillFields(); fillItems(); rebuildDetail() }
+$('reset-state').onclick = () => {
+  if (activeEntry.kind === 'block') return refreshBlockFields(true)
+  activeValues = initialValues(activeEntry, activeFields); activeItem = ''; fillFields(); fillItems(); rebuildDetail()
+}
 $('item-search').oninput = fillItems
 $('item-select').onchange = () => { activeItem = $('item-select').value; rebuildDetail() }
 $('scope').onchange = () => { route.scope = $('scope').value; route.page = 0; renderPage() }

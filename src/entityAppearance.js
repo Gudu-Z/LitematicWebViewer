@@ -284,7 +284,10 @@ export function getMobAppearance(entity, id, data) {
   }
   // 取消原版在 setAngles 中才隐藏的多余部件，避免同时显示交叉双臂和伸出的双臂。
   if (['pillager', 'vindicator', 'evoker', 'illusioner'].includes(id)) model = transformEntityModel(model, (node, name) => {
-    if (['right_arm', 'left_arm'].includes(name) || (name === 'hat' && id !== 'illusioner')) node.cuboids = []
+    // PillagerEntity.getState 返回 NEUTRAL / CROSSBOW_HOLD，永远不返回 CROSSED。
+    // 其余灾厄村民的静止状态保留交叉手臂；不能把掠夺者的独立双臂一并删掉。
+    if (id === 'pillager' && name === 'arms') { node.cuboids = []; node.children = {} }
+    if ((id !== 'pillager' && ['right_arm', 'left_arm'].includes(name)) || (name === 'hat' && id !== 'illusioner')) node.cuboids = []
   })
   if (id === 'goat') model = transformEntityModel(model, (node, name) => {
     if ((name === 'left_horn' && n.HasLeftHorn != null && !n.HasLeftHorn) || (name === 'right_horn' && n.HasRightHorn != null && !n.HasRightHorn)) node.cuboids = []

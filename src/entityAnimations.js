@@ -67,6 +67,15 @@ export function applyIdlePose(parts, id, state, age) {
     }
   }
   switch (id) {
+    case 'pillager': {
+      const items = [...(nbt.HandItems || []), nbt.equipment?.mainhand, nbt.equipment?.offhand]
+      if (items.some(item => item?.id?.replace(/^minecraft:/, '') === 'crossbow')) {
+        // IllagerEntityModel.CROSSBOW_HOLD -> ArmPosing.hold（静止持弩姿态）。
+        set('right_arm', 'y', -0.3); set('left_arm', 'y', 0.6)
+        set('right_arm', 'x', -PI / 2 + pitch + 0.1); set('left_arm', 'x', -1.5 + pitch)
+      }
+      break
+    }
     case 'guardian': case 'elder_guardian': {
       const xs = [0, 0, 8, -8, -8, 8, 8, -8, 0, 0, 8, -8]
       const ys = [-8, -8, -8, -8, 0, 0, 0, 0, 8, 8, 8, 8]
