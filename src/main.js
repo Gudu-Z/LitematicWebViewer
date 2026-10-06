@@ -48,8 +48,16 @@ const view = {
   showWireframes: true,
   showDimensions: true,
   showFog: true, // 水下雾开关
+  illagerExtraArms: false,
   materialSortAsc: false, // 材料排序：false=多→少，true=少→多
 }
+
+// 主预览器与模型图鉴分别保存趣味选项。
+const ILLAGER_ARMS_PREFERENCE = 'viewer-illager-extra-arms-v1'
+try { view.illagerExtraArms = localStorage.getItem(ILLAGER_ARMS_PREFERENCE) === 'true' } catch {}
+const illagerExtraArms = document.getElementById('illagerExtraArms')
+illagerExtraArms.checked = view.illagerExtraArms
+illagerExtraArms.disabled = !renderer
 
 // 全局错误捕获，让任何错误都显示在页面上
 window.addEventListener('error', (e) => {
@@ -236,6 +244,21 @@ if (renderer) {
     view.showFog = e.target.checked
     renderer.setUnderwaterFogEnabled(view.showFog)
   })
+  illagerExtraArms.addEventListener('change', async () => {
+    if (busy) { illagerExtraArms.checked = view.illagerExtraArms; return }
+    const previous = view.illagerExtraArms
+    view.illagerExtraArms = illagerExtraArms.checked
+    setBusy(true); ui.clearError()
+    try {
+      await renderCurrentEntities()
+      try { localStorage.setItem(ILLAGER_ARMS_PREFERENCE, String(view.illagerExtraArms)) }
+      catch { ui.showError(t('settingsSaveFailed')) }
+    } catch (error) {
+      view.illagerExtraArms = previous
+      illagerExtraArms.checked = previous
+      ui.showError(t('settingsApplyFailed') + error.message)
+    } finally { setBusy(false) }
+  })
   // 设置：渲染模式
   document.getElementById('renderMode').addEventListener('change', (e) => {
     setRenderMode(e.target.value)
@@ -393,7 +416,10 @@ async function renderCurrentSigns() {
 // 渲染当前结构里的实体
 async function renderCurrentEntities() {
   if (!currentData || !renderer) return
-  const ents = filterByRegion(currentData.entities || [])
+  const ents = filterByRegion(currentData.entities || []).map(entity => ({
+    ...entity,
+    renderOptions: { ...entity.renderOptions, illagerExtraArms: view.illagerExtraArms },
+  }))
   await renderer.renderEntities(ents, assets, currentData)
 }
 
@@ -799,6 +825,7 @@ function setBusy(on) {
   busy = on
   document.getElementById('app').setAttribute('aria-busy', String(on))
   document.getElementById('packSettings').setAttribute('aria-busy', String(on))
+  illagerExtraArms.disabled = on || !renderer
   for (const el of document.querySelectorAll('#openBtn, #clearBtn, #welcomeOpenBtn, #demoBtn, #fileInput, #packBtn, #packInput, #controlPanel button, #controlPanel select, #regionListBody button')) {
     el.disabled = on || (el.id === 'clearBtn' && !currentData)
   }
