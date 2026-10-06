@@ -51,3 +51,19 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  notify-search:
+    needs: deploy
+    if: github.repository == 'Gudu-Z/LitematicWebViewer'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Notify IndexNow search engines
+        # Search-engine downtime must not mark a successful website deployment as failed.
+        continue-on-error: true
+        run: node scripts/submit-indexnow.mjs

@@ -219,6 +219,21 @@ resourcepacks/         可加载的资源包
 docs/images/           README 的实际页面截图
 ```
 
+### 搜索引擎收录与部署
+
+主预览器和模型图鉴提供独立的页面标题、简介、规范网址、分享元数据及 JSON-LD；[站点地图](https://gudu-z.github.io/LitematicWebViewer/sitemap.xml) 只列出这两个正式页面，搜索词、分页、资源包等参数不作为独立页面提交。
+
+GitHub Pages 部署成功后，`notify-search` 会通过 [IndexNow](https://www.indexnow.org/documentation) 通知 Bing 等参与的搜索引擎。`public/indexnow-key.txt` 是公开的网站所有权验证文件，通知前会检查线上文件是否已发布。提交结果记录在 Actions 日志和步骤摘要；HTTP 200 表示已收到，202 表示已收到但验证仍在进行，均不代表已经收录。手动检查或重新提交：
+
+```bash
+node scripts/submit-indexnow.mjs --dry-run  # 只检查提交范围，不发请求
+node scripts/submit-indexnow.mjs            # 部署完成后提交
+```
+
+Google 需在 [Search Console](https://search.google.com/search-console) 中添加网址前缀 `https://gudu-z.github.io/LitematicWebViewer/`，使用首页的 HTML 标记完成账号验证，然后在“站点地图”提交 `sitemap.xml`，并可通过“网址检查”请求抓取首页和模型图鉴。[Google 验证说明](https://support.google.com/webmasters/answer/9008080) · [站点地图说明](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)。
+
+当前站点部署在 `/LitematicWebViewer/` 子目录；搜索引擎只读取域名根目录的 `/robots.txt`，放在项目子目录中不会生效。当前域名根目录返回 404，并未禁止抓取，因此使用站长平台提交站点地图。[robots.txt 位置与 404 处理规则](https://developers.google.com/crawling/docs/robots-txt/robots-txt-spec)。迁移域名时须同步更新 HTML 规范网址与分享链接、结构化数据、站点地图和提交脚本；Fork 不会自动向原站点发送 IndexNow 通知。
+
 ## 七、参考与致谢
 
 本项目参考了以下项目与资料（在此致谢）：

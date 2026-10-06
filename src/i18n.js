@@ -5,6 +5,8 @@
 import { BLOCK_NAMES } from './blockNames.js'
 
 const STRINGS = {
+  pageTitle: ['LitematicWebViewer - Minecraft 投影在线预览器', 'LitematicWebViewer - Online Minecraft Schematic Viewer'],
+  pageDescription: ['免费在线预览 Minecraft Litematica 投影文件，支持 .litematic、.litematica 和 .nbt，提供 3D 旋转、逐层查看、材料统计、资源包切换与方块、生物模型图鉴。文件在浏览器本地处理。', 'Preview Minecraft Litematica schematics online for free. Open .litematic, .litematica and .nbt files, explore builds in 3D, inspect layers, count materials and browse block and mob models. Files are processed locally in your browser.'],
   openFile: ['打开投影文件', 'Open schematic'],
   viewerSubtitle: ['Minecraft 投影预览器', 'Minecraft schematic viewer'],
   welcomeTitle: ['打开你的 Minecraft 投影', 'Explore your Minecraft builds'],
@@ -180,6 +182,9 @@ export function applyTranslations(root = document) {
   })
   root.querySelectorAll('[data-i18n-title]').forEach((el) => {
     el.setAttribute('title', t(el.getAttribute('data-i18n-title')))
+  })
+  root.querySelectorAll('[data-i18n-content]').forEach((el) => {
+    el.setAttribute('content', t(el.getAttribute('data-i18n-content')))
   })
   root.querySelectorAll('[data-i18n-aria-label]').forEach((el) => {
     el.setAttribute('aria-label', t(el.getAttribute('data-i18n-aria-label')))
