@@ -151,6 +151,7 @@ export function createFixture(entry, values = {}, item = '') {
 
 const PROP_LABELS = { attachment: '安装方式', facing: '朝向', axis: '轴向', half: '半部', type: '类型', shape: '形状', open: '开启', powered: '供能', lit: '点亮', waterlogged: '含水', age: '生长阶段', level: '液面等级', power: '红石信号', rotation: '旋转', north: '北侧', south: '南侧', east: '东侧', west: '西侧', up: '上方连接', down: '下方连接', layers: '层数', bites: '食用次数', part: '部件', hinge: '门轴', face: '附着面', attached: '附着', persistent: '持续存在', distance: '距离', enabled: '启用', conditional: '条件制约', mode: '模式', candles: '蜡烛数量', honey_level: '蜂蜜等级', in_wall: '墙内', occupied: '占用', unstable: '不稳定', triggered: '触发', charges: '充能', eggs: '蛋数量', hatch: '孵化阶段', moisture: '湿润度', snowy: '覆雪', stage: '生长阶段', flower_amount: '花朵数量', orientation: '朝向组合', tilt: '倾斜', drag: '向下流动', hanging: '悬挂', vertical_direction: '垂直朝向', thickness: '粗细', sculk_sensor_phase: '感测阶段', shrieking: '尖啸', can_summon: '允许召唤', bloom: '绽放', berries: '浆果', bottom: '底部', delay: '延迟', locked: '锁定', inverted: '反相', note: '音高', instrument: '乐器', extended: '伸出', short: '缩短', has_book: '有书', has_record: '有唱片', has_bottle_0: '左侧药水', has_bottle_1: '中间药水', has_bottle_2: '右侧药水' }
 const VALUE_LABELS = { single_wall: '单墙', double_wall: '双墙', true: '是', false: '否', north: '北', south: '南', west: '西', east: '东', up: '上', down: '下', top: '上', bottom: '下', upper: '上半部', lower: '下半部', double: '双层', single: '单个', left: '左', right: '右', none: '无', low: '低', tall: '高', side: '侧面', straight: '直形', inner_left: '内左', inner_right: '内右', outer_left: '外左', outer_right: '外右', head: '头部', foot: '尾部', floor: '地面', wall: '墙面', ceiling: '顶面', x: '东西', y: '上下', z: '南北', compare: '比较', subtract: '减法', active: '激活', inactive: '静止', cooldown: '冷却' }
+const blockRegistry = id => BLOCK_STATES[id] || (id === 'chain' ? BLOCK_STATES.iron_chain : null)
 export function blockFields(blockstate, id) {
   const props = new Map()
   const add = (key, value) => {
@@ -169,7 +170,7 @@ export function blockFields(blockstate, id) {
   for (const part of blockstate?.multipart || []) visit(part.when)
   // 游戏状态报告包含不影响模型选择的属性，尤其是 waterlogged 和墙连接的 none。
   // 保留资源包额外声明的属性，同时用原版报告补全取值集合。
-  const registry = BLOCK_STATES[id] || (id === 'chain' ? BLOCK_STATES.iron_chain : null)
+  const registry = blockRegistry(id)
   for (const [key, values] of Object.entries(registry?.[0] || {})) for (const value of values) add(key, value)
   if (['water', 'lava'].includes(id)) for (let i = 0; i < 16; i++) add('level', i)
   const preferred = { facing: 'south', half: 'lower', type: 'single', axis: 'y', shape: 'straight', up: id === 'fire' ? 'false' : 'true', part: 'foot' }
@@ -187,12 +188,15 @@ export function filterCatalog(scope = 'all', query = '') {
   const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const matches = text => terms.every(term => text.toLowerCase().includes(term))
   const names = (id, kind) => officialName(id, kind, 'zh') + ' ' + officialName(id, kind, 'en')
+  const blockText = id => names(id, 'block') + ' ' + blockVariantLabel(id) + ' ' + id
+    + (id.includes('wall') ? ' 墙上' : '')
+    + (blockRegistry(id)?.[0]?.waterlogged?.includes('true') ? ' 含水 waterlogged' : '')
   const matchingItems = terms.length ? ITEM_OPTIONS.filter(item => matches(names(item.value, 'item') + ' ' + item.value)) : []
   return CATALOG.filter(entry => scope === 'all' || entry.kind === scope).filter(entry => {
-    const variantNames = entry.kind === 'block' ? entry.variants.map(id => names(id, 'block') + ' ' + blockVariantLabel(id) + ' ' + id + (id.includes('wall') ? ' 墙上' : '')).join(' ') : entityFields(entry).flatMap(f => f.options.map(o => o.label + ' ' + o.value)).join(' ')
+    const variantNames = entry.kind === 'block' ? entry.variants.map(blockText).join(' ') : entityFields(entry).flatMap(f => f.options.map(o => o.label + ' ' + o.value)).join(' ')
     return matches(names(entry.id, entry.kind === 'block' ? 'block' : 'entity') + ' ' + entry.id + ' ' + variantNames) || (entry.key === 'entity/item_frame' && matchingItems.length > 0)
   }).map(entry => ({ entry,
-    matchedBlock: terms.length && entry.kind === 'block' ? entry.variants.find(id => matches(names(id, 'block') + ' ' + blockVariantLabel(id) + ' ' + id + (id.includes('wall') ? ' 墙上' : ''))) : undefined,
+    matchedBlock: terms.length && entry.kind === 'block' ? entry.variants.find(id => matches(blockText(id))) : undefined,
     matchedItem: terms.length && entry.key === 'entity/item_frame' ? matchingItems[0]?.value : undefined,
   }))
 }

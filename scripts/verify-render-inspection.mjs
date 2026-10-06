@@ -25,6 +25,17 @@ assert.ok(filterCatalog('entity', '白桦木船').some(r => r.entry.id === 'boat
 assert.ok(filterCatalog('entity', '涂蜡的铜块').some(r => r.matchedItem === 'waxed_copper_block'))
 assert.equal(filterCatalog('block', 'stone').some(r => r.entry.kind !== 'block'), false)
 assert.equal(filterCatalog('all', '不可能存在的测试名称').length, 0)
+const wetResults = filterCatalog('all', '含水')
+assert.ok(wetResults.length > 0, '含水搜索应显示可含水方块')
+assert.deepEqual(filterCatalog('block', ' WATERLOGGED '), wetResults, '中英文搜索应返回相同方块')
+for (const id of ['oak_slab', 'oak_stairs', 'oak_sign', 'chain', 'iron_chain']) {
+  assert.ok(wetResults.some(r => r.entry.id === id), id + ' 应被含水搜索命中')
+}
+assert.equal(wetResults.some(r => r.entry.kind !== 'block' || ['stone', 'water', 'oak_door'].includes(r.entry.id)), false)
+assert.equal(filterCatalog('mob', '含水').length, 0)
+assert.equal(filterCatalog('entity', 'waterlogged').length, 0)
+assert.deepEqual(filterCatalog('block', '含水 spruce_wall_sign').map(r => [r.entry.id, r.matchedBlock]), [['spruce_sign', 'spruce_wall_sign']])
+assert.equal(filterCatalog('block', '含水 stone').some(r => r.entry.id === 'stone'), false)
 
 const textures = new Map(), shared = new Set()
 const assets = {
