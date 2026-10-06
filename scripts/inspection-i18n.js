@@ -3,6 +3,22 @@ import { EN_NAMES } from './inspection-english.js'
 import { language } from './inspection-catalog.js'
 
 const words = {
+  '设置': 'Settings', '图鉴设置': 'Catalog settings', '关闭设置': 'Close settings', '材质包': 'Resource packs',
+  '本地导入 .zip': 'Import local .zip', '选择本地材质包': 'Choose local resource packs',
+  '越靠上的材质包优先级越高；未覆盖的资源使用原版材质。': 'Packs at the top take priority. Uncovered resources use vanilla textures.',
+  '已加载': 'Loaded', '可用材质包': 'Available packs', '内置': 'Built in', '本地导入': 'Local import',
+  '上移': 'Move up', '下移': 'Move down', '卸载': 'Unload', '加载': 'Load',
+  '未加载材质包，使用原版材质。': 'No packs loaded. Using vanilla textures.',
+  '没有其他材质包，可从本地导入。': 'No other packs available. Import a local pack to add one.',
+  '趣味选项': 'Fun options', '巨儒卫道士': 'Four-armed illagers',
+  '让卫道士、唤魔者和幻术师同时显示交叉与独立的两套手臂。': 'Show both crossed and separate arms on vindicators, evokers and illusioners.',
+  '正在应用设置…': 'Applying settings…', '设置已应用': 'Settings applied', '操作失败：': 'Operation failed:',
+  '无法读取 ZIP 文件': 'Cannot read ZIP file', '材质包缺少 pack.mcmeta': 'Resource pack is missing pack.mcmeta',
+  'pack.mcmeta 格式无效': 'Invalid pack.mcmeta', '材质包没有可用的 Minecraft 资源': 'Resource pack contains no usable Minecraft assets',
+  '无法保存设置，当前会话仍可使用。': 'Could not save settings. They still apply to this session.',
+  '无法读取本地材质包，仍可在当前会话导入。': 'Could not restore local packs. You can still import packs for this session.',
+  '无法保存本地材质包，刷新后需要重新导入。': 'Could not save local packs. Import them again after refreshing.',
+  '部分设置未能恢复：': 'Some settings could not be restored:',
   '切换语言': 'Switch language',
   '惯用手': 'Main arm', '右手': 'Right hand', '左手': 'Left hand', '轻度': 'Low', '中度': 'Medium', '重度': 'High',
   '头部装备': 'Head equipment', '胸部装备': 'Chest equipment', '腿部装备': 'Leg equipment', '脚部装备': 'Feet equipment',

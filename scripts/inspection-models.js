@@ -66,14 +66,14 @@ export function inspectionItemId(entry, values = {}) {
   return id !== 'air' && ITEM_IDS.includes(id) ? id : null
 }
 
-export async function buildInspectionModel(entry, assets, values = {}, item = '', view = 'world') {
+export async function buildInspectionModel(entry, assets, values = {}, item = '', view = 'world', renderOptions = {}) {
   if (view !== 'world') {
     const id = inspectionItemId(entry, values)
     if (!id) return null
     if (view === 'frame') return buildEntityMesh({ id: 'minecraft:item_frame', pos: [0, 0, 0], rotation: [0, 0], nbt: { Facing: 3, Item: { id: 'minecraft:' + id, count: 1 } } }, assets)
     return buildItemPreview({ id: 'minecraft:' + id, count: 1 }, assets)
   }
-  if (entry.kind !== 'block') return buildEntityMesh(createFixture(entry, values, item), assets)
+  if (entry.kind !== 'block') return buildEntityMesh({ ...createFixture(entry, values, item), renderOptions }, assets)
   return Renderer.buildBlockPreview(await createBlockSampleData(entry, assets, values), assets)
 }
 

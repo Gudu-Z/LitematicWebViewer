@@ -15,22 +15,22 @@ function cuboidFaces(c, texW, texH) {
   const uN = u + dz, uE = u + dz + dx, uE2 = u + dz + dx + dx
   const uS = u + dz + dx + dz, uS2 = u + dz + dx + dz + dx
   const vT = v, vM = v + dz, vB = v + dz + dy
+  // Dilation 可把零宽盒膨胀成实体（如疣猪兽鬃毛）；只有实际共面时才去重。
+  const flatX = x0 === x1, flatY = y0 === y1, flatZ = z0 === z1
   const FACES = [
-    [['v5', 'v4', 'v0', 'v1'], [uN, vT, uE, vM], [0, 1, 0], dy === 0], // down(+y)：dy=0 时与 up 面重合，跳过
-    [['v2', 'v3', 'v7', 'v6'], [uE, vM, uE2, vT], [0, -1, 0], false], // up(-y)
-    [['v0', 'v4', 'v7', 'v3'], [u, vM, uN, vB], [-1, 0, 0], dx === 0], // west(-x)：dx=0 时与 east 面重合，跳过
-    [['v1', 'v0', 'v3', 'v2'], [uN, vM, uE, vB], [0, 0, -1], dz === 0], // north(-z)：dz=0 时与 south 面重合，跳过
-    [['v5', 'v1', 'v2', 'v6'], [uE, vM, uS, vB], [1, 0, 0], false], // east(+x)
-    [['v4', 'v5', 'v6', 'v7'], [uS, vM, uS2, vB], [0, 0, 1], false], // south(+z)
+    [['v5', 'v4', 'v0', 'v1'], [uN, vT, uE, vM], [0, -1, 0], flatX || flatY || flatZ], // 原版 Direction.DOWN
+    [['v2', 'v3', 'v7', 'v6'], [uE, vM, uE2, vT], [0, 1, 0], flatX || flatZ], // 原版 Direction.UP
+    [['v0', 'v4', 'v7', 'v3'], [u, vM, uN, vB], [-1, 0, 0], flatX || flatY || flatZ],
+    [['v1', 'v0', 'v3', 'v2'], [uN, vM, uE, vB], [0, 0, -1], flatX || flatY || flatZ],
+    [['v5', 'v1', 'v2', 'v6'], [uE, vM, uS, vB], [1, 0, 0], flatY || flatZ], // east(+x)
+    [['v4', 'v5', 'v6', 'v7'], [uS, vM, uS2, vB], [0, 0, 1], flatX || flatY], // south(+z)
   ]
   // 平面（某维度为 0）的“背面”采样与“正面”相同的 UV，避免背面空白（如炽足兽刚毛、沼泽骷髅蘑菇）。
-  // 同时上面已经把这些与正面重合的背面标记为 skip，避免两个重合面（法线相反）z-fighting。
-  // 但背面与正面的顶点顺序相反，不能直接把正面的 UV 数组套到背面：套用后 V（弦向）会上下颠倒。
-  // 例如末影龙翼膜（u=-56）：顶面应采 U=u+dz..u+dz+dx、V=v+dz(前缘)..v(后缘)，即 [uN,vM,uE,vT]，
-  // 而不是 [uN,vT,uE,vM]——后者会让翼膜“反了”。故这里按顶面自身顶点顺序重排 V。
-  if (dy === 0) FACES[1][1] = [uN, vM, uE, vT]
-  if (dz === 0) FACES[5][1] = FACES[3][1].slice()
-  if (dx === 0) FACES[4][1] = FACES[2][1].slice()
+  // 跳过重合面以避免 z-fighting，也跳过面积为零的侧面，避免蒙皮浮点误差产生边缘杂线。
+  // 保留面的顶点顺序与原面相反：Y 平面重排 V（如末影龙翼膜），Z/X 平面重排 U。
+  if (flatY) FACES[1][1] = [uN, vM, uE, vT]
+  if (flatZ) FACES[5][1] = [uE, vM, uN, vB]
+  if (flatX) FACES[4][1] = [uN, vM, u, vB]
   const out = []
   for (const [idx, [u1, v1, u2, v2], dir, skip] of FACES) {
     if (skip) continue

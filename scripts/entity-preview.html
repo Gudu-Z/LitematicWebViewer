@@ -13,9 +13,8 @@
     <div class="toolbar">
       <label class="sr-only" for="scope" data-i18n="分类">分类</label>
       <select id="scope"><option value="all" data-i18n="全部">全部</option><option value="block" data-i18n="方块">方块</option><option value="mob" data-i18n="生物">生物</option><option value="entity" data-i18n="实体">实体</option></select>
-      <label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="搜索中文名或 ID" aria-label="搜索方块、生物、实体或展示框物品" autocomplete="off"></label>
-      <label class="sr-only" for="pack" data-i18n="资源包">资源包</label>
-      <select id="pack"><option value="xk" data-i18n="XK 材质包">XK 材质包</option><option value="vanilla" data-i18n="原版材质">原版材质</option></select>
+      <label class="search"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 5 5"/></svg><input id="search" type="search" placeholder="搜索中文名或 ID" aria-label="搜索方块、生物、实体或展示框物品" autocomplete="off"></label>
+      <button id="open-settings" type="button" aria-haspopup="dialog" aria-controls="settings" disabled><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="m9 3-.6 2.5-2 .9L4 5.7 1.8 9.5l1.8 1.8v2l-1.8 1.8L4 19l2.4-.7 2 .9L9 22h5l.6-2.8 2-.9 2.4.7 2.2-3.9-1.8-1.8v-2l1.8-1.8L19 5.7l-2.4.7-2-.9L14 3Z"/><circle cx="11.5" cy="12.5" r="3.3"/></svg><span data-i18n="设置">设置</span></button>
       <button id="language" type="button" aria-label="切换语言">English</button>
       <button id="pause" type="button" aria-pressed="false" data-i18n="暂停动画">暂停动画</button>
     </div>
@@ -31,6 +30,21 @@
     <div class="detail-body">
       <div class="model-column"><div id="detail-stage" aria-label="可旋转的模型预览"></div><p id="model-message" role="status"></p><div class="model-tools"><span data-i18n="拖动旋转 · 滚轮缩放">拖动旋转 · 滚轮缩放</span><button id="reset-view" type="button" data-i18n="重置视角">重置视角</button></div></div>
       <section class="state-panel" aria-label="模型状态"><h3 data-i18n="状态与变种">状态与变种</h3><div class="state-field"><label for="view-mode" data-i18n="查看方式">查看方式</label><select id="view-mode"><option value="world" data-i18n="世界形态">世界形态</option><option value="item" data-i18n="物品形态">物品形态</option><option value="frame" data-i18n="展示框内">展示框内</option></select></div><div id="state-fields"></div><div id="item-fields" hidden><label for="item-search" data-i18n="展示框物品">展示框物品</label><input id="item-search" type="search" placeholder="筛选物品名称" aria-label="筛选展示框物品"><select id="item-select" aria-label="展示框物品"></select></div><button id="reset-state" type="button" data-i18n="恢复默认状态">恢复默认状态</button></section>
+    </div>
+  </dialog>
+  <dialog id="settings" aria-labelledby="settings-title">
+    <div class="detail-heading"><h2 id="settings-title" data-i18n="图鉴设置">图鉴设置</h2><button id="close-settings" type="button" aria-label="关闭设置">✕</button></div>
+    <div class="settings-body">
+      <section aria-labelledby="packs-title">
+        <div class="settings-section-heading"><h3 id="packs-title" data-i18n="材质包">材质包</h3><button id="import-packs" type="button" data-i18n="本地导入 .zip">本地导入 .zip</button><input id="pack-files" type="file" accept=".zip,application/zip" multiple hidden aria-label="选择本地材质包"></div>
+        <p class="settings-note" data-i18n="越靠上的材质包优先级越高；未覆盖的资源使用原版材质。">越靠上的材质包优先级越高；未覆盖的资源使用原版材质。</p>
+        <div class="pack-columns">
+          <section aria-labelledby="loaded-title"><h4 id="loaded-title" data-i18n="已加载">已加载</h4><ul id="loaded-packs" class="pack-list"></ul></section>
+          <section aria-labelledby="available-title"><h4 id="available-title" data-i18n="可用材质包">可用材质包</h4><ul id="available-packs" class="pack-list"></ul></section>
+        </div>
+        <p id="settings-status" role="status" aria-live="polite"></p>
+      </section>
+      <section class="extra-settings" aria-labelledby="extras-title"><h3 id="extras-title" data-i18n="趣味选项">趣味选项</h3><label class="setting-toggle"><input id="illager-extra-arms" type="checkbox"><span data-i18n="巨儒卫道士">巨儒卫道士</span></label><p class="settings-note" data-i18n="让卫道士、唤魔者和幻术师同时显示交叉与独立的两套手臂。">让卫道士、唤魔者和幻术师同时显示交叉与独立的两套手臂。</p></section>
     </div>
   </dialog>
   <script type="module" src="./inspection.js"></script>

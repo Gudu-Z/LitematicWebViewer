@@ -77,7 +77,9 @@ npm run dev
 
 无需加载投影文件，打开[在线模型图鉴页](https://gudu-z.github.io/LitematicWebViewer/scripts/entity-preview.html)即可浏览模型。本地运行时，点击预览器右上角“隐藏界面”和“切换语言”之间的检查清单按钮，也可以直接打开 `http://localhost:5173/scripts/entity-preview.html`。
 
-支持“全部 / 方块 / 生物 / 实体”分类、中英文名称或 ID 搜索、分页、暂停动画和中英界面切换。默认使用内置 XK 材质包，可通过顶部下拉框切换原版；语言、资源包和搜索条件保存在 URL 中，便于刷新或分享。
+支持“全部 / 方块 / 生物 / 实体”分类、中英文名称或 ID 搜索、分页、暂停动画和中英界面切换。顶部“设置”可加载、卸载、排序材质包，并导入本地 ZIP；越靠上的包优先级越高，未覆盖的资源回退原版。首次打开默认加载内置 XK，卸载全部材质包即可使用原版。导入文件、加载顺序和趣味选项保存在当前浏览器；语言和搜索条件仍保存在 URL 中，兼容旧链接的 `pack=xk` / `pack=vanilla`。
+
+设置中的“巨儒卫道士”默认关闭；开启后，图鉴里的卫道士、唤魔者和幻术师同时显示交叉手臂与独立双臂。
 
 ![模型图鉴页的生物分类，可按名称搜索并点击卡片查看状态](docs/images/render-catalog.png)
 
@@ -106,7 +108,7 @@ npm run dev
 
 方块选项合并资源包模型声明与 [26.3 游戏生成的状态报告（mcmeta 归档）](https://github.com/misode/mcmeta/blob/26.3-summary/blocks/data.json)，包含 505 种可含水方块（另兼容旧版 chain ID）以及墙的“不显示 / 低 / 高”连接状态。方块网格、流体与特殊方块实体共用主预览器的渲染路径。空气等不可见方块保留目录项并标明原因；图鉴页显示的是当前渲染器的能力，仍受下文已知外观差异的限制。
 
-名称来自 Minecraft 26.3 官方 `zh_cn.json` 和 `en_us.json`，图鉴页默认使用内置 XK 材质包，也可切换原版；语言与资源包选择通过 URL 保留。更新默认资源版本后运行 `node scripts/gen-inspection-data.mjs <版本>`，重新生成目录、状态报告与官方译名。
+名称来自 Minecraft 26.3 官方 `zh_cn.json` 和 `en_us.json`。图鉴设置与主预览器独立；本地材质包通过 IndexedDB 保存，不上传服务器。更新默认资源版本后运行 `node scripts/gen-inspection-data.mjs <版本>`，重新生成目录、状态报告与官方译名。
 
 坐垫按 26.3 的 [CushionModel](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/model/object/cushion/cushionmodel/) 和 [CushionRenderer](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/renderer/entity/cushionrenderer/) 渲染，读取实体 NBT 的 `color` 与朝向。图鉴将 16 色坐垫合并为一张实体卡片，可切换颜色、四个朝向，以及对应的物品和展示框视图；投影主预览器使用同一渲染实现。
 
@@ -132,6 +134,8 @@ npm run dev
 
 时间按每秒 20 tick 推进；从已保存 NBT 和结构中的水方块选择姿态。随机待机的起点使用稳定种子，无法还原存档中未保存的客户端动画相位。没有持续待机动作的生物保持原版静止姿态；不模拟 AI、移动、攻击、粒子、临时事件或末影龙的历史飞行轨迹。
 
+监守者触角对照 26.3 的 [WardenModel](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/model/monster/warden/wardenmodel/) 与 [ModelPart.Cube](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/model/geom/modelpart/)：修正零厚度平面合并后横向 UV 翻转的问题，同步修正美西螈外鳃、翅膀、鱼鳍等共用部件。平面省略重合面和零面积侧面；膨胀后具有厚度的部件（如疣猪兽鬃毛）保留六面，并统一修正上下表面的法线方向。
+
 幼年形态使用 26.3 的 27 套独立模型、专用贴图及美西螈/骆驼/犰狳待机关键帧；嗅探兽和快乐恶魂使用原版缩放规则，快乐恶魂保留幼体内芯。猫、狼、狐狸的幼年坐姿/睡姿也按新版模型处理。生成数据记录了[客户端源码镜像](https://mc-packet-reference.netlify.app/26.x/source/net/minecraft/client/model/animal/cow/babycowmodel/)的具体 URL 和 SHA-256；运行 `node scripts/gen-baby-models.mjs --fetch`、`node scripts/gen-baby-animations.mjs --fetch` 可重新获取并转录。
 
 仍确认存在的差异：寒冷/温暖牛、猪、鸡等变种目前只切换贴图，未切换专用几何；村民帽子尚未读取资源包的 hat 元数据；狐狸叼物、熊猫进食等专用物品层、手持物附魔光效、自定义玩家头颅皮肤、拴绳及乘骑组合尚未完整渲染。手持物目前覆盖盔甲架、人形盔甲生物、掠夺者、悦灵和恼鬼，不模拟使用物品、攻击或拉弓过程。静态投影也不能复现游戏中的动态光照和实体之间的交互。图鉴页的敲钟、翻书和激活潮涌核心为显式演示选项；不模拟玩家靠近、潮涌核心框架检测、折跃门临时光束或粒子。
@@ -140,6 +144,8 @@ npm run dev
 
 ```bash
 node scripts/verify-entities.mjs  # 全部生物/状态、真实贴图、绑定姿态、动画无漂移、资源隔离及释放
+node scripts/verify-entity-planes.mjs  # 平面 UV、镜像/膨胀、面法线、监守者与图鉴双套手臂
+node scripts/verify-inspection-packs.mjs  # ZIP/BOM 校验、包裹目录、叠加排序、卸载与原版回退
 node scripts/verify-equipment.mjs # 装备槽、新旧 NBT、幼年/小型模型、姿态同步、染色与动物装备
 node scripts/verify-breeze.mjs   # 风层几何、UV、透明排序与滚动
 node scripts/verify-shulker.mjs  # 共用潜影盒几何回归

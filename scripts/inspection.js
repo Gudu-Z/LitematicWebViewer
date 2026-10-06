@@ -1,11 +1,11 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import JSZip from 'jszip'
 import { AssetProvider } from '../src/assets.js'
 import { CATALOG, CATEGORY_NAMES, ITEM_OPTIONS, officialName, entityFields, getPath, filterCatalog, language, setLanguage } from './inspection-catalog.js'
 import { buildInspectionModel, disposeInspectionModel, fieldsFor, inspectionItemId } from './inspection-models.js'
 import { t, optionLabel, translateDocument } from './inspection-i18n.js'
 import { createOrientationGizmo } from './orientation-gizmo.js'
+import { createInspectionSettings } from './inspection-settings.js'
 
 const $ = id => document.getElementById(id)
 const PAGE_SIZE = 24
@@ -25,7 +25,7 @@ function makeAssets() {
 }
 let assets = makeAssets(), scenes = [], generation = 0, detailGeneration = 0
 let activeEntry = null, activeFields = [], activeValues = {}, activeItem = '', detailView = null
-let paused = false, age = 0, lastTime = performance.now(), packZip = null
+let paused = false, age = 0, lastTime = performance.now()
 let route = readRoute()
 setLanguage(route.lang)
 let activeView = 'world'
@@ -46,12 +46,12 @@ translateDocument()
 function readRoute() {
   const p = new URLSearchParams(location.search)
   const raw = p.get('scope'), scope = raw === 'features' ? 'mob' : ['block', 'mob', 'entity'].includes(raw) ? raw : 'all'
-  return { scope, query: p.get('q') || '', page: Math.max(0, Math.floor(Number(p.get('page')) || 0)), pack: p.get('pack') === 'vanilla' ? 'vanilla' : 'xk', lang: p.get('lang') === 'en' ? 'en' : 'zh' }
+  return { scope, query: p.get('q') || '', page: Math.max(0, Math.floor(Number(p.get('page')) || 0)), pack: ['vanilla', 'xk'].includes(p.get('pack')) ? p.get('pack') : null, lang: p.get('lang') === 'en' ? 'en' : 'zh' }
 }
 function writeRoute() {
   const p = new URLSearchParams({ scope: route.scope, page: route.page })
   if (route.query) p.set('q', route.query)
-  if (route.pack === 'vanilla') p.set('pack', 'vanilla')
+  if (route.pack) p.set('pack', route.pack)
   if (route.lang === 'en') p.set('lang', 'en')
   history.replaceState(null, '', '?' + p)
 }
@@ -103,13 +103,13 @@ function initialValues(entry, fields) {
   }))
 }
 async function renderPage() {
-  const token = ++generation, provider = assets
+  const token = ++generation, provider = assets, renderOptions = settings.renderOptions()
   window.ready = false
   clearViews(); $('grid').replaceChildren(); $('grid').setAttribute('aria-busy', 'true')
   const matches = filterCatalog(route.scope, route.query)
   const pages = Math.max(1, Math.ceil(matches.length / PAGE_SIZE))
   route.page = Math.min(route.page, pages - 1); writeRoute()
-  $('scope').value = route.scope; $('search').value = route.query; $('pack').value = route.pack
+  $('scope').value = route.scope; $('search').value = route.query
   $('status').textContent = `${t(CATEGORY_NAMES[route.scope] || '全部')} · ${matches.length.toLocaleString()} ${language === 'en' ? 'entries' : '项'}`
   $('page-label').textContent = `${route.page + 1} / ${pages}`
   $('previous').disabled = route.page === 0; $('next').disabled = route.page >= pages - 1
@@ -131,7 +131,7 @@ async function renderPage() {
         if (token !== generation) return
         const values = initialValues(entry, fields)
         if (matchedBlock) values.block = matchedBlock
-        group = await buildInspectionModel(entry, provider, values, matchedItem)
+        group = await buildInspectionModel(entry, provider, values, matchedItem, 'world', renderOptions)
         if (token !== generation) { dispose(group); return }
         message.textContent = modelMessage(group, entry)
         if (group) scenes.push(createView(group, entry, slot))
@@ -223,7 +223,7 @@ async function rebuildDetail() {
   $('model-message').textContent = t('正在加载模型…')
   let group
   try {
-    group = await buildInspectionModel(entry, provider, values, item, activeView)
+    group = await buildInspectionModel(entry, provider, values, item, activeView, settings.renderOptions())
     if (token !== detailGeneration || !$('detail').open) { dispose(group); return }
     if (detailView) dispose(detailView.group)
     detailView = group ? createView(group, entry, $('detail-stage')) : null
@@ -268,6 +268,7 @@ $('item-select').onchange = () => { activeItem = $('item-select').value; rebuild
 $('view-mode').onchange = () => { activeView = $('view-mode').value; rebuildDetail() }
 $('language').onclick = async () => {
   route.lang = language === 'en' ? 'zh' : 'en'; setLanguage(route.lang); translateDocument()
+  settings.render()
   $('pause').textContent = t(paused ? '继续动画' : '暂停动画')
   if ($('detail').open) {
     $('detail-title').textContent = entryName(activeEntry); $('detail-category').textContent = t(CATEGORY_NAMES[activeEntry.kind])
@@ -287,29 +288,23 @@ for (const [id, step] of [['previous', -1], ['next', 1]]) $(id).onclick = () => 
 $('pause').onclick = () => {
   paused = !paused; $('pause').textContent = t(paused ? '继续动画' : '暂停动画'); $('pause').setAttribute('aria-pressed', String(paused))
 }
-let packGeneration = 0
-async function changePack() {
-  const token = ++packGeneration
+async function changePacks(packs) {
   ++generation; clearViews(); $('status').textContent = t('正在加载资源包…'); window.ready = false
   if ($('detail').open) closeDetail()
   const next = makeAssets()
-  try {
-    if (route.pack === 'xk') {
-      if (!packZip) {
-        const response = await fetch(new URL('../resourcepacks/XK redstone display 26.3.0.zip', location.href))
-        if (!response.ok) throw Error(t('资源包下载失败'))
-        packZip = await JSZip.loadAsync(await response.arrayBuffer())
-      }
-      next.addPack(packZip, 'XK')
-    }
-    if (token !== packGeneration) return
-    assets.retired = true
-    for (const promise of assets.textureCache.values()) promise.then(texture => { if (texture) { sharedTextures.delete(texture); texture.dispose() } })
-    assets = next
-    await renderPage()
-  } catch (error) { $('status').textContent = t('加载失败：') + error.message; failures.push(error.message) }
+  for (const pack of packs) next.addPack(pack.zip, pack.id)
+  assets.retired = true
+  for (const promise of assets.textureCache.values()) promise.then(texture => { if (texture) { sharedTextures.delete(texture); texture.dispose() } })
+  assets = next; route.pack = null
+  await renderPage()
 }
-$('pack').onchange = () => { route.pack = $('pack').value; changePack() }
+const settings = createInspectionSettings({
+  onPacksChange: changePacks,
+  onOptionsChange: async () => {
+    await renderPage()
+    if ($('detail').open) await rebuildDetail()
+  },
+})
 
 function renderFrame(now) {
   if (!paused) age += Math.min(100, now - lastTime) / 50
@@ -340,5 +335,5 @@ function renderFrame(now) {
   }
 }
 renderer.setAnimationLoop(renderFrame)
-window.renderCheck = { renderer, detailRenderer, failures, catalog: CATALOG, get scenes() { return scenes }, get detailView() { return detailView }, get age() { return age } }
-await changePack()
+window.renderCheck = { renderer, detailRenderer, failures, catalog: CATALOG, settings, get scenes() { return scenes }, get detailView() { return detailView }, get age() { return age } }
+await settings.init(route.pack)

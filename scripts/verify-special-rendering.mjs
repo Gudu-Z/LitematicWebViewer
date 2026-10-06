@@ -74,7 +74,7 @@ for (const id of BABY_MOBS) {
   group.traverse(o => {
     if (!o.isSkinnedMesh) return
     for (const age of [0, 100, 1000]) {
-      o.userData.updateAnimation(age); o.updateWorldMatrix(true, true); o.skeleton.update()
+      o.userData.updateAnimation?.(age); o.updateWorldMatrix(true, true); o.skeleton.update()
       const p = new THREE.Vector3()
       for (let i = 0; i < o.geometry.attributes.position.count; i++) assert.ok(o.getVertexPosition(i, p).toArray().every(Number.isFinite), id + ' 幼年几何')
       assert.ok(o.material.map, id + ' 幼年图层纹理')
@@ -91,7 +91,8 @@ for (const id of BABY_MOBS) {
     group.traverse(o => {
       if (!o.isSkinnedMesh) return
       assert.ok(o.material.map, id + ' ' + option.label + ' 图层')
-      o.userData.updateAnimation(80); o.updateWorldMatrix(true, true); o.skeleton.update()
+      // 穿戴的生物头颅使用静态骨骼，随父骨骼移动，没有独立待机回调。
+      o.userData.updateAnimation?.(80); o.updateWorldMatrix(true, true); o.skeleton.update()
       const vertex = new THREE.Vector3()
       for (let i = 0; i < o.geometry.attributes.position.count; i++) assert.ok(o.getVertexPosition(i, vertex).toArray().every(Number.isFinite))
     })
