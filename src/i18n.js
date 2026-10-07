@@ -5,12 +5,12 @@
 import { BLOCK_NAMES } from './blockNames.js'
 
 const STRINGS = {
-  pageTitle: ['LitematicWebViewer - Minecraft 投影在线预览器', 'LitematicWebViewer - Online Minecraft Schematic Viewer'],
-  pageDescription: ['免费在线预览 Minecraft Litematica 投影文件，支持 .litematic、.litematica 和 .nbt，提供 3D 旋转、逐层查看、材料统计、资源包切换与方块、生物模型图鉴。文件在浏览器本地处理。', 'Preview Minecraft Litematica schematics online for free. Open .litematic, .litematica and .nbt files, explore builds in 3D, inspect layers, count materials and browse block and mob models. Files are processed locally in your browser.'],
+  pageTitle: ['Minecraft 投影在线预览器（Litematica）| LitematicWebViewer', 'Minecraft Litematica Viewer Online | LitematicWebViewer'],
+  pageDescription: ['免费的我的世界（Minecraft）投影在线预览器，支持 Litematica 的 .litematic、.litematica 投影与 .nbt 结构文件。3D 查看建筑、逐层预览、统计材料，支持资源包和模型图鉴；无需安装游戏，文件在浏览器本地处理。', 'Free online Minecraft Litematica viewer for .litematic, .litematica and .nbt files. Preview schematics in 3D, inspect layers, count materials and explore the model catalog. No game installation needed; files stay in your browser.'],
   openFile: ['打开投影文件', 'Open schematic'],
   viewerSubtitle: ['Minecraft 投影预览器', 'Minecraft schematic viewer'],
-  welcomeTitle: ['打开你的 Minecraft 投影', 'Explore your Minecraft builds'],
-  welcomeDescription: ['拖入投影文件，旋转查看建筑、逐层浏览，并统计所需材料。', 'Drop a schematic to explore it in 3D, inspect each layer and check the materials you need.'],
+  welcomeTitle: ['Minecraft 投影在线预览器', 'Online Minecraft schematic viewer'],
+  welcomeDescription: ['打开我的世界 Litematica 投影，3D 查看建筑、逐层浏览并统计材料。无需安装游戏，文件在浏览器本地处理。', 'Open Litematica schematics in 3D, inspect each layer and count materials. No Minecraft installation needed; files are processed locally in your browser.'],
   openDemo: ['体验示例建筑', 'Try the demo'],
   browseCatalog: ['浏览模型图鉴 ↗', 'Browse the model catalog ↗'],
   currentFile: ['当前文件', 'Current file'],

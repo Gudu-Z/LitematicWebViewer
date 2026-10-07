@@ -4,8 +4,8 @@ import { language } from './inspection-catalog.js'
 
 const words = {
   'Minecraft 方块与生物模型图鉴 | LitematicWebViewer': 'Minecraft Block & Mob Model Catalog | LitematicWebViewer',
-  '模型图鉴简介': 'Explore Minecraft block, mob and entity models in 3D. Search official names, switch block states, baby forms, equipment, vehicles and resource packs, and preview items and item frames.',
-  '在线浏览 Minecraft 方块、生物与实体的 3D 模型；点击卡片，查看状态、装备和乘坐效果。': 'Explore Minecraft blocks, mobs and entities in 3D. Open a card to view states, equipment and passengers.',
+  '模型图鉴简介': 'Explore Minecraft block, mob, entity and item models in an online 3D model catalog. Search official names, switch states, baby forms, equipment, vehicles and resource packs, and preview item frames.',
+  '在线浏览我的世界（Minecraft）方块、生物、实体与物品的 3D 模型；点击卡片，查看状态、装备和乘坐效果。': 'Explore Minecraft block, mob, entity and item models online in 3D. Open a card to view states, equipment and passengers.',
   '乘坐载具': 'Vehicle', '乘客': 'Passenger', '第二位乘客': 'Second passenger',
   '乘客年龄': 'Passenger age', '第二位乘客年龄': 'Second passenger age', '坐垫颜色': 'Cushion color',
   '设置': 'Settings', '图鉴设置': 'Catalog settings', '关闭设置': 'Close settings', '材质包': 'Resource packs',
