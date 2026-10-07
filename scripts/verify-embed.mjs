@@ -6,7 +6,26 @@ import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 // Run npm run build first. Set CHROME_PATH if Chrome is installed elsewhere.
-const server = await preview({ base: '/LitematicWebViewer/', preview: { host: '127.0.0.1', port: 5178, strictPort: true, open: false } })
+let seedLegacySDK = false, legacySDKRequests = 0
+const server = await preview({
+  base: '/LitematicWebViewer/', preview: { host: '127.0.0.1', port: 5178, strictPort: true, open: false },
+  plugins: [{
+    name: 'legacy-preview-cache-fixture',
+    configurePreviewServer(server) {
+      server.middlewares.use((request, response, next) => {
+        if (request.url === '/LitematicWebViewer/seed-preview-cache.html') {
+          response.writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' })
+          response.end('<script type="module">await import("./embed.js"); window.legacySDKCached = true</script>')
+        } else if (seedLegacySDK && request.url === '/LitematicWebViewer/embed.js') {
+          legacySDKRequests++
+          response.writeHead(200, { 'Content-Type': 'application/javascript', 'Cache-Control': 'public, max-age=14400' })
+          // The old SDK supported inline cards but did not export the new popup API.
+          response.end('export function createLitematicCard() { throw Error("Legacy SDK used") }')
+        } else next()
+      })
+    },
+  }],
+})
 const profile = resolve('scripts/_ref/embed-verify-profile')
 await mkdir(profile, { recursive: true })
 await unlink(resolve(profile, 'DevToolsActivePort')).catch(() => {})
@@ -218,9 +237,26 @@ try {
   await send('Page.navigate', { url: base + 'embed.html?' + new URLSearchParams({ file: host + '/no-cors.litematic', pack: 'vanilla', lang: 'en' }) })
   await waitFor('document.getElementById("preview")?.dataset.state==="error"', 'CORS failure is visible')
   assert.match(await evaluate('document.getElementById("status").textContent'), /CORS/)
+  // Retain a previously cached SDK across navigation, as returning visitors do.
+  await send('Network.clearBrowserCache')
+  await send('Network.setCacheDisabled', { cacheDisabled: false })
+  seedLegacySDK = true
+  await send('Page.navigate', { url: base + 'seed-preview-cache.html' })
+  await waitFor('window.legacySDKCached', 'legacy SDK cached for four hours')
+  seedLegacySDK = false
   await send('Page.navigate', { url: base + 'embed-example.html' })
   await waitFor('typeof document.getElementById("modelTab")?.onclick === "function"', 'built example page')
   assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 0, 'gallery starts with an image and no renderer')
+  const clickElement = async selector => {
+    const point = await evaluate(`(()=>{const el=document.querySelector(${JSON.stringify(selector)});el.scrollIntoView({block:'center'});const r=el.getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+    await mouse('mousePressed', point.x, point.y, { button: 'left', buttons: 1, clickCount: 1 })
+    await mouse('mouseReleased', point.x, point.y, { button: 'left', clickCount: 1 })
+  }
+  await clickElement('#quickPreview')
+  await waitFor('document.querySelector("[data-litematic-preview]")?.shadowRoot.querySelector("dialog")?.matches(":modal")', 'list click opens a modal despite cached legacy SDK', 30)
+  await waitFor('document.querySelector("[data-litematic-preview]")?.shadowRoot.querySelector(".viewport > div")?.dataset.state==="loaded"', 'popup renders after cache upgrade')
+  assert.equal(legacySDKRequests, 1, 'fixture seeded one cached legacy SDK')
+  await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("button").click()')
   await evaluate('document.getElementById("modelTab").click()')
   await waitFor('document.querySelector("#detailPreview > div")?.dataset.state==="loaded"', 'gallery preview with XK')
   await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 1040, deviceScaleFactor: 1, mobile: false })
@@ -255,7 +291,7 @@ try {
   assert.equal(await evaluate('document.getElementById("projectionBtn").getAttribute("aria-pressed")'), 'true', 'full viewer still supports projection switching')
   const exceptions = errors.filter(error => error.exception || error.exceptionId)
   assert.deepEqual(exceptions, [], 'no uncaught JavaScript exceptions')
-  console.log('Passed cross-origin URL/File loading, orbit/pan/wheel/reset, explicit full-viewer handoff, modal Escape/backdrop/focus/cleanup and style isolation, gallery switching, mobile pinch/layout, source/channel checks, iframe pool/recovery and production paths.')
+  console.log('Passed cross-origin URL/File loading, orbit/pan/wheel/reset, explicit full-viewer handoff, modal Escape/backdrop/focus/cleanup and style isolation, cached SDK upgrade with real list clicks, gallery switching, mobile pinch/layout, source/channel checks, iframe pool/recovery and production paths.')
 } finally {
   socket?.close(); chrome.kill()
   if (archive) await new Promise(resolve => archive.close(resolve))

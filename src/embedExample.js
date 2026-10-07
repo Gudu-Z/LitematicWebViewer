@@ -17,7 +17,9 @@ if (lang === 'en') {
   document.getElementById('cover').alt = 'Screenshot of the sample schematic'
   document.getElementById('docs').href = 'https://github.com/Gudu-Z/LitematicWebViewer/blob/main/README.en.md#embedded-preview-cards'
 }
-const { createLitematicCard, openLitematicPreview } = await import(/* @vite-ignore */ new URL('./embed.js', location.href).href)
+const sdkURL = new URL('./embed.js', location.href)
+sdkURL.searchParams.set('v', __EMBED_SDK_VERSION__)
+const { createLitematicCard, openLitematicPreview } = await import(/* @vite-ignore */ sdkURL.href)
 const sample = new URL('./demo.litematic', location.href).href
 const name = lang === 'en' ? 'Sample schematic' : '示例投影'
 document.getElementById('quickPreview').onclick = () => openLitematicPreview({ url: sample, name, lang })
