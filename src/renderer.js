@@ -326,14 +326,9 @@ export class Renderer {
       window.addEventListener('keyup', this._onKeyUp)
       this._initFlyControls()
       this._initTouchControls()
-    } else {
-      this.controls.enablePan = false
-      this.controls.enableZoom = false
-      this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE }
-      this.controls.touches = { ONE: THREE.TOUCH.ROTATE }
-      // Vertical touch gestures scroll the host page; horizontal drags orbit.
-      this.renderer.domElement.style.touchAction = 'pan-y'
     }
+    // Embedded previews retain the full OrbitControls interaction (rotate/pan/zoom),
+    // including one-finger rotation and two-finger dolly/pan, without flight keys.
 
     this._onResize = () => this._resize()
     window.addEventListener('resize', this._onResize)

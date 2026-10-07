@@ -86,11 +86,13 @@ try {
     if (request.url === '/html') { response.writeHead(200, { 'Content-Type': 'text/html', 'Access-Control-Allow-Origin': new URL(base).origin }); response.end('<p>Download page, not a file</p>'); return }
     if (request.url === '/favicon.ico') { response.writeHead(204); response.end(); return }
     response.writeHead(200, { 'Content-Type': 'text/html' })
-    response.end(`<!doctype html><meta charset="utf-8"><style>body{margin:20px;background:#101c2b;color:white}#row{display:flex;gap:20px}.card{width:340px;height:250px;border-radius:12px}#d{margin-top:1400px}</style><div id="row"><div id="a" class="card"></div><div id="b" class="card"></div><div id="c" class="card"></div></div><div id="d" class="card"></div><script type="module">
-      import { createLitematicCard } from '${base}embed.js';
+    response.end(`<!doctype html><meta charset="utf-8"><style>body{margin:20px;background:#101c2b;color:white}#row{display:flex;gap:20px}.card{width:340px;height:250px;border-radius:12px}#d{margin-top:1400px}dialog{display:none!important}</style><div id="row"><div id="a" class="card"></div><div id="b" class="card"></div><div id="c" class="card"></div></div><div id="d" class="card"></div><button id="launch" style="position:fixed;top:310px;left:20px">Preview modal</button><script type="module">
+      import { createLitematicCard, openLitematicPreview } from '${base}embed.js';
       window.events={};window.cards={};
       const file = new File([await(await fetch('/private.litematic',{headers:{'X-Archive-Session':'example-session'}})).blob()],'private.litematic');
       for (const id of ['a','b','c','d']) cards[id]=createLitematicCard(document.getElementById(id),{lang:'en',pack:'vanilla',...(id==='a'?{url:'/cors.litematic'}:id==='c'?{url:'/html'}:{file}),onStatus:data=>{events[id]=data;}});
+      window.openModal=()=>window.modal=openLitematicPreview({file,name:'Private schematic',lang:'en',pack:'vanilla',onStatus:data=>{events.modal=data;}});
+      document.getElementById('launch').onclick=openModal;
     </script>`)
   })
   await new Promise(resolve => archive.listen(0, '127.0.0.1', resolve))
@@ -100,8 +102,9 @@ try {
   await waitFor('window.events?.a?.type==="loaded" && window.events?.b?.type==="loaded"', 'cross-origin URL and protected File previews')
   assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2, 'pool limits active frames')
   assert.equal(privateDownloads, 1, 'protected file fetched only by the host')
+  const frameQuery = id => id === 'modal' ? 'document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("iframe")' : `document.querySelector('#${id} iframe')`
   const frameEval = async (id, expression) => {
-    const src = await evaluate(`document.querySelector('#${id} iframe').src`)
+    const src = await evaluate(`${frameQuery(id)}.src`)
     const tree = await send('Page.getFrameTree')
     const child = tree.frameTree.childFrames.find(value => value.frame.url === src)
     const { executionContextId } = await send('Page.createIsolatedWorld', { frameId: child.frame.id, worldName: 'verification' })
@@ -110,7 +113,7 @@ try {
     return result.result.value
   }
   assert.equal(await frameEval('b', 'document.documentElement.lang'), 'en')
-  assert.equal(await frameEval('b', 'document.querySelector("canvas").style.touchAction'), 'pan-y')
+  assert.equal(await frameEval('b', 'document.querySelector("canvas").style.touchAction'), 'none')
   await shot('embed-cross-origin')
   const hash = () => frameEval('b', 'document.querySelector("canvas").toDataURL()')
   const before = await hash()
@@ -123,6 +126,18 @@ try {
   await delay(150)
   assert.notEqual(await hash(), before, 'orbit changes rendered view')
   assert.equal((await targets()).length, countBefore, 'drag does not open a tab')
+  const afterOrbit = await hash()
+  await mouse('mousePressed', 530, 140, { button: 'right', buttons: 2, clickCount: 1 })
+  await mouse('mouseMoved', 555, 155, { button: 'right', buttons: 2 })
+  await mouse('mouseReleased', 555, 155, { button: 'right', clickCount: 1 })
+  await delay(100)
+  assert.notEqual(await hash(), afterOrbit, 'right-drag pans the preview')
+  const afterPan = await hash()
+  await mouse('mouseWheel', 530, 140, { deltaX: 0, deltaY: -160 })
+  await delay(150)
+  assert.notEqual(await hash(), afterPan, 'wheel zooms the preview')
+  await frameEval('b', 'document.getElementById("fit").click()'); await delay(100)
+  assert.equal(await hash(), before, 'reset restores the original framing')
   const afterDrag = await hash()
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'w', code: 'KeyW', windowsVirtualKeyCode: 87 })
   await delay(200)
@@ -139,9 +154,18 @@ try {
 
   await mouse('mousePressed', 520, 140, { button: 'left', buttons: 1, clickCount: 1 })
   await mouse('mouseReleased', 520, 140, { button: 'left', clickCount: 1 })
+  await delay(100)
+  assert.equal((await targets()).length, countBefore, 'clicking the model stays inside the preview')
+  const clickInFrame = async (id, selector) => {
+    const point = await frameEval(id, `(()=>{const r=document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect();return {x:r.left+r.width/2,y:r.top+r.height/2}})()`)
+    const origin = await evaluate(`(()=>{const r=${frameQuery(id)}.getBoundingClientRect();return {x:r.left,y:r.top}})()`)
+    await mouse('mousePressed', origin.x + point.x, origin.y + point.y, { button: 'left', buttons: 1, clickCount: 1 })
+    await mouse('mouseReleased', origin.x + point.x, origin.y + point.y, { button: 'left', clickCount: 1 })
+  }
+  await clickInFrame('b', '#open')
   let popup
   for (let attempt = 0; attempt < 100 && !popup; attempt++) { popup = (await targets()).find(t => t.url.startsWith(base) && !t.url.includes('embed')); if (!popup) await delay(100) }
-  assert.ok(popup, 'tap opens full viewer')
+  assert.ok(popup, 'explicit full-viewer button opens a new tab')
   const pageList = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()
   const popupSocket = new WebSocket(pageList.find(p => p.id === popup.targetId).webSocketDebuggerUrl)
   await new Promise((resolve, reject) => { popupSocket.onopen = resolve; popupSocket.onerror = reject })
@@ -160,6 +184,26 @@ try {
     assert.equal(privateDownloads, 1, 'full viewer does not refetch private file')
   } finally { popupSocket.close(); await send('Target.closeTarget', { targetId: popup.targetId }) }
   await send('Page.bringToFront')
+  await evaluate('document.getElementById("launch").focus(); document.getElementById("launch").click()')
+  await waitFor('document.querySelector("[data-litematic-preview]")?.shadowRoot.querySelector(".viewport > div")?.dataset.state==="loaded"', 'cross-origin protected file modal')
+  assert.equal(await evaluate('location.origin'), host, 'modal stays on the archive page')
+  assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 0, 'modal releases background cards')
+  assert.equal(await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("dialog").matches(":modal")'), true)
+  assert.equal(await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("dialog").getBoundingClientRect().width > 500'), true, 'host dialog CSS does not leak into the modal')
+  assert.equal(await evaluate('document.documentElement.style.overflow'), 'hidden')
+  await clickInFrame('modal', 'canvas')
+  await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+  await waitFor('!document.querySelector("[data-litematic-preview]")', 'Escape closes modal from inside iframe')
+  assert.equal(await evaluate('document.activeElement.id'), 'launch', 'focus returns to the trigger')
+  assert.equal(await evaluate('document.documentElement.style.overflow'), '', 'host scrolling is restored')
+  await evaluate('openModal()')
+  await waitFor('document.querySelector("[data-litematic-preview]")?.shadowRoot.querySelector(".viewport > div")?.dataset.state==="loaded"', 'modal can reopen')
+  await mouse('mousePressed', 5, 5, { button: 'left', buttons: 1, clickCount: 1 })
+  await mouse('mouseReleased', 5, 5, { button: 'left', clickCount: 1 })
+  await waitFor('!document.querySelector("[data-litematic-preview]")', 'backdrop closes modal')
+  await evaluate('openModal(); openModal(); modal.close()')
+  assert.equal(await evaluate('document.querySelectorAll("[data-litematic-preview]").length'), 0, 'replacement and programmatic close release modal roots')
   await evaluate('document.querySelector("#c button").click()')
   await waitFor('window.events.c?.type==="error"', 'HTML download rejected')
   assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 2)
@@ -175,14 +219,34 @@ try {
   await waitFor('document.getElementById("preview")?.dataset.state==="error"', 'CORS failure is visible')
   assert.match(await evaluate('document.getElementById("status").textContent'), /CORS/)
   await send('Page.navigate', { url: base + 'embed-example.html' })
-  await waitFor('document.querySelectorAll("iframe").length===2', 'built example page')
-  await delay(1000)
-  await evaluate('document.getElementById("sample").click()')
-  await waitFor('document.querySelector("#fileCard > div").dataset.state==="loaded"', 'example data card with XK')
+  await waitFor('typeof document.getElementById("modelTab")?.onclick === "function"', 'built example page')
+  assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 0, 'gallery starts with an image and no renderer')
+  await evaluate('document.getElementById("modelTab").click()')
+  await waitFor('document.querySelector("#detailPreview > div")?.dataset.state==="loaded"', 'gallery preview with XK')
+  await send('Emulation.setDeviceMetricsOverride', { width: 1200, height: 1040, deviceScaleFactor: 1, mobile: false })
   await shot('embed-example')
-  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: false })
+  await evaluate('document.getElementById("quickPreview").click()')
+  await waitFor('document.querySelector("[data-litematic-preview]")?.shadowRoot.querySelector(".viewport > div")?.dataset.state==="loaded"', 'example popup')
+  await shot('embed-popup')
+  await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("button").click()')
+  await waitFor('document.querySelector("#detailPreview > div")?.dataset.state==="loaded"', 'gallery resumes after modal closes')
+  await evaluate('document.getElementById("imageTab").click()')
+  assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 0, 'returning to images releases the preview')
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+  await send('Emulation.setTouchEmulationEnabled', { enabled: true })
   assert.equal(await evaluate('document.documentElement.scrollWidth<=390'), true, 'mobile example fits')
   await shot('embed-example-mobile')
+  await evaluate('document.getElementById("quickPreview").click()')
+  await waitFor('document.querySelector("[data-litematic-preview]")?.shadowRoot.querySelector(".viewport > div")?.dataset.state==="loaded"', 'mobile popup')
+  assert.equal(await evaluate('(()=>{const r=document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("dialog").getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})()'), true, 'mobile modal fits viewport')
+  await shot('embed-popup-mobile')
+  const mobileBefore = await frameEval('modal', 'document.querySelector("canvas").toDataURL()')
+  await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: 150, y: 400, id: 1 }, { x: 240, y: 400, id: 2 }] })
+  await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: 115, y: 400, id: 1 }, { x: 275, y: 400, id: 2 }] })
+  await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await delay(100)
+  assert.notEqual(await frameEval('modal', 'document.querySelector("canvas").toDataURL()'), mobileBefore, 'two-finger pinch changes the preview scale')
+  await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("button").click()')
   await send('Page.navigate', { url: base + '?' + new URLSearchParams({ file: host + '/cors.litematic', lang: 'en', pack: 'vanilla' }) })
   await waitFor('document.body.classList.contains("has-model") && document.getElementById("app").getAttribute("aria-busy")==="false"', 'full viewer loads URL without a handoff')
   assert.equal(await evaluate('document.getElementById("fileName").textContent'), 'cors.litematic')
@@ -191,7 +255,7 @@ try {
   assert.equal(await evaluate('document.getElementById("projectionBtn").getAttribute("aria-pressed")'), 'true', 'full viewer still supports projection switching')
   const exceptions = errors.filter(error => error.exception || error.exceptionId)
   assert.deepEqual(exceptions, [], 'no uncaught JavaScript exceptions')
-  console.log('Passed cross-origin URL/CORS and protected-file loading, full-viewer handoff without refetch/storage, drag vs click, orbit-only keys, source/channel checks, HTML rejection/recovery, bounded iframe pool/offscreen release, XK example, mobile and production subdirectory paths.')
+  console.log('Passed cross-origin URL/File loading, orbit/pan/wheel/reset, explicit full-viewer handoff, modal Escape/backdrop/focus/cleanup and style isolation, gallery switching, mobile pinch/layout, source/channel checks, iframe pool/recovery and production paths.')
 } finally {
   socket?.close(); chrome.kill()
   if (archive) await new Promise(resolve => archive.close(resolve))

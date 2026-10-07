@@ -35,7 +35,7 @@
 - 模型图鉴：分类、双语搜索、状态组合，以及世界 / 物品 / 刷怪蛋 / 展示框视图
 - 设置面板：背景色、显示实体 / 区域线框 / 尺寸、水下雾、镜头灵敏度
 - 移动端适配：飞行模式下左下角虚拟摇杆移动、右下角上升 / 下降按钮
-- 可嵌入其他网站的投影预览卡片：拖动环绕、单击进入完整预览，支持公开链接和文件数据接入
+- 可嵌入其他网站的投影预览：点击投影弹出卡片，或嵌入详情页图片区；支持旋转、平移、缩放，以及公开链接和文件数据接入
 
 日常使用直接打开[在线预览器](https://lwv.loafing.club/)即可；以下安装步骤适合本地运行或开发。
 
@@ -43,11 +43,40 @@
 
 投影档案馆、作品详情页等网站可以直接嵌入本站的渲染卡片，不需要部署渲染器或上传投影到本站。[查看可操作示例](https://lwv.loafing.club/embed-example.html)。
 
-![公开链接与文件数据两种预览卡片](docs/images/embed-cards.png)
+![档案馆接入示例：列表点击预览，以及详情页图片区切换 3D 预览](docs/images/embed-cards.png)
 
-卡片只保留模型、环绕交互、状态提示和打开入口。左键拖动旋转，短按单击或点击右上角箭头，在新标签页打开完整预览器；拖动结束不会跳转。滚轮留给宿主网页滚动，不启用缩放、平移或 WASD 飞行。手机横向拖动旋转，纵向手势用于滚动页面。
+支持两种展示方式：**点击列表中的投影，在当前网页弹出预览卡片**；或**在作品详情页的图片区域嵌入 3D 预览**。两者都支持左键拖动旋转、右键拖动平移、滚轮缩放；手机单指旋转、双指平移和缩放，在预览区域外滑动可滚动网页。右上角提供“复位视角”和“完整预览”，只有点击后者才在新标签页进入完整网站。快速预览不启用 WASD 飞行。
 
-### 方式一：iframe + 公开文件链接
+### 方式一：点击投影弹出卡片
+
+把档案馆原有的投影列表项、缩略图或“快速预览”按钮接入 `openLitematicPreview`。用户留在当前页面，关闭卡片即可继续浏览。
+
+```html
+<button id="preview-schematic" type="button">预览示例投影</button>
+
+<script type="module">
+  import { openLitematicPreview } from 'https://lwv.loafing.club/embed.js'
+
+  document.getElementById('preview-schematic').addEventListener('click', () => {
+    openLitematicPreview({
+      url: 'https://lwv.loafing.club/demo.litematic',
+      name: '示例投影',
+      lang: 'zh',
+      pack: 'xk',
+    })
+  })
+</script>
+```
+
+![点击投影后弹出的预览卡片，原档案馆页面保留在背景中](docs/images/embed-popup.png)
+
+点击关闭按钮、遮罩或按 Esc 退出；关闭后释放渲染资源，并恢复原页面的滚动和焦点。每次只打开一个弹窗，新弹窗会替换旧弹窗。样式放在 Shadow DOM 内，不影响宿主网站。
+
+`openLitematicPreview(options)` 接受下文卡片 API 相同的 `url` / `file`、`name`、`lang`、`pack`、`background`、`poster`、`onStatus` 选项，返回 `{ element, load(source, name?), close() }`。可用 `file` 代替 `url`，或先打开弹窗，再调用 `load` 传入取得的文件；离开 SPA 路由时调用 `close()`。`name` 设置弹窗标题。公开文件 URL 需要满足下文的 CORS 要求。
+
+### 方式二：在详情页图片区域嵌入
+
+将以下 iframe 放进作品详情页原有的图片区，就能在该区域旋转、平移和缩放投影。也可以像[示例详情页](https://lwv.loafing.club/embed-example.html#detail)一样添加“图片 / 3D 预览”切换：选中 3D 时调用下文的 `createLitematicCard`，切回图片时调用 `destroy()` 释放资源。
 
 下面这段可以直接运行。替换 `file` 参数时，请对**整个文件 URL** 使用 `encodeURIComponent` 或 `URLSearchParams` 编码，不要直接拼接含 `&` 的下载链接。
 
@@ -71,9 +100,9 @@
 
 **跨域要求：**文件服务器必须允许 `https://lwv.loafing.club` 读取响应，例如返回 `Access-Control-Allow-Origin: https://lwv.loafing.club`；公开文件也可以返回 `*`。有重定向时，下载链路也需要满足 CORS。文件请求不携带 Cookie 或认证信息。线上使用 HTTPS，HTTP 仅用于本地 HTTP 开发环境。[CORS 说明](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
 
-### 方式二：JS 接入脚本 + 文件数据
+### 文件来源：JS 接入与需要登录的下载
 
-需要登录才能下载、没有开放跨域接口，或者已经在档案馆页面取得文件时，使用这个方式。宿主网站按自己的权限读取文件，再把 `File` / `Blob` / `ArrayBuffer` / 类型化数组交给卡片，不需要把登录凭据传给本站。
+弹窗和内嵌卡片都可以使用文件数据。需要登录才能下载、没有开放跨域接口，或者已经在档案馆页面取得文件时，宿主网站按自己的权限读取文件，再把 `File` / `Blob` / `ArrayBuffer` / 类型化数组交给预览，不需要把登录凭据传给本站。下面以内嵌卡片为例；弹窗可使用 `openLitematicPreview({ file, name: file.name })`。
 
 ```html
 <input id="schematic" type="file" accept=".litematic,.litematica,.nbt">
@@ -109,12 +138,12 @@
 
 也可以创建时直接传入 `file`，或使用 `{ url: 'https://档案馆/建筑.litematic' }`。URL 模式仍受上一节的 CORS 限制；宿主读取文件也必须具有正常访问权限，此接口不会绕过登录或跨域限制。
 
-`createLitematicCard(container, options)` 的其他选项：`name` 用于卡片无障碍标题及未命名文件的默认名称，`background` 设置背景色，`poster` 指定等待激活时的 HTTP(S) 封面图片。返回值包含 `element`、`load(source, name?)` 和 `destroy()`。`onStatus` 会收到 `waiting`、`ready`（通信已就绪）、`loading`、`loaded`（模型完成）、`error`、`handoff-start` 和 `handoff-end`；加载事件可包含 0–1 的 `progress`。`load` 对无效类型、空文件和超限文件会同步抛错，网络或解析失败通过 `onStatus` 报告。
+`createLitematicCard(container, options)` 的其他选项：`name` 用于卡片无障碍标题及未命名文件的默认名称，`background` 设置背景色，`poster` 指定等待激活时的 HTTP(S) 封面图片。返回值包含 `element`、`load(source, name?)` 和 `destroy()`。`onStatus` 会收到 `waiting`、`ready`（通信已就绪）、`loading`、`loaded`（模型完成）、`error`、`handoff-start` 和 `handoff-end`；加载事件可包含 0–1 的 `progress`。内嵌卡片按 Esc 还会通知 `close-request`，弹窗会自动处理关闭。`load` 对无效类型、空文件和超限文件会同步抛错，网络或解析失败通过 `onStatus` 报告。
 
 ### 多卡片、完整预览与部署
 
-- **列表页推荐 JS 接入。**脚本默认最多同时挂载 2 张可见卡片，其他卡片显示封面或“启用 3D 预览”；悬停或激活可切换运行的卡片。离屏卡片会移除 iframe，释放渲染上下文，回到视野时重新加载。可使用同一模块导出的 `configureLitematicCards({ maxActive: 1 })` 调整，范围为 1–4。原始 iframe 只会暂停离屏渲染，不能自动限制其他 iframe 的数量。
-- **打开完整预览会保留文件、相机位置、语言、材质预设和背景色。**文件通过经来源和窗口校验的 `postMessage` 交接，不依赖第三方 Cookie 或浏览器存储，也不上传到服务器。请保持原页面打开直到加载完成，并允许用户单击打开新标签页。[postMessage 说明](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
+- **列表页推荐封面图片配合点击弹窗。**只在点击后启动 3D 渲染。若需要同时显示多张内嵌预览，JS 脚本默认最多挂载 2 张可见卡片，其他显示封面或“启用 3D 预览”；悬停或激活可切换运行的卡片。离屏卡片会移除 iframe，释放渲染上下文，回到视野时重新加载。打开弹窗也会释放后台内嵌卡片，关闭后恢复（正在向完整页面传递文件的卡片会临时保留）。可使用同一模块导出的 `configureLitematicCards({ maxActive: 1 })` 调整，范围为 1–4。原始 iframe 只会暂停离屏渲染，不参与 JS 的卡片管理。
+- **点击“完整预览”会保留文件、相机位置、语言、材质预设和背景色。**文件通过经来源和窗口校验的 `postMessage` 交接，不依赖第三方 Cookie 或浏览器存储，也不上传到服务器。请保持原页面和预览卡片打开直到加载完成，并允许用户单击打开新标签页。[postMessage 说明](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
 - **文件数据模式的完整页面刷新后需要重新打开文件。**公开 URL 模式保留 `file` 参数，可重新下载；临时签名链接过期后需由档案馆更新。
 - 卡片及其打开的完整页面使用指定的 `xk` / `vanilla` 预设，不读取个人资源包，也不覆盖已有资源包偏好。自定义 ZIP 暂不作为嵌入参数提供。
 - 嵌入文件上限为 **64 MiB（压缩文件大小）**，另受下文投影方块数量与浏览器内存限制。大型投影依然需要完整下载和解析，建议档案馆列表使用封面图片，详情页提供交互预览。
@@ -126,7 +155,7 @@
 ```bash
 node scripts/verify-embed-protocol.mjs  # URL/文件校验、错误响应、流式下载上限
 npm run build
-node scripts/verify-embed.mjs           # 跨站卡片、受保护文件交接、交互、卡片池与手机布局
+node scripts/verify-embed.mjs           # 跨站文件交接、弹窗、图片切换、鼠标/触摸操作与卡片池
 ```
 
 浏览器验证需要 Chrome / Chromium，使用独立的 5178 端口和临时测试页面。Windows 默认查找标准 Chrome 安装路径；其他安装位置可通过 `CHROME_PATH` 环境变量指定。

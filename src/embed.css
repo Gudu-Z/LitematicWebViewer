@@ -9,7 +9,9 @@ canvas:active { cursor: grabbing; }
 #status { max-width: 36em; overflow-wrap: anywhere; }
 progress { width: min(180px, 70%); height: 5px; accent-color: #75c8ff; }
 #retry { margin-top: 10px; padding: 6px 18px; color: inherit; background: #253d57; border: 1px solid #516a83; border-radius: 6px; cursor: pointer; }
-#open { position: absolute; top: 8px; right: 8px; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 6px; background: #152638cc; color: #deefff; text-decoration: none; font-size: 19px; }
-#open:focus-visible, #retry:focus-visible { outline: 2px solid #8bd4ff; outline-offset: 2px; }
-#hint { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); white-space: nowrap; border-radius: 5px; padding: 2px 8px; background: #152638c9; color: #bed5ec; font-size: 11px; pointer-events: none; }
+#toolbar { position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; }
+#open, #fit { display: grid; place-items: center; min-height: 32px; padding: 5px 10px; border: 1px solid #49658280; border-radius: 6px; background: #152638df; color: #deefff; text-decoration: none; font: 12px/1.5 system-ui, sans-serif; cursor: pointer; }
+#fit:disabled { opacity: .5; cursor: default; }
+#open:focus-visible, #fit:focus-visible, #retry:focus-visible { outline: 2px solid #8bd4ff; outline-offset: 2px; }
+#hint { position: absolute; bottom: 8px; left: 50%; transform: translateX(-50%); width: max-content; max-width: calc(100% - 16px); text-align: center; border-radius: 5px; padding: 2px 8px; background: #152638c9; color: #bed5ec; font-size: 11px; pointer-events: none; }
 #preview[aria-busy="true"] #hint, #preview[data-state="error"] #hint { display: none; }

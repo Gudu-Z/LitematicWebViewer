@@ -6,26 +6,38 @@
   <meta name="robots" content="noindex, follow">
   <title>预览卡片接入示例 | LitematicWebViewer</title>
   <link rel="icon" type="image/svg+xml" href="./brand/icon.svg">
-  <style>
-    * { box-sizing: border-box } body { margin:0; background:#111d2b; color:#e0eaf7; font:15px/1.8 system-ui,sans-serif }
-    main { max-width:1100px; margin:48px auto; padding:0 24px } a { color:#87cbff } h1 { font-size:28px } p { color:#acc0d7 }
-    .cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:24px; margin:28px 0 }
-    article { background:#1a2b40; border:1px solid #344b65; border-radius:14px; overflow:hidden } article h2,article p { margin:12px 20px }
-    h2 { font-size:18px }.preview { height:300px; background:#172332 } iframe { width:100%;height:100%;border:0 }
-    button,input { font:inherit; max-width:100% } button { padding:6px 12px; border:1px solid #647e9d; border-radius:6px; color:inherit; background:#284568; cursor:pointer }
-    .actions { padding:0 20px 20px; display:flex;flex-wrap:wrap;gap:12px;align-items:center }
-    @media(max-width:700px) { .cards { grid-template-columns:1fr } main { margin:24px auto } }
-  </style>
 </head>
 <body>
   <main>
     <a href="./" id="back">← 完整预览器</a>
     <h1 id="heading">把投影放进你的档案馆</h1>
-    <p id="intro">拖动卡片内的建筑旋转视角，单击进入完整预览。下面分别演示文件链接和文件数据两种接入方式。</p>
-    <div class="cards">
-      <article><div id="urlCard" class="preview"></div><h2 id="urlTitle">公开文件链接</h2><p id="urlText">一段 iframe 即可接入，示例使用原版材质。</p></article>
-      <article><div id="fileCard" class="preview"></div><h2 id="fileTitle">本地或受保护的文件</h2><p id="fileText">文件在浏览器中传递；进入完整预览也不需要上传。</p><div class="actions"><button id="sample">使用示例</button><input id="file" type="file" accept=".litematic,.litematica,.nbt" aria-label="选择投影文件"></div></article>
-    </div>
+    <p id="intro">在列表里点击投影，弹出快速预览；也可以在作品详情的图片区直接查看 3D 模型。</p>
+    <section id="popup-example" aria-labelledby="popupTitle">
+      <p class="eyebrow" id="popupLabel">01 · 列表页</p>
+      <h2 id="popupTitle">点击投影，弹出预览卡片</h2>
+      <p id="popupText">预览时留在当前页面。左键旋转、右键平移、滚轮缩放，关闭后继续浏览。</p>
+      <div class="entries">
+        <button id="quickPreview" class="entry" type="button"><img src="./demo-preview.png" width="96" height="72" alt=""><span class="entry-text"><strong id="sampleTitle">示例投影</strong><span>demo.litematic</span></span><span class="entry-action" id="quickLabel">快速预览</span></button>
+        <button id="localPreview" class="entry" type="button"><img src="./brand/logo.svg" width="64" height="64" alt=""><span class="entry-text"><strong id="localTitle">预览你的投影</strong><span id="localText">选择本地文件，无需上传</span></span><span class="entry-action" id="chooseLabel">选择文件</span></button>
+      </div>
+      <input id="file" type="file" accept=".litematic,.litematica,.nbt" hidden>
+      <p id="exampleStatus" role="status"></p>
+    </section>
+    <section id="detail" aria-labelledby="detailTitle">
+      <p class="eyebrow" id="detailLabel">02 · 作品详情页</p>
+      <h2 id="detailTitle">在图片展示区内预览</h2>
+      <article class="detail">
+        <div class="media">
+          <div class="media-tabs" role="tablist" aria-label="作品展示">
+            <button id="imageTab" role="tab" aria-selected="true" aria-controls="imagePanel" type="button">图片</button>
+            <button id="modelTab" role="tab" aria-selected="false" aria-controls="modelPanel" tabindex="-1" type="button">3D 预览</button>
+          </div>
+          <div id="imagePanel" class="media-panel" role="tabpanel" aria-labelledby="imageTab"><img src="./demo-preview.png" alt="示例投影的建筑截图" id="cover"></div>
+          <div id="modelPanel" class="media-panel" role="tabpanel" aria-labelledby="modelTab" hidden><div id="detailPreview"></div></div>
+        </div>
+        <div class="details"><p class="eyebrow">LITEMATICA</p><h3 id="buildTitle">示例建筑</h3><p id="buildDescription">切换到「3D 预览」，在原本放图片的位置旋转、平移和放大建筑。</p><p id="buildHint">需要查看材料或逐层检查时，点击预览区内的「完整预览」。</p><a href="./demo.litematic" download id="download">下载投影 ↓</a></div>
+      </article>
+    </section>
     <p><a id="docs" href="https://github.com/Gudu-Z/LitematicWebViewer#嵌入预览卡片">查看 README 接入文档 ↗</a></p>
   </main>
   <script type="module" src="./src/embedExample.js"></script>

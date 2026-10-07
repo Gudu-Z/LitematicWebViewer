@@ -1,0 +1,42 @@
+* { box-sizing: border-box; }
+body { margin: 0; background: #111d2b; color: #e0eaf7; font: 14px/1.8 system-ui, sans-serif; }
+main { max-width: 1120px; margin: 36px auto; padding: 0 24px; }
+a { color: #87cbff; text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1 { font-size: 28px; margin: 18px 0 8px; }
+h2 { font-size: 19px; margin: 4px 0 8px; }
+h3 { font-size: 22px; margin: 10px 0; }
+p { color: #acc0d7; margin: 8px 0; }
+section { margin: 32px 0; }
+.eyebrow { color: #78adcf; font-size: 11px; letter-spacing: .08em; }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:focus-visible, a:focus-visible { outline: 2px solid #83cbff; outline-offset: 3px; }
+.entries { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 18px 0; }
+.entry { display: flex; align-items: center; gap: 16px; padding: 12px 16px; min-width: 0; text-align: left; border: 1px solid #344b65; border-radius: 12px; background: #1a2b40; }
+.entry:hover { background: #223851; border-color: #5883ae; }
+.entry img { width: 88px; height: 64px; object-fit: contain; border-radius: 6px; flex: none; }
+.entry-text { display: grid; gap: 3px; min-width: 0; }
+.entry strong { font-size: 15px; }
+.entry-text > span { color: #9eb9d3; font-size: 12px; overflow-wrap: anywhere; }
+.entry-action { color: #8fd2ff; margin-left: auto; white-space: nowrap; font-size: 12px; }
+.detail { display: grid; grid-template-columns: minmax(0, 2fr) minmax(230px, 1fr); border: 1px solid #344b65; border-radius: 14px; overflow: hidden; background: #1a2b40; margin-top: 18px; }
+.media { min-width: 0; background: #172332; }
+.media-tabs { display: flex; gap: 4px; padding: 10px 12px; border-bottom: 1px solid #344b65; }
+.media-tabs button { border: 0; background: transparent; color: #9eb9d3; border-radius: 6px; padding: 6px 16px; }
+.media-tabs button[aria-selected="true"] { background: #30537a; color: #eff7ff; }
+.media-panel { width: 100%; height: clamp(280px, 35vw, 390px); }
+.media-panel[hidden] { display: none; }
+.media-panel > img { width: 100%; height: 100%; object-fit: contain; }
+#detailPreview { height: 100%; }
+.details { padding: 28px; align-self: center; }
+.details p { line-height: 1.9; }
+.details a { display: inline-block; margin-top: 20px; padding: 6px 16px; background: #2e527a; border: 1px solid #496a90; border-radius: 7px; }
+#exampleStatus:empty { display: none; }
+@media(max-width: 700px) {
+  main { padding: 0 16px; margin: 24px auto; }
+  h1 { font-size: 23px; }
+  .entries, .detail { grid-template-columns: 1fr; }
+  .entry { padding: 12px; gap: 12px; }
+  .entry img { width: 64px; height: 56px; }
+  .details { padding: 20px; }
+}

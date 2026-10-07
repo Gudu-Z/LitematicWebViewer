@@ -15,7 +15,9 @@ const words = {
   waiting: ['等待投影文件…', 'Waiting for a schematic…'],
   loading: ['正在加载投影…', 'Loading schematic…'],
   rendering: ['正在生成模型…', 'Building model…'],
-  ready: ['拖动旋转 · 单击打开', 'Drag to orbit · Click to open'],
+  ready: ['左键旋转 · 右键平移 · 滚轮缩放', 'Left-drag orbit · Right-drag pan · Scroll to zoom'],
+  touch: ['单指旋转 · 双指平移与缩放', 'One finger to orbit · Two fingers to pan and zoom'],
+  fit: ['复位视角', 'Reset view'], full: ['完整预览 ↗', 'Full viewer ↗'],
   open: ['打开完整预览', 'Open full viewer'], retry: ['重试', 'Retry'],
   invalidURL: ['请使用 HTTPS 投影文件直链。', 'Use a direct HTTPS schematic URL.'],
   fileLimit: ['文件必须非空且不超过 64 MiB。', 'File must be nonempty and no larger than 64 MiB.'],
@@ -32,8 +34,10 @@ document.body.style.background = background
 const root = document.getElementById('preview'), message = document.getElementById('message')
 const status = document.getElementById('status'), progress = document.getElementById('progress')
 const retry = document.getElementById('retry'), open = document.getElementById('open')
+const fit = document.getElementById('fit')
 open.title = open.ariaLabel = t('open'); retry.textContent = t('retry')
-document.getElementById('hint').textContent = t('ready')
+open.textContent = t('full'); fit.textContent = t('fit')
+document.getElementById('hint').textContent = t(matchMedia('(pointer: coarse)').matches ? 'touch' : 'ready')
 
 let parentOrigin = null
 try { const value = params.get('parentOrigin'); if (value && new URL(value).origin === value && /^https?:/.test(value)) parentOrigin = value } catch {}
@@ -48,6 +52,7 @@ function state(type, text, fraction) {
   root.dataset.state = type; root.setAttribute('aria-busy', String(type === 'loading'))
   message.hidden = type === 'loaded'; status.textContent = text
   retry.hidden = type !== 'error' || !lastRequest
+  fit.disabled = type !== 'loaded'
   progress.hidden = type !== 'loading'
   if (fraction === undefined) progress.removeAttribute('value'); else progress.value = fraction
   notify(type, { message: text, progress: fraction })
@@ -61,7 +66,6 @@ async function initialize() {
     renderer.setBackgroundColor(background)
     renderer.setWireframesVisible(false); renderer.setDimensionsVisible(false)
     updateActive()
-    wirePointer(renderer.renderer.domElement)
     const manager = new ViewerPacks({ apply: async packs => {
       for (const value of packs) assets.addPack(value.zip, value.id)
     } })
@@ -111,7 +115,7 @@ async function pump() {
       await renderer.renderDecoratedPots(extractDecoratedPots(tiles, data), assets)
       await renderer.renderEntities(data.entities, assets, data)
       if (requested) continue
-      current = { file, url }
+      current = { file, url, bounds: data.bounds }
       state('loaded', t('ready'), 1)
       updateActive()
     } catch (error) {
@@ -127,25 +131,10 @@ function enter() {
     position: renderer.camera.position.toArray(), target: renderer.controls.target.toArray(),
   } }, key => { state('error', t(key)); retry.hidden = true }, () => notify('handoff-end'))
 }
-function wirePointer(canvas) {
-  let gesture = null
-  // Capture runs before OrbitControls; pointer capture cannot turn a drag into a tap.
-  canvas.addEventListener('pointerdown', event => {
-    if (!event.isPrimary || event.button !== 0) { if (gesture) gesture.moved = true; return }
-    gesture = { id: event.pointerId, x: event.clientX, y: event.clientY, time: performance.now(), moved: false }
-  }, true)
-  canvas.addEventListener('pointermove', event => {
-    if (gesture && event.pointerId === gesture.id && Math.hypot(event.clientX - gesture.x, event.clientY - gesture.y) > 6) gesture.moved = true
-  }, true)
-  canvas.addEventListener('pointerup', event => {
-    if (gesture?.id !== event.pointerId) return
-    const tap = !gesture.moved && performance.now() - gesture.time < 600
-    gesture = null
-    if (tap) enter()
-  }, true)
-  canvas.addEventListener('pointercancel', () => { gesture = null }, true)
-}
 open.addEventListener('click', event => { event.preventDefault(); enter() })
+fit.onclick = () => { if (current) renderer.fitToBounds(current.bounds) }
+// Keyboard events inside a cross-origin iframe do not bubble to the host dialog.
+window.addEventListener('keydown', event => { if (event.key === 'Escape') notify('close-request') })
 retry.onclick = () => load(lastRequest)
 document.addEventListener('visibilitychange', updateActive)
 new IntersectionObserver(entries => { active = entries[0].isIntersecting; updateActive() }).observe(root)

@@ -3,9 +3,10 @@ const PROTOCOL = 'litematic-preview-v1'
 const MAX_BYTES = 64 * 1024 * 1024
 const cards = new Set()
 let maxActive = 2, serial = 0
+let activePreview = null
 
 function schedule() {
-  const candidates = [...cards].filter(card => card.pinned || card.visible)
+  const candidates = [...cards].filter(card => card.pinned || (card.visible && (!activePreview || card.modal)))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.priority - a.priority || a.order - b.order)
   const selected = new Set(candidates.slice(0, maxActive))
   for (const card of cards) if (!selected.has(card)) card.unmount()
@@ -20,6 +21,10 @@ export function configureLitematicCards({ maxActive: count = 2 } = {}) {
 
 /** options: { url | file, name?, lang?, pack?, background?, poster?, onStatus? } */
 export function createLitematicCard(container, options = {}) {
+  return createCard(container, options)
+}
+
+function createCard(container, options, { modal = false, onClose } = {}) {
   if (!(container instanceof HTMLElement)) throw TypeError('A card container element is required')
   const lang = options.lang === 'en' ? 'en' : 'zh'
   const label = lang === 'en' ? 'Activate 3D preview' : '启用 3D 预览'
@@ -50,7 +55,7 @@ export function createLitematicCard(container, options = {}) {
     frame.contentWindow.postMessage({ protocol: PROTOCOL, channel, type: 'load', ...(typeof source === 'string' ? { url: source } : { file: source }) }, frameURL.origin)
   }
   const card = {
-    order: ++serial, priority: 0, visible: false, pinned: false,
+    order: ++serial, priority: 0, visible: false, pinned: false, modal,
     mount() {
       if (frame || destroyed) return
       channel = crypto.randomUUID(); ready = false
@@ -61,15 +66,16 @@ export function createLitematicCard(container, options = {}) {
       frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox')
       frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;'
       frame.src = url.href
-      placeholder.hidden = true; element.append(frame)
+      placeholder.hidden = true; element.dataset.state = 'loading'; element.append(frame)
     },
     unmount() {
-      frame?.remove(); frame = null; ready = false; placeholder.hidden = false
+      frame?.remove(); frame = null; ready = false; placeholder.hidden = false; element.dataset.state = 'inactive'
     },
   }
   function receive(event) {
     const data = event.data
     if (!frame || event.source !== frame.contentWindow || event.origin !== frameURL.origin || data?.protocol !== PROTOCOL || data.channel !== channel) return
+    if (data.type === 'close-request' && onClose) { onClose(); return }
     if (data.type === 'ready') { ready = true; send() }
     if (data.type === 'handoff-start') {
       card.pinned = true
@@ -110,4 +116,74 @@ export function createLitematicCard(container, options = {}) {
       cards.delete(card); card.unmount(); element.remove(); schedule()
     },
   }
+}
+
+/** Open a model-catalog-style preview over the host page. Same source options as cards. */
+export function openLitematicPreview(options = {}) {
+  activePreview?.close()
+  const previousFocus = document.activeElement
+  const previousOverflow = document.documentElement.style.overflow
+  const english = options.lang === 'en'
+  const host = document.createElement('div')
+  host.dataset.litematicPreview = ''
+  const shadow = host.attachShadow({ mode: 'open' })
+  // Only static markup is interpolated here. Filenames and titles use textContent below.
+  shadow.innerHTML = `<style>
+    :host { all: initial; color-scheme: dark; }
+    * { box-sizing: border-box; }
+    dialog { width: min(1040px, calc(100vw - 32px)); height: min(720px, calc(100dvh - 40px)); max-width: none; max-height: none; padding: 0; margin: auto; border: 1px solid #405a76; border-radius: 16px; background: #172332; color: #e4edf9; font: 14px/1.6 system-ui, sans-serif; box-shadow: 0 24px 100px #0009; overflow: hidden; }
+    dialog[open] { display: flex; flex-direction: column; }
+    dialog::backdrop { background: #050b16bc; backdrop-filter: blur(4px); }
+    header { display: flex; align-items: center; gap: 16px; padding: 16px 20px; border-bottom: 1px solid #344b65; }
+    .title { flex: 1; min-width: 0; }
+    p { margin: 0 0 3px; color: #9bb7d7; font-size: 11px; letter-spacing: .04em; }
+    h2 { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 18px; font-weight: 600; }
+    button { width: 36px; height: 36px; flex: none; padding: 0; border: 1px solid #49627e; border-radius: 8px; background: #25394f; color: #dceaff; cursor: pointer; font: 25px/1 system-ui; }
+    button:hover { background: #345373; }
+    button:focus-visible { outline: 2px solid #83cbff; outline-offset: 3px; }
+    .viewport { flex: 1; min-height: 0; }
+    @media (max-width: 600px) { dialog { width: calc(100vw - 16px); height: calc(100dvh - 24px); border-radius: 12px; } header { padding: 12px; } h2 { font-size: 16px; } }
+  </style><dialog aria-labelledby="preview-title"><header><div class="title"><p></p><h2 id="preview-title"></h2></div><button type="button" autofocus>×</button></header><div class="viewport"></div></dialog>`
+  const dialog = shadow.querySelector('dialog'), closeButton = shadow.querySelector('button')
+  shadow.querySelector('p').textContent = english ? 'SCHEMATIC PREVIEW' : '投影快速预览'
+  shadow.querySelector('h2').textContent = options.name || options.file?.name || (english ? 'Schematic' : '投影')
+  closeButton.ariaLabel = english ? 'Close preview' : '关闭预览'
+  let preview, closed = false, backdropDown = false
+  const finish = () => {
+    if (closed) return
+    closed = true
+    if (activePreview === api) activePreview = null
+    preview?.destroy()
+    host.remove()
+    if (document.documentElement.style.overflow === 'hidden') document.documentElement.style.overflow = previousOverflow
+    if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true })
+    schedule()
+  }
+  const api = {
+    element: host,
+    load(source, name) { if (closed) throw Error('This preview was closed'); preview.load(source, name) },
+    close() { if (dialog.open) dialog.close(); finish() },
+  }
+  closeButton.onclick = api.close
+  dialog.addEventListener('cancel', event => { event.preventDefault(); api.close() })
+  dialog.addEventListener('close', finish)
+  const outside = event => {
+    const bounds = dialog.getBoundingClientRect()
+    return event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom
+  }
+  dialog.addEventListener('pointerdown', event => { backdropDown = event.button === 0 && event.target === dialog && outside(event) })
+  dialog.addEventListener('pointerup', event => {
+    if (backdropDown && event.target === dialog && outside(event)) api.close()
+    backdropDown = false
+  })
+  dialog.addEventListener('pointercancel', () => { backdropDown = false })
+  document.body.append(host)
+  document.documentElement.style.overflow = 'hidden'
+  activePreview = api
+  try {
+    dialog.showModal()
+    preview = createCard(shadow.querySelector('.viewport'), options, { modal: true, onClose: api.close })
+    schedule()
+  } catch (error) { api.close(); throw error }
+  return api
 }

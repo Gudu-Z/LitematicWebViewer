@@ -35,7 +35,7 @@ Preview Minecraft `.litematic` / `.litematica` schematics—building blueprints 
 - Model catalog with categories, bilingual search, state combinations, and world, item, spawn egg and item-frame views.
 - Settings for background color, entity/region outline/dimension visibility, underwater fog and camera sensitivity.
 - Mobile controls, including a flight joystick and vertical movement buttons.
-- Embeddable schematic cards for other websites: drag to orbit, click to open the full viewer; accepts public URLs or file data.
+- Embedded schematic previews for other websites: open a popup from a schematic list or embed inside a build page's image gallery; rotate, pan and zoom using public URLs or file data.
 
 For everyday use, open the [online viewer](https://lwv.loafing.club/). The installation instructions below are for local use and development.
 
@@ -43,11 +43,40 @@ For everyday use, open the [online viewer](https://lwv.loafing.club/). The insta
 
 Schematic archives and build pages can embed the viewer without deploying the renderer or uploading schematics to our server. [Try the interactive examples](https://lwv.loafing.club/embed-example.html?lang=en).
 
-![Preview cards using a public URL and browser-provided file data](docs/images/embed-cards.png)
+![Archive integration examples: click a list entry to preview, or switch an image gallery to 3D](docs/images/embed-cards.png)
 
-Cards contain only the model, orbit interaction, status messages and an open link. Drag with the left mouse button to rotate. A short click, or the arrow in the top-right corner, opens the full viewer in a new tab; finishing a drag does not navigate. Wheel scrolling is reserved for the host page. Zoom, panning and WASD flight are disabled. On mobile, drag horizontally to orbit and use vertical gestures to scroll the page.
+There are two presentation options: **click a schematic to open a preview over the current page**, or **embed a 3D preview inside a build page's image gallery**. Both support left-drag to rotate, right-drag to pan and the mouse wheel to zoom. On mobile, use one finger to rotate and two fingers to pan or pinch to zoom; swipe outside the preview to scroll the page. The top-right controls provide **Reset view** and **Full viewer**. Only the latter opens the full website in a new tab. Quick previews do not enable WASD flight.
 
-### Option 1: iframe with a public file URL
+### Option 1: click to open a preview
+
+Connect an existing schematic list entry, thumbnail or quick-preview button to `openLitematicPreview`. Users stay on the current page and close the preview to continue browsing.
+
+```html
+<button id="preview-schematic" type="button">Preview sample schematic</button>
+
+<script type="module">
+  import { openLitematicPreview } from 'https://lwv.loafing.club/embed.js'
+
+  document.getElementById('preview-schematic').addEventListener('click', () => {
+    openLitematicPreview({
+      url: 'https://lwv.loafing.club/demo.litematic',
+      name: 'Sample schematic',
+      lang: 'en',
+      pack: 'xk',
+    })
+  })
+</script>
+```
+
+![A schematic preview dialog with the archive page preserved behind it](docs/images/embed-popup.png)
+
+Use the close button, click the backdrop or press Esc to dismiss. Closing releases rendering resources and restores the page's scrolling and focus. Only one popup is open at a time; opening another replaces it. Styles are contained in a Shadow DOM and do not affect the host website.
+
+`openLitematicPreview(options)` accepts the same `url` / `file`, `name`, `lang`, `pack`, `background`, `poster` and `onStatus` options as the card API below. It returns `{ element, load(source, name?), close() }`. Supply `file` instead of `url`, or open the popup first and call `load` when the file becomes available. Call `close()` when leaving an SPA route. `name` sets the popup title. Public file URLs must satisfy the CORS requirements below.
+
+### Option 2: embed inside a build page's image gallery
+
+Place this iframe inside the build page's image area to rotate, pan and zoom the schematic there. You can also add **Images / 3D preview** tabs like the [example detail page](https://lwv.loafing.club/embed-example.html?lang=en#detail): call `createLitematicCard` when selecting 3D, then `destroy()` when returning to images to release resources.
 
 This example works as written. When replacing `file`, encode the **entire file URL** using `encodeURIComponent` or `URLSearchParams`; do not concatenate download URLs containing `&` directly into the query string.
 
@@ -71,9 +100,9 @@ This example works as written. When replacing `file`, encode the **entire file U
 
 **CORS:** the file server must allow responses to be read by `https://lwv.loafing.club`, for example with `Access-Control-Allow-Origin: https://lwv.loafing.club`. Public files may use `*`. Redirects must also satisfy CORS requirements. Download requests do not include cookies or authentication credentials. Use HTTPS in production; HTTP is supported for local HTTP development. [CORS documentation](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
 
-### Option 2: JavaScript integration with file data
+### File sources: JavaScript integration and authenticated downloads
 
-Use this for authenticated downloads, servers without a cross-origin download API, or files already loaded by the archive. The host reads the file using its own access permissions, then provides a `File`, `Blob`, `ArrayBuffer` or typed array. Login credentials do not need to be shared with this site.
+Both popup and inline previews accept file data. For authenticated downloads, servers without a cross-origin download API, or files already loaded by the archive, the host reads the file using its own access permissions and provides a `File`, `Blob`, `ArrayBuffer` or typed array. Login credentials do not need to be shared with this site. This example uses an inline card; for a popup, use `openLitematicPreview({ file, name: file.name, lang: 'en' })`.
 
 ```html
 <input id="schematic" type="file" accept=".litematic,.litematica,.nbt">
@@ -109,12 +138,12 @@ Use this for authenticated downloads, servers without a cross-origin download AP
 
 You can also pass `file` during creation, or use `{ url: 'https://archive.example/build.litematic' }`. URL mode still requires CORS as described above. The host must have legitimate access to files it reads; this API does not bypass authentication or cross-origin restrictions.
 
-Other `createLitematicCard(container, options)` options: `name` supplies the accessible card title and the default name for unnamed files; `background` sets the background color; `poster` supplies an HTTP(S) cover image while the card is inactive. The returned object exposes `element`, `load(source, name?)` and `destroy()`. `onStatus` receives `waiting`, `ready` (communication ready), `loading`, `loaded` (model complete), `error`, `handoff-start` and `handoff-end`. Loading events may include `progress` from 0 to 1. `load` throws synchronously for invalid types, empty files and oversized files; network and parsing errors are reported through `onStatus`.
+Other `createLitematicCard(container, options)` options: `name` supplies the accessible card title and the default name for unnamed files; `background` sets the background color; `poster` supplies an HTTP(S) cover image while the card is inactive. The returned object exposes `element`, `load(source, name?)` and `destroy()`. `onStatus` receives `waiting`, `ready` (communication ready), `loading`, `loaded` (model complete), `error`, `handoff-start` and `handoff-end`. Loading events may include `progress` from 0 to 1. Pressing Esc in an inline card also reports `close-request`; popups handle dismissal automatically. `load` throws synchronously for invalid types, empty files and oversized files; network and parsing errors are reported through `onStatus`.
 
 ### Multiple cards, full-viewer navigation and hosting
 
-- **Use the JS integration for lists.** By default, at most two visible cards have live iframes. Other cards show a poster or an “Activate 3D preview” button. Hovering or activating a card changes which cards run. Offscreen frames are removed to release rendering contexts, and reload when selected again. Import `configureLitematicCards` from the same module and call `configureLitematicCards({ maxActive: 1 })` to change the limit; supported values are 1–4. Plain iframes pause offscreen rendering but cannot limit the number of other iframes.
-- **Opening the full viewer preserves the file, camera position, language, resource preset and background.** Files are transferred using `postMessage` with origin and window checks, without third-party cookies, browser storage or server uploads. Keep the original page open until loading completes, and allow user-initiated new tabs. [postMessage documentation](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
+- **For lists, use cover images with click-to-open previews.** Rendering starts only after a click. If you need several inline previews, the JS module mounts at most two visible cards by default. Other cards show a poster or an “Activate 3D preview” button. Hovering or activating a card changes which cards run. Offscreen frames are removed to release rendering contexts, and reload when selected again. Opening a popup also releases background inline cards and restores them after closing, except cards temporarily retained during file handoff to the full viewer. Import `configureLitematicCards` from the same module and call `configureLitematicCards({ maxActive: 1 })` to change the limit; supported values are 1–4. Plain iframes pause offscreen rendering but do not participate in JS card management.
+- **Clicking Full viewer preserves the file, camera position, language, resource preset and background.** Files are transferred using `postMessage` with origin and window checks, without third-party cookies, browser storage or server uploads. Keep the original page and preview open until loading completes, and allow user-initiated new tabs. [postMessage documentation](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
 - **Refreshing a full-viewer tab opened from file data requires reopening the file.** Public URL mode retains the `file` parameter and can download again. Archives must refresh expired signed URLs.
 - Cards and the full-viewer pages they open use the requested `xk` / `vanilla` preset. They do not read personal resource packs or overwrite saved pack preferences. Custom ZIP packs are not currently accepted as embed parameters.
 - The embedded file limit is **64 MiB of compressed file data**, in addition to the block-count and browser-memory limits below. Large schematics still require full downloads and parsing. Prefer cover images in archive lists and interactive previews on detail pages.
@@ -126,7 +155,7 @@ Validation:
 ```bash
 node scripts/verify-embed-protocol.mjs  # URLs, files, error responses and streamed download limits
 npm run build
-node scripts/verify-embed.mjs           # Cross-site cards, private-file handoff, input, pooling and mobile layout
+node scripts/verify-embed.mjs           # Cross-site handoff, popups, gallery tabs, mouse/touch controls and pooling
 ```
 
 Browser validation requires Chrome / Chromium and uses port 5178 plus a temporary test website. On Windows it checks the standard Chrome installation path; set `CHROME_PATH` for other locations.

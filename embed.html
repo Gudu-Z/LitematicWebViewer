@@ -12,8 +12,8 @@
   <main id="preview" aria-busy="true">
     <div id="canvas"></div>
     <div id="message" role="status"><p id="status">正在准备预览…</p><progress id="progress" max="1"></progress><button id="retry" hidden>重试</button></div>
-    <a id="open" href="./" target="_blank" rel="noopener" aria-label="打开完整预览">↗</a>
-    <span id="hint">拖动旋转 · 单击打开</span>
+    <div id="toolbar"><button id="fit" type="button" disabled>复位视角</button><a id="open" href="./" target="_blank" rel="noopener" aria-label="打开完整预览">完整预览 ↗</a></div>
+    <span id="hint">左键旋转 · 右键平移 · 滚轮缩放</span>
   </main>
   <script type="module" src="./src/embed.js"></script>
 </body>
