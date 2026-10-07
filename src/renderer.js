@@ -238,8 +238,10 @@ export class Renderer {
     }
   }
 
-  constructor(container) {
+  constructor(container, { orbitOnly = false, pixelRatio = 2 } = {}) {
     this.container = container
+    this.orbitOnly = orbitOnly
+    this._active = true
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color(0x2a2a2a) // 默认深灰背景
     this._bgColor = 0x2a2a2a
@@ -256,7 +258,7 @@ export class Renderer {
     this.camera.position.set(20, 16, 20)
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatio))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     container.appendChild(this.renderer.domElement)
 
@@ -319,11 +321,19 @@ export class Renderer {
     this._lastTime = performance.now()
     this._onKeyDown = (e) => this._key(e, true)
     this._onKeyUp = (e) => this._key(e, false)
-    window.addEventListener('keydown', this._onKeyDown)
-    window.addEventListener('keyup', this._onKeyUp)
-
-    this._initFlyControls()
-    this._initTouchControls()
+    if (!orbitOnly) {
+      window.addEventListener('keydown', this._onKeyDown)
+      window.addEventListener('keyup', this._onKeyUp)
+      this._initFlyControls()
+      this._initTouchControls()
+    } else {
+      this.controls.enablePan = false
+      this.controls.enableZoom = false
+      this.controls.mouseButtons = { LEFT: THREE.MOUSE.ROTATE }
+      this.controls.touches = { ONE: THREE.TOUCH.ROTATE }
+      // Vertical touch gestures scroll the host page; horizontal drags orbit.
+      this.renderer.domElement.style.touchAction = 'pan-y'
+    }
 
     this._onResize = () => this._resize()
     window.addEventListener('resize', this._onResize)
@@ -490,7 +500,8 @@ export class Renderer {
   }
 
   _animate() {
-    requestAnimationFrame(() => this._animate())
+    if (!this._active) return
+    this._animationFrame = requestAnimationFrame(() => this._animate())
     const now = performance.now()
     const dt = Math.min((now - this._lastTime) / 1000, 0.1)
     this._lastTime = now
@@ -500,6 +511,27 @@ export class Renderer {
     // 飞行模式下不跑 OrbitControls.update()——它会 lookAt(target) 覆盖掉原地转头的旋转
     if (this.moveMode === 'orbit') this.controls.update()
     this.renderer.render(this.scene, this.camera)
+  }
+
+  setActive(active) {
+    active = !!active
+    if (active === this._active) return
+    this._active = active
+    cancelAnimationFrame(this._animationFrame)
+    this.keys.clear()
+    if (active) { this._lastTime = performance.now(); this._animate() }
+  }
+
+  dispose() {
+    this.setActive(false)
+    window.removeEventListener('resize', this._onResize)
+    window.removeEventListener('keydown', this._onKeyDown)
+    window.removeEventListener('keyup', this._onKeyUp)
+    this.controls.dispose()
+    this.clear(true)
+    this.renderer.dispose()
+    this.renderer.forceContextLoss()
+    this.renderer.domElement.remove()
   }
 
   // 相机浸入水中时蒙上原版的水下雾（深蓝黑 #050533）。复刻原版 Camera.getFluidInCamera：
@@ -940,6 +972,7 @@ export class Renderer {
 
   // —— 移动模式 ——
   setMoveMode(mode) {
+    if (this.orbitOnly && mode !== 'orbit') return
     if (mode !== 'orbit' && mode !== 'fly') return
     this.moveMode = mode
     this.controls.enabled = mode === 'orbit'

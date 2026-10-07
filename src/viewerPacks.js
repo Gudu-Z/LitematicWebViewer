@@ -41,9 +41,9 @@ export class ViewerPacks {
     }
     return ''
   }
-  async init() {
+  async init({ preset } = {}) {
     let warning = '', saved
-    try { saved = JSON.parse(this.storage.getItem(PREFERENCES)) } catch {}
+    if (!preset) try { saved = JSON.parse(this.storage.getItem(PREFERENCES)) } catch {}
     try {
       const response = await this.fetch('resourcepacks/manifest.json')
       if (!response.ok) throw Error()
@@ -52,16 +52,16 @@ export class ViewerPacks {
         this.library.set(id, { ...pack, id })
       }
     } catch { warning = 'packManifestUnavailable' }
-    try { for (const pack of await this.read()) this.library.set(pack.id, pack) }
+    try { if (!preset) for (const pack of await this.read()) this.library.set(pack.id, pack) }
     catch { warning ||= 'packStorageUnavailable' }
     const defaultPack = [...this.library.values()].find(pack => pack.file && /XK/i.test(pack.name))
-    const requested = Array.isArray(saved) ? saved : defaultPack ? [defaultPack.id] : []
+    const requested = preset === 'vanilla' ? [] : Array.isArray(saved) ? saved : defaultPack ? [defaultPack.id] : []
     const valid = []
     for (const id of new Set(requested)) {
       try { await this.resolve(id); valid.push(id) } catch { warning ||= 'packRestoreFailed' }
     }
     // A temporary outage must not erase a user's saved pack selection.
-    return (await this.commit(valid, !warning)) || warning
+    return (await this.commit(valid, !warning && !preset)) || warning
   }
   load(id) { return this.commit([id, ...this.loaded.filter(key => key !== id)]) }
   unload(id) { return this.commit(this.loaded.filter(key => key !== id)) }

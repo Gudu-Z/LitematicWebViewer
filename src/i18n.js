@@ -5,6 +5,10 @@
 import { BLOCK_NAMES } from './blockNames.js'
 
 const STRINGS = {
+  invalidURL: ['请使用有效的 HTTPS 投影文件链接。', 'Use a valid HTTPS schematic URL.'],
+  fileLimit: ['远程投影文件必须非空且不超过 64 MiB。', 'Remote schematics must be nonempty and no larger than 64 MiB.'],
+  notSchematic: ['链接返回了网页，请提供投影文件的直接下载地址。', 'The URL returned a web page. Provide a direct schematic download URL.'],
+  previewTransferFailed: ['未收到预览卡片的文件，请保持原页面打开后重试，或手动打开投影文件。', 'The preview file was not received. Keep the original page open and try again, or open the schematic manually.'],
   pageTitle: ['Minecraft 投影在线预览器（Litematica）| LitematicWebViewer', 'Minecraft Litematica Viewer Online | LitematicWebViewer'],
   pageDescription: ['免费的我的世界（Minecraft）投影在线预览器，支持 Litematica 的 .litematic、.litematica 投影与 .nbt 结构文件。3D 查看建筑、逐层预览、统计材料，支持资源包和模型图鉴；无需安装游戏，文件在浏览器本地处理。', 'Free online Minecraft Litematica viewer for .litematic, .litematica and .nbt files. Preview schematics in 3D, inspect layers, count materials and explore the model catalog. No game installation needed; files stay in your browser.'],
   openFile: ['打开投影文件', 'Open schematic'],

@@ -69,4 +69,11 @@ assert.equal(storage.getItem(key), savedBeforeOutage, 'transient failures must n
 failNetwork = false; failWrite = true
 assert.equal(await manager.importFiles([file('session.zip', b)]), 'packSaveFailed')
 assert.equal(await value(), 'B', 'storage failure still permits session use')
+const beforePreset = storage.getItem(key)
+const isolated = { ...options, storage: { getItem() { throw Error('preset must not read storage') }, setItem() { throw Error('preset must not write storage') } }, read: () => { throw Error('preset must not read private packs') } }
+manager = new ViewerPacks(isolated); assert.equal(await manager.init({ preset: 'vanilla' }), '')
+assert.deepEqual(manager.loaded, [], 'embed preset ignores saved personal packs')
+manager = new ViewerPacks(isolated); assert.equal(await manager.init({ preset: 'xk' }), '')
+assert.equal(await value(), 'XK', 'XK preset works with third-party storage blocked')
+assert.equal(storage.getItem(key), beforePreset, 'card/full-viewer preset does not overwrite personal pack preferences')
 console.log('Passed viewer packs: default XK, batch import, priority, unload/reload, persistent ZIPs/order/vanilla, replacement, atomic failures, rendering rollback and storage/network fallback')

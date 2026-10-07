@@ -2,9 +2,11 @@
 
 # LitematicWebViewer
 
+**简体中文** · [English](README.en.md)
+
 在浏览器里 3D 预览 Minecraft 的 `.litematic` / `.litematica` 投影文件（Litematica 模组保存的建筑蓝图），也可以通过模型图鉴页查看方块、生物和实体的不同状态。纯前端运行，不需要后端服务器。代码主要由 AI 完成。
 
-**[在线预览器](https://lwv.loafing.club/)** · **[模型图鉴](https://lwv.loafing.club/scripts/entity-preview.html)** · **[下载示例文件](samples/demo.litematic)**
+**[在线预览器](https://lwv.loafing.club/)** · **[模型图鉴](https://lwv.loafing.club/scripts/entity-preview.html)** · **[预览卡片示例](https://lwv.loafing.club/embed-example.html)** · **[下载示例文件](samples/demo.litematic)**
 
 ![预览器打开示例建筑，左侧可切换渲染层级，右侧显示区域和材料清单](docs/images/viewer.png)
 
@@ -33,8 +35,101 @@
 - 模型图鉴：分类、双语搜索、状态组合，以及世界 / 物品 / 刷怪蛋 / 展示框视图
 - 设置面板：背景色、显示实体 / 区域线框 / 尺寸、水下雾、镜头灵敏度
 - 移动端适配：飞行模式下左下角虚拟摇杆移动、右下角上升 / 下降按钮
+- 可嵌入其他网站的投影预览卡片：拖动环绕、单击进入完整预览，支持公开链接和文件数据接入
 
 日常使用直接打开[在线预览器](https://lwv.loafing.club/)即可；以下安装步骤适合本地运行或开发。
+
+## 嵌入预览卡片
+
+投影档案馆、作品详情页等网站可以直接嵌入本站的渲染卡片，不需要部署渲染器或上传投影到本站。[查看可操作示例](https://lwv.loafing.club/embed-example.html)。
+
+![公开链接与文件数据两种预览卡片](docs/images/embed-cards.png)
+
+卡片只保留模型、环绕交互、状态提示和打开入口。左键拖动旋转，短按单击或点击右上角箭头，在新标签页打开完整预览器；拖动结束不会跳转。滚轮留给宿主网页滚动，不启用缩放、平移或 WASD 飞行。手机横向拖动旋转，纵向手势用于滚动页面。
+
+### 方式一：iframe + 公开文件链接
+
+下面这段可以直接运行。替换 `file` 参数时，请对**整个文件 URL** 使用 `encodeURIComponent` 或 `URLSearchParams` 编码，不要直接拼接含 `&` 的下载链接。
+
+```html
+<iframe
+  src="https://lwv.loafing.club/embed.html?file=https%3A%2F%2Flwv.loafing.club%2Fdemo.litematic&amp;lang=zh&amp;pack=xk"
+  title="投影预览"
+  loading="lazy"
+  referrerpolicy="no-referrer"
+  sandbox="allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox"
+  style="width:100%;height:320px;border:0;border-radius:12px"
+></iframe>
+```
+
+| URL 参数 | 含义 | 默认值 |
+| --- | --- | --- |
+| `file` | `.litematic`、`.litematica` 或 `.nbt` 的直接下载地址；不是下载介绍页 | 无，等待文件 |
+| `lang` | `zh` / `en` | `zh` |
+| `pack` | `xk` / `vanilla` | `xk` |
+| `background` | 六位十六进制背景色，例如编码后的 `%23172332` | `#172332` |
+
+**跨域要求：**文件服务器必须允许 `https://lwv.loafing.club` 读取响应，例如返回 `Access-Control-Allow-Origin: https://lwv.loafing.club`；公开文件也可以返回 `*`。有重定向时，下载链路也需要满足 CORS。文件请求不携带 Cookie 或认证信息。线上使用 HTTPS，HTTP 仅用于本地 HTTP 开发环境。[CORS 说明](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
+
+### 方式二：JS 接入脚本 + 文件数据
+
+需要登录才能下载、没有开放跨域接口，或者已经在档案馆页面取得文件时，使用这个方式。宿主网站按自己的权限读取文件，再把 `File` / `Blob` / `ArrayBuffer` / 类型化数组交给卡片，不需要把登录凭据传给本站。
+
+```html
+<input id="schematic" type="file" accept=".litematic,.litematica,.nbt">
+<div id="preview-card" style="height:320px;border-radius:12px"></div>
+
+<script type="module">
+  import { createLitematicCard } from 'https://lwv.loafing.club/embed.js'
+
+  const card = createLitematicCard(document.getElementById('preview-card'), {
+    lang: 'zh',
+    pack: 'xk',
+    onStatus(event) {
+      if (event.type === 'error') console.error(event.message)
+    },
+  })
+
+  document.getElementById('schematic').addEventListener('change', event => {
+    const file = event.target.files[0]
+    if (file) card.load(file)
+  })
+
+  // 档案馆已有的下载接口也可以这样接入：
+  // const response = await fetch('/api/schematics/123/download', {
+  //   credentials: 'same-origin',
+  // })
+  // if (!response.ok) throw new Error(`HTTP ${response.status}`)
+  // card.load(await response.blob(), '建筑名称.litematic')
+
+  // SPA 路由切换或删除卡片时调用：
+  // card.destroy()
+</script>
+```
+
+也可以创建时直接传入 `file`，或使用 `{ url: 'https://档案馆/建筑.litematic' }`。URL 模式仍受上一节的 CORS 限制；宿主读取文件也必须具有正常访问权限，此接口不会绕过登录或跨域限制。
+
+`createLitematicCard(container, options)` 的其他选项：`name` 用于卡片无障碍标题及未命名文件的默认名称，`background` 设置背景色，`poster` 指定等待激活时的 HTTP(S) 封面图片。返回值包含 `element`、`load(source, name?)` 和 `destroy()`。`onStatus` 会收到 `waiting`、`ready`（通信已就绪）、`loading`、`loaded`（模型完成）、`error`、`handoff-start` 和 `handoff-end`；加载事件可包含 0–1 的 `progress`。`load` 对无效类型、空文件和超限文件会同步抛错，网络或解析失败通过 `onStatus` 报告。
+
+### 多卡片、完整预览与部署
+
+- **列表页推荐 JS 接入。**脚本默认最多同时挂载 2 张可见卡片，其他卡片显示封面或“启用 3D 预览”；悬停或激活可切换运行的卡片。离屏卡片会移除 iframe，释放渲染上下文，回到视野时重新加载。可使用同一模块导出的 `configureLitematicCards({ maxActive: 1 })` 调整，范围为 1–4。原始 iframe 只会暂停离屏渲染，不能自动限制其他 iframe 的数量。
+- **打开完整预览会保留文件、相机位置、语言、材质预设和背景色。**文件通过经来源和窗口校验的 `postMessage` 交接，不依赖第三方 Cookie 或浏览器存储，也不上传到服务器。请保持原页面打开直到加载完成，并允许用户单击打开新标签页。[postMessage 说明](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
+- **文件数据模式的完整页面刷新后需要重新打开文件。**公开 URL 模式保留 `file` 参数，可重新下载；临时签名链接过期后需由档案馆更新。
+- 卡片及其打开的完整页面使用指定的 `xk` / `vanilla` 预设，不读取个人资源包，也不覆盖已有资源包偏好。自定义 ZIP 暂不作为嵌入参数提供。
+- 嵌入文件上限为 **64 MiB（压缩文件大小）**，另受下文投影方块数量与浏览器内存限制。大型投影依然需要完整下载和解析，建议档案馆列表使用封面图片，详情页提供交互预览。
+- 使用严格 CSP 的宿主需允许本站的 `frame-src`；JS 方式还需允许本站的模块脚本。若设置 iframe `sandbox`，保留示例中的四项权限，否则脚本、跨窗口文件传递或打开完整网站可能被阻止。
+- 可在当前静态托管上运行，不需要后端代理。自建部署时从自己的域名引入 `embed.js`，脚本会自动找到同目录的 `embed.html`；相对路径也兼容子目录部署。托管响应不能用 `X-Frame-Options: DENY/SAMEORIGIN` 或限制性的 CSP `frame-ancestors` 阻止合作网站嵌入。
+
+验证命令：
+
+```bash
+node scripts/verify-embed-protocol.mjs  # URL/文件校验、错误响应、流式下载上限
+npm run build
+node scripts/verify-embed.mjs           # 跨站卡片、受保护文件交接、交互、卡片池与手机布局
+```
+
+浏览器验证需要 Chrome / Chromium，使用独立的 5178 端口和临时测试页面。Windows 默认查找标准 Chrome 安装路径；其他安装位置可通过 `CHROME_PATH` 环境变量指定。
 
 ---
 
@@ -184,6 +279,9 @@ npm run build
 ```
 src/
   main.js             入口：文件读取、拖拽、资源包、UI 接线
+  embed.js / embed.css  嵌入式预览卡片入口与样式
+  embedProtocol.js     文件下载、跨窗口传递与参数校验
+  schematicDetails.js  主站和卡片共用的方块实体数据提取
   nbt.js               NBT 二进制解析 + gzip/zlib 解压
   litematica.js        .litematica 解析（位解码、区域归一化）
   blocks.js            方块状态 -> 方块模型解析（含 multipart/变体）
@@ -212,16 +310,21 @@ scripts/
   copy-packs.mjs       复制资源包
   verify-*.mjs / bench-pipeline.mjs   解码/几何验证与基准（开发用）
 public/
+  embed.js            无依赖的外站卡片接入脚本（ES module）
   assets/minecraft/    默认官方资源（贴图/模型/blockstates）
   fonts/               像素字体
   demo.litematic       测试样例（部署用）
 resourcepacks/         可加载的资源包
 docs/images/           README 的实际页面截图
+embed.html             iframe 预览入口
+embed-example.html     两种接入方式的可操作示例
 ```
 
 ### 搜索引擎收录与部署
 
 主预览器和模型图鉴提供独立的页面标题、简介、规范网址、分享元数据及 JSON-LD；[站点地图](https://lwv.loafing.club/sitemap.xml) 只列出这两个正式页面，搜索词、分页、资源包等参数不作为独立页面提交。
+
+嵌入预览页和接入示例页标记为 `noindex`，不加入站点地图，避免产生大量投影链接的重复索引。
 
 GitHub Pages 部署成功后，`notify-search` 会通过 [IndexNow](https://www.indexnow.org/documentation) 通知 Bing 等参与的搜索引擎。`public/indexnow-key.txt` 是公开的网站所有权验证文件，通知前会检查线上文件是否已发布。提交结果记录在 Actions 日志和步骤摘要；HTTP 200 表示已收到，202 表示已收到但验证仍在进行，均不代表已经收录。手动检查或重新提交：
 

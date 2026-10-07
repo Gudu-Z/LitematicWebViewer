@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex, follow">
+  <meta name="referrer" content="no-referrer">
+  <title>投影预览卡片 | LitematicWebViewer</title>
+  <link rel="icon" type="image/svg+xml" href="./brand/icon.svg">
+</head>
+<body>
+  <main id="preview" aria-busy="true">
+    <div id="canvas"></div>
+    <div id="message" role="status"><p id="status">正在准备预览…</p><progress id="progress" max="1"></progress><button id="retry" hidden>重试</button></div>
+    <a id="open" href="./" target="_blank" rel="noopener" aria-label="打开完整预览">↗</a>
+    <span id="hint">拖动旋转 · 单击打开</span>
+  </main>
+  <script type="module" src="./src/embed.js"></script>
+</body>
+</html>

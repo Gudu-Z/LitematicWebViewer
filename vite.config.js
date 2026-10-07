@@ -7,6 +7,8 @@ export default defineConfig({
     rolldownOptions: {
       input: {
         main: fileURLToPath(new URL('./index.html', import.meta.url)),
+        embed: fileURLToPath(new URL('./embed.html', import.meta.url)),
+        embedExample: fileURLToPath(new URL('./embed-example.html', import.meta.url)),
         entityPreview: fileURLToPath(new URL('./scripts/entity-preview.html', import.meta.url)),
       },
     },
