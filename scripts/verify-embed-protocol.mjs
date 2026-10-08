@@ -10,6 +10,9 @@ for (const options of [
   { controls: { pan: true } }, { controls: { open: 'false' } },
   { camera: { projection: 'invalid' } }, { camera: { zoom: Infinity } },
   { camera: { position: [1, 2, 3] } }, { camera: { position: [1,2,3], target: [1,2,3] } },
+  { viewer: { panelOpacity: 0 } }, { viewer: { layout: 'sidebar' } }, { viewer: { panels: { controls: 'false' } } },
+  { viewer: { brand: { logo: 'javascript:alert(1)' } } }, { viewer: { brand: { returnUrl: 'https://u:p@archive.example/' } } },
+  { viewer: { brand: { logo: '/logo.svg' } } }, { viewer: { tools: { typo: true } } }, { viewer: [] },
 ]) assert.throws(() => normalizeOptions(options), TypeError)
 const initialOptions = normalizeOptions({ theme:'auto', controls:{hint:false}, style:{accent:'#123456'}, camera:{projection:'orthographic'} })
 const mergedOptions = normalizeOptions({ controls:{open:false}, labels:{reset:'<img onerror=alert(1)>'} }, initialOptions)
@@ -21,6 +24,14 @@ assert.equal(themeValues(initialOptions,false).theme,'light')
 assert.equal(themeValues(normalizeOptions({background:'transparent'})).background,'transparent')
 assert.equal(themeValues(normalizeOptions({style:{accent:null}},initialOptions)).accent,'#1268bf','null clears a color override')
 assert.equal(normalizeOptions({controls:null},initialOptions).controls.hint,true,'null resets an option group')
+const branded = normalizeOptions({ viewer: { panels: { file: false }, expanded: { materials: false }, brand: { name: '<b>Archive</b>', returnUrl: 'https://archive.example/build/42' } } })
+const adjusted = normalizeOptions({ viewer: { panels: { metadata: false } } }, branded)
+assert.equal(adjusted.viewer.panels.file, false)
+assert.equal(adjusted.viewer.panels.metadata, false)
+assert.equal(branded.viewer.panels.metadata, true)
+assert.equal(adjusted.viewer.brand.name, '<b>Archive</b>')
+assert.equal(normalizeOptions({ viewer: { panels: null } }, adjusted).viewer.panels.file, true)
+assert.equal(normalizeOptions({ viewer: null }, adjusted).viewer.expanded.materials, true)
 assert.equal(fileURL('demo.litematic', base), base + 'demo.litematic')
 for (const value of ['javascript:alert(1)', 'data:application/octet-stream,abc', 'file:///etc/passwd', 'https://user:password@archive.example/a', 'http://archive.example/a']) assert.throws(() => fileURL(value, base))
 assert.equal(fileURL('http://localhost:3000/a', 'http://localhost:5173/'), 'http://localhost:3000/a')

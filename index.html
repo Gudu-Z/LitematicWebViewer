@@ -49,7 +49,7 @@
       </section>
 
       <aside id="sidebar">
-        <div class="panel file-panel">
+        <div class="panel file-panel" id="filePanel">
           <h2 data-i18n="currentFile">当前文件</h2>
           <p id="fileName" class="file-name"></p>
           <div class="buttons file-actions">
@@ -94,7 +94,7 @@
         </div>
 
         <button id="packSummaryBtn" class="pack-summary" type="button" aria-haspopup="dialog" aria-controls="settingsPanel"><span data-i18n="resourcePacks">资源包</span><span id="packSummary"></span><span aria-hidden="true">›</span></button>
-        <details class="hint"><summary data-i18n="operationHelp">操作提示</summary>
+        <details class="hint" id="operationHelp"><summary data-i18n="operationHelp">操作提示</summary>
           <p data-i18n="hint1">环绕模式：左键旋转 · 右键平移 · 滚轮缩放</p>
           <p data-i18n="hint2">飞行模式（按 WASD 切换）：左键转头 · WASD 移动 · 右键平移 · 滚轮调速</p>
           <p data-i18n="hint3">E / Q：上一 / 下一层</p>
@@ -102,6 +102,7 @@
       </aside>
 
       <div id="topbar">
+        <a id="archiveReturn" class="icon-btn" hidden rel="noopener noreferrer" title="返回档案馆" aria-label="返回档案馆"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m10 5-7 7 7 7M3 12h18"/></svg></a>
         <button id="imageExportBtn" class="icon-btn" type="button" data-i18n-title="exportImage" data-i18n-aria-label="exportImage" title="导出图片" aria-label="导出图片" aria-haspopup="dialog" aria-controls="imageExport">
           <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h6M3 17l5-5 4 4 3-3"/><circle cx="15" cy="8" r="1.5"/><path d="M18 14v8m-3-3 3 3 3-3"/></svg>
         </button>
@@ -162,10 +163,10 @@
 
       <aside id="right-panel">
         <div class="panel">
-          <h2 data-i18n="info">信息</h2>
+          <div id="metadataPanel"><h2 data-i18n="info">信息</h2>
           <dl id="metadata" class="metadata">
             <div class="row empty" data-i18n="metaNotLoaded">尚未加载文件</div>
-          </dl>
+          </dl></div>
 
           <div id="regionList" class="region-list">
             <button id="regionListToggle" class="region-toggle" data-i18n-title="regionsToggleTitle" title="展开/收起区域">

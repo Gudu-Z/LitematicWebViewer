@@ -1,6 +1,7 @@
 // Built into public/embed.js. No dependencies or global host styles in the shipped module.
 import { normalizeOptions, applyTheme, themeValues } from './previewOptions.js'
 import { PROTOCOL, openFullViewer } from './embedProtocol.js'
+import { viewerAppearance } from './viewerOptions.js'
 const MAX_BYTES = 64 * 1024 * 1024
 const cards = new Set()
 let maxActive = 2, serial = 0
@@ -8,10 +9,13 @@ let activePreview = null
 
 function schedule() {
   const modalVisible = activePreview || [...cards].some(card => card.visible && card.modal)
-  const candidates = [...cards].filter(card => card.pinned || (card.visible && (!modalVisible || card.modal)))
+  const candidates = [...cards].filter(card => !card.full && (card.pinned || (card.visible && (!modalVisible || card.modal))))
     .sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.priority - a.priority || a.order - b.order)
   const selected = new Set(candidates.slice(0, maxActive))
-  for (const card of cards) if (!selected.has(card)) card.unmount()
+  for (const card of cards) {
+    if (card.full) { if (card.visible) card.mount(); card.setActive(card.visible && (!modalVisible || card.modal)) }
+    else if (!selected.has(card)) card.unmount()
+  }
   for (const card of selected) card.mount()
 }
 
@@ -26,13 +30,19 @@ export function createLitematicCard(container, options = {}) {
   return createCard(container, options)
 }
 
-function createCard(container, options, { modal = false, onClose, onOptions } = {}) {
+/** Full viewer with layers, materials, resource packs and image export. */
+export function createLitematicViewer(container, options = {}) {
+  return createCard(container, options, { full: true })
+}
+
+function createCard(container, options, { modal = false, full = false, onClose, onOptions } = {}) {
   if (!(container instanceof HTMLElement)) throw TypeError('A card container element is required')
   let config = normalizeOptions(options)
   const media = matchMedia('(prefers-color-scheme: dark)')
-  const frameURL = new URL(/* @vite-ignore */ './embed.html', import.meta.url)
+  const frameURL = full ? new URL(/* @vite-ignore */ './index.html', import.meta.url) : new URL(/* @vite-ignore */ './embed.html', import.meta.url)
   // Keep the iframe and handoff receiver fresh when an integration upgrades its SDK.
-  frameURL.searchParams.set('v', new URL(import.meta.url).searchParams.get('v') || 'customize-1')
+  frameURL.searchParams.set('v', new URL(import.meta.url).searchParams.get('v') || 'viewer-1')
+  if (full) frameURL.searchParams.set('embedded', '1')
   frameURL.searchParams.set('lang', config.lang)
   frameURL.searchParams.set('pack', options.pack === 'vanilla' ? 'vanilla' : 'xk')
   frameURL.searchParams.set('parentOrigin', location.origin)
@@ -69,21 +79,23 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
   appearance()
   const send = () => {
     if (!ready || !frame || source === undefined) return
-    post({ type: 'load', options: config, resumeCamera: latestCamera, ...(typeof source === 'string' ? { url: source } : { file: source }) })
+    post({ type: 'load', ...(full ? {} : { options: config }), resumeCamera: latestCamera, ...(typeof source === 'string' ? { url: source } : { file: source }) })
   }
   const card = {
-    order: ++serial, priority: 0, visible: false, pinned: false,
+    order: ++serial, priority: 0, visible: false, pinned: false, full, active: true,
+    setActive(active) { this.active = active; post({ type: 'active', active }) },
     get modal() { return modal || !!element.closest('dialog:modal') },
     mount() {
       if (frame || destroyed) return
       channel = crypto.randomUUID(); ready = false
       const url = new URL(frameURL); url.searchParams.set('channel', channel)
+      if (full) url.searchParams.set('appearance', JSON.stringify(viewerAppearance(config)))
       url.searchParams.set('theme', config.theme); url.searchParams.set('ui', config.ui)
       if (config.background) url.searchParams.set('background', config.background)
       frame = document.createElement('iframe')
       frame.title = options.name || (config.lang === 'en' ? 'Schematic preview' : '投影预览')
       frame.referrerPolicy = 'no-referrer'
-      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox')
+      frame.setAttribute('sandbox', 'allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox' + (full ? ' allow-downloads' : ''))
       frame.style.cssText = 'position:absolute;inset:0;width:100%;height:100%;border:0;'
       frame.src = url.href
       placeholder.hidden = true; element.dataset.state = 'loading'; element.append(frame)
@@ -109,9 +121,9 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
       return
     }
     if (data.type === 'handoff-data') { transfer?.resolve(data); transfer = null; return }
-    if (data.type === 'ready') { ready = true; post({ type: 'configure', options: config }); send() }
+    if (data.type === 'ready') { ready = true; post({ type: 'configure', options: config }); if (full) post({ type: 'active', active: card.active }); send() }
     if (data.type === 'loaded') loaded = true
-    if (data.type === 'loading' || (data.type === 'error' && data.stage !== 'handoff')) loaded = false
+    if (data.type === 'waiting' || data.type === 'loading' || (data.type === 'error' && !['handoff', 'viewer'].includes(data.stage))) loaded = false
     if (data.type === 'handoff-start') {
       card.pinned = true
       clearTimeout(pinTimer); pinTimer = setTimeout(() => { card.pinned = false; schedule() }, 65000)
@@ -155,7 +167,10 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
       if ('name' in patch) options = { ...options, name: String(patch.name) }
       if ('camera' in patch) latestCamera = null
       appearance(); onOptions?.(config, options.name)
-      post({ type: 'configure', options: config, cameraChanged: 'camera' in patch })
+      // Full-viewer visitors can change language and background themselves. A host theme
+      // patch must not overwrite unrelated choices made inside that session.
+      const update = full ? Object.fromEntries(Object.keys(patch).filter(key => Object.hasOwn(config, key)).map(key => [key, patch[key]])) : config
+      post({ type: 'configure', options: update, cameraChanged: 'camera' in patch })
     },
     setCamera(camera) { this.setOptions({ camera }) },
     resetView() { assertAlive(); latestCamera = null; post({ type: 'reset' }) },
@@ -167,7 +182,7 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
       // Open synchronously in the host's click handler; collect the iframe data afterwards.
       const task = openFullViewer({
         baseURL: frameURL.href, url: typeof source === 'string' ? source : undefined,
-        lang: config.lang, pack: options.pack === 'vanilla' ? 'vanilla' : 'xk', background: themeValues(config, media.matches).background,
+        lang: config.lang, pack: options.pack === 'vanilla' ? 'vanilla' : 'xk', background: themeValues(config, media.matches).background, appearance: config,
         readData: () => new Promise((resolve, reject) => { transfer = { resolve, reject }; post({ type: 'handoff-request' }) }),
       }, code => emit({ type: 'error', stage: 'handoff', code, message: config.lang === 'en' ? 'Could not open the full viewer. Allow popups and retry.' : '无法打开完整预览，请允许弹出窗口后重试。' }), () => {
         transfer?.reject(Error('Transfer ended')); transfer = null; handoff = null; card.pinned = false

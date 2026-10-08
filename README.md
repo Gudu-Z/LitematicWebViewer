@@ -37,6 +37,7 @@
 - 设置面板：背景色、显示实体 / 区域线框 / 尺寸、水下雾、镜头灵敏度
 - 移动端适配：飞行模式下左下角虚拟摇杆移动、右下角上升 / 下降按钮
 - 可嵌入其他网站的投影预览：弹窗或内嵌卡片，支持主题定制、透明背景、纯模型模式和宿主控制接口；提供可复制代码的[样式定制器](https://lwv.loafing.club/embed-example.html#customize)
+- 完整预览器嵌入：档案馆品牌、面板与工具显隐、紧凑布局，快速卡片跳转后保留主题
 
 日常使用直接打开[在线预览器](https://lwv.loafing.club/)即可；以下安装步骤适合本地运行或开发。
 
@@ -232,15 +233,67 @@ preview.setOptions({ theme: 'dark', background: null });
 
 SDK 保持单文件 ES module 地址。采用新接口时建议使用定制器生成的带版本号导入地址，避免浏览器保留旧 SDK；示例页会自动匹配构建版本。开发时修改 `src/embedSdk.js` / `src/previewOptions.js`，`npm run build`（或 `npm run dev` 启动时）会生成 `public/embed.js`。
 
+### 在档案馆内嵌入完整预览器
+
+`createLitematicViewer` 把主界面的层级控制、区域开关、材料清单、资源包管理和图片导出直接放进作品页。它与快速卡片共用 `theme`、`background`、`style` 和相机配置，设置窗口与导出界面也会使用同一主题。
+
+![浅色档案馆中的完整预览器，保留层级控制和结构信息](docs/images/full-viewer-embed.png)
+
+在[定制器](https://lwv.loafing.club/embed-example.html#customize)中将「预览模式」切换为「完整预览器」，可以试用面板布局、档案馆名称与返回按钮，并复制内嵌或弹窗代码。
+
+```html
+<div id="viewer" style="height:680px;border-radius:14px;overflow:hidden"></div>
+<script type="module">
+  import { createLitematicViewer } from 'https://lwv.loafing.club/embed.js?v=viewer-1';
+  const viewer = createLitematicViewer(document.getElementById('viewer'), {
+    url: 'https://lwv.loafing.club/demo.litematic', // 也可以传 file
+    lang: 'zh', pack: 'xk', theme: 'light',
+    style: { accent: '#21796b', surface: '#ffffff', radius: 14 },
+    viewer: {
+      header: true,
+      layout: 'auto', density: 'comfortable', panelOpacity: 0.94,
+      panels: { file: false, metadata: true, materials: true },
+      tools: { catalog: false, help: false },
+      expanded: { regions: true, materials: false },
+      brand: {
+        name: '我的建筑档案馆',
+        // logo: 'https://archive.example/logo.svg',
+        returnUrl: 'https://archive.example/build/123',
+        returnLabel: '返回作品详情',
+      },
+    },
+  });
+  // 跟随档案馆自己的主题开关；不会重新加载模型或重置视角。
+  // viewer.setOptions({ theme: 'dark', style: { surface: null } });
+  // 离开作品页或移除组件时：viewer.destroy();
+</script>
+```
+
+| `viewer` 配置 | 作用与默认值 |
+| --- | --- |
+| `header` | 显示标题栏，默认 `true`；关闭后渲染区延伸至顶部 |
+| `layout` | `auto`：宽屏左右面板、窄屏底部抽屉；`compact`：宽屏也收起为底部按钮 |
+| `density` / `panelOpacity` | `comfortable` 或 `compact`；面板不透明度范围 0.3–1，默认 0.94 |
+| `panels` | `file`、`controls`（视角与层级）、`metadata`、`regions`、`materials`；默认全部显示 |
+| `tools` | `packs`、`export`、`catalog`、`settings`、`language`、`help`（提示与源码链接）、`interface`（隐藏界面）、`projection`（正交/透视）；默认全部显示 |
+| `expanded` | `regions`、`materials` 默认展开；修改主题不会覆盖用户手动展开/收起的状态 |
+| `brand` | `name`、`logo`、`returnUrl`、`returnLabel`；文字按纯文本处理，链接需为绝对 HTTP(S) 地址。嵌入时返回链接在新标签打开，独立完整页在当前标签返回 |
+
+返回对象与快速卡片相同，支持 `load`、`setOptions`、`setCamera`、`resetView`、`openFullViewer`、`destroy`，以及加载/相机事件。`ui`、`controls`、`labels` 定制快速卡片；完整界面的入口和面板使用上表的 `viewer` 配置。`interaction` 控制环绕交互，完整预览器仍提供飞行模式。完整界面中的普通操作错误会带 `stage: 'viewer'`，宿主可显示提示而保留已加载模型的操作按钮。
+
+**快速卡片也可以传入 `viewer` 配置。**用户打开「完整预览」时，主题、字体、透明背景、面板和品牌设置会一起带过去。外观配置保留在完整页网址中，刷新仍可使用；文件数据模式的文件本身仍需重新打开。仅通过宿主 CSS 修改弹窗外框的样式不会自动传入完整页，应使用 `style` 配置。
+
+完整预览器首次进入可视区域时加载，离屏或宿主预览弹窗打开时暂停绘制，保留文件、层级、资源包和视角，直到调用 `destroy()`；它不参与快速卡片的 `maxActive` 释放池。适合详情页或按需弹窗，列表缩略图继续使用快速卡片。嵌入会话及其打开的完整页面不读取或写入独立网站的个人偏好；在其中导入的资源包只保留在当前页面内存中。
+
 ### 多卡片、完整预览与部署
 
 - **列表页推荐封面图片配合点击弹窗。**只在点击后启动 3D 渲染。若需要同时显示多张内嵌预览，JS 脚本默认最多挂载 2 张可见卡片，其他显示封面或“启用 3D 预览”；悬停或激活可切换运行的卡片。离屏卡片会移除 iframe，释放渲染上下文，回到视野时重新加载。打开弹窗也会释放后台内嵌卡片，关闭后恢复（正在向完整页面传递文件的卡片会临时保留）。可使用同一模块导出的 `configureLitematicCards({ maxActive: 1 })` 调整，范围为 1–4。原始 iframe 只会暂停离屏渲染，不参与 JS 的卡片管理。
-- **打开“完整预览”会保留文件、相机位置、投影方式、语言、材质预设和不透明背景色。**透明背景在完整网站中使用其默认背景。文件通过经来源、窗口和随机标记校验的 `postMessage` 交接，不依赖第三方 Cookie 或浏览器存储，也不上传到服务器。请保持原页面和预览卡片打开直到加载完成，并允许用户单击打开新标签页。[postMessage 说明](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
+- **打开“完整预览”会保留文件、相机位置、投影方式、语言、材质预设和外观配置。**透明背景也会保留；新标签页不会复制宿主页面背后的图片或渐变。文件通过经来源、窗口和随机标记校验的 `postMessage` 交接，不依赖第三方 Cookie 或浏览器存储，也不上传到服务器。请保持原页面和预览卡片打开直到加载完成，并允许用户单击打开新标签页。[postMessage 说明](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
 - **文件数据模式的完整页面刷新后需要重新打开文件。**公开 URL 模式保留 `file` 参数，可重新下载；临时签名链接过期后需由档案馆更新。
 - 卡片及其打开的完整页面使用指定的 `xk` / `vanilla` 预设，不读取个人资源包，也不覆盖已有资源包偏好。自定义 ZIP 暂不作为嵌入参数提供。
 - 嵌入文件上限为 **64 MiB（压缩文件大小）**，另受下文投影方块数量与浏览器内存限制。大型投影依然需要完整下载和解析，建议档案馆列表使用封面图片，详情页提供交互预览。
-- 使用严格 CSP 的宿主需允许本站的 `frame-src`；JS 方式还需允许本站的模块脚本。若设置 iframe `sandbox`，保留示例中的四项权限，否则脚本、跨窗口文件传递或打开完整网站可能被阻止。
-- 可在当前静态托管上运行，不需要后端代理。自建部署时从自己的域名引入 `embed.js`，脚本会自动找到同目录的 `embed.html`；相对路径也兼容子目录部署。托管响应不能用 `X-Frame-Options: DENY/SAMEORIGIN` 或限制性的 CSP `frame-ancestors` 阻止合作网站嵌入。
+- 使用严格 CSP 的宿主需允许本站的 `frame-src`；JS 方式还需允许本站的模块脚本。若设置 iframe `sandbox`，保留示例中的四项权限；完整预览器还需要 `allow-downloads` 用于导出 PNG，SDK 会自动添加。
+- 可在当前静态托管上运行，不需要后端代理。自建部署时从自己的域名引入 `embed.js`，脚本会自动找到同目录的 `embed.html` 或 `index.html`；相对路径也兼容子目录部署。托管响应不能用 `X-Frame-Options: DENY/SAMEORIGIN` 或限制性的 CSP `frame-ancestors` 阻止合作网站嵌入。
 
 验证命令：
 
@@ -248,6 +301,7 @@ SDK 保持单文件 ES module 地址。采用新接口时建议使用定制器�
 node scripts/verify-embed-protocol.mjs  # URL/文件校验、错误响应、流式下载上限
 npm run build
 node scripts/verify-embed.mjs           # 跨站交接、透明像素、主题/相机接口、生成代码、弹窗与鼠标/触摸操作
+node scripts/verify-full-viewer.mjs     # 完整嵌入、面板/品牌、设置隔离、PNG 下载、跳转继承与手机布局
 ```
 
 浏览器验证需要 Chrome / Chromium，使用独立的 5178 端口和临时测试页面。Windows 默认查找标准 Chrome 安装路径；其他安装位置可通过 `CHROME_PATH` 环境变量指定。

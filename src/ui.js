@@ -51,6 +51,7 @@ export class UI {
     if (!this.errorBanner) return
     this.errorBanner.textContent = String(msg)
     this.errorBanner.classList.remove('hidden')
+    this.onError?.(String(msg))
   }
 
   clearError() {
@@ -78,6 +79,7 @@ export class UI {
   setProgress(p) {
     this.progressFill.style.width = Math.round(Math.min(1, Math.max(0, p)) * 100) + '%'
     this.progressFill.parentElement.setAttribute('aria-valuenow', String(Math.round(Math.min(1, Math.max(0, p)) * 100)))
+    this.onProgress?.(p)
   }
 
   showMetadata(meta) {

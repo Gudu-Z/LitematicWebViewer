@@ -72,6 +72,14 @@ pre { background: #0e1926; padding: 20px; border: 1px solid #344b65; border-radi
 .custom-preview-dialog { padding: 0; width: min(960px, calc(100vw - 24px)); max-width: none; max-height: calc(100dvh - 24px); border: 0; border-radius: 16px; overflow: auto; background: transparent; }
 .custom-preview-dialog::backdrop { background: #14233488; backdrop-filter: blur(4px); }
 .custom-dialog-viewport { height: min(60dvh, 500px); }
+.full-viewer-demo #customPreview { height: 610px; }
+#viewerConfig { grid-column: 1 / -1; border-top: 1px solid #344b65; padding-top: 14px; }
+#viewerConfig summary { cursor: pointer; font-size: 13px; }
+#viewerConfig p { font-size: 11px; line-height: 1.7; }
+#viewerConfig > label, #viewerConfig > fieldset { margin-top: 14px; }
+#viewerConfig > label { display: grid; gap: 5px; min-width: 0; }
+#configForm input[type=text], #configForm input[type=url] { min-width: 0; width: 100%; padding: 8px; color: inherit; font: inherit; font-size: 12px; background: #152338; border: 1px solid #49617f; border-radius: 6px; }
+#configError { grid-column: 1 / -1; color: #ffb4ac; font-size: 12px; overflow-wrap: anywhere; }
 .custom-dialog-controls { display: flex; justify-content: center; gap: 12px; padding: 8px 16px; }
 .custom-preview-dialog button { background: #21796b; color: white; border: 0; padding: 7px 18px; border-radius: 30px; }
 .custom-preview-dialog button:disabled { opacity: .5; cursor: default; }

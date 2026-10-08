@@ -11,9 +11,15 @@ import { UI } from './ui.js'
 import { t, setLang, getLang, applyTranslations, blockName } from './i18n.js'
 import { fetchSchematic, receivePreviewFile, applyCamera } from './embedProtocol.js'
 import { ImageExport } from './imageExport.js'
+import { normalizeOptions } from './previewOptions.js'
+import { ViewerAppearance, readViewerAppearance } from './viewerAppearance.js'
+import { FullViewerBridge } from './fullViewerBridge.js'
+import { viewerAppearance } from './viewerOptions.js'
 
 const startupParams = new URLSearchParams(location.search)
-if (startupParams.get('lang') === 'en') setLang('en')
+const integration = readViewerAppearance(startupParams)
+let previewOptions = integration.options
+setLang(previewOptions.lang)
 
 const container = document.getElementById('viewer')
 const ui = new UI(document.body)
@@ -26,13 +32,13 @@ ui.setStatusKey('dragHint')
 // 渲染器初始化可能因 WebGL 不可用而失败，做保护
 let renderer = null
 try {
-  renderer = new Renderer(container)
+  renderer = new Renderer(container, { alpha: integration.themed })
   const background = /^#[0-9a-f]{6}$/i.test(startupParams.get('background')) ? startupParams.get('background') : '#172332'
   renderer.setBackgroundColor(background)
   document.getElementById('bgColor').value = background
   renderer.getViewportInsets = () => {
     if (document.body.classList.contains('ui-hidden')) return {}
-    if (matchMedia('(max-width:900px)').matches) return { top: 16, bottom: 76 }
+    if (matchMedia('(max-width:900px)').matches || document.body.classList.contains('viewer-compact')) return { top: 16, bottom: 76 }
     const left = document.getElementById('sidebar').getBoundingClientRect()
     const right = document.getElementById('right-panel').getBoundingClientRect()
     return { left: left.width ? left.right + 20 : 20, right: right.width ? innerWidth - right.left + 20 : 20, top: 20, bottom: 20 }
@@ -45,6 +51,7 @@ try {
 let currentData = null
 let busy = false
 let currentFileName = ''
+let currentFile = null, integrationBridge, appearance, themeBackground
 
 // 视图状态：渲染模式 / 当前层 / 可见区域 / 各显示开关
 const view = {
@@ -76,9 +83,37 @@ function openImageExport() {
 }
 for (const id of ['imageExportBtn', 'welcomeExportBtn']) document.getElementById(id).addEventListener('click', openImageExport)
 
+appearance = new ViewerAppearance({
+  ...integration,
+  onTheme(values) {
+    themeBackground = values.background
+    renderer?.setBackgroundColor(themeBackground)
+    renderer?.setUnderwaterFogEnabled(view.showFog && themeBackground !== 'transparent')
+    if (themeBackground !== 'transparent') document.getElementById('bgColor').value = themeBackground
+  },
+  onLayout: () => renderer?._resize(),
+})
+appearance.update(previewOptions)
+integrationBridge = new FullViewerBridge({
+  params: startupParams, renderer, ui,
+  getCurrent: () => ({ file: currentFile, bounds: currentData?.bounds }),
+  getBusy: () => busy, setBusy, openFile, getOptions: () => previewOptions,
+  onProjection: refreshProjectionButton, isExportOpen: () => !!imageExport?.isOpen,
+  configure(options) {
+    const previous = previewOptions
+    previewOptions = normalizeOptions(options, previewOptions)
+    appearance.update(previewOptions)
+    if (previewOptions.lang !== previous.lang) { setLang(previewOptions.lang); refreshLocalizedUI() }
+    if (renderer) {
+      const i = previewOptions.interaction
+      Object.assign(renderer.controls, { enableRotate: i.rotate, enablePan: i.pan, enableZoom: i.zoom, autoRotate: i.autoRotate, autoRotateSpeed: i.autoRotateSpeed })
+    }
+  },
+})
+
 // 主预览器与模型图鉴分别保存趣味选项。
 const ILLAGER_ARMS_PREFERENCE = 'viewer-illager-extra-arms-v1'
-try { view.illagerExtraArms = localStorage.getItem(ILLAGER_ARMS_PREFERENCE) === 'true' } catch {}
+try { if (!integration.themed) view.illagerExtraArms = localStorage.getItem(ILLAGER_ARMS_PREFERENCE) === 'true' } catch {}
 const illagerExtraArms = document.getElementById('illagerExtraArms')
 illagerExtraArms.checked = view.illagerExtraArms
 illagerExtraArms.disabled = !renderer
@@ -121,6 +156,7 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   if (busy) return
   renderer?.clear()
   currentData = null
+  currentFile = null
   currentFileName = ''; document.body.classList.remove('has-model')
   closeMobilePanels()
   resetViewForClear()
@@ -129,6 +165,7 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   ui.setStatusKey('statusCleared')
   ui.setProgress(0)
   updateMaterialList()
+  integrationBridge.notify('waiting', { message: t('statusCleared') })
 })
 
 // 材料排序切换（多→少 / 少→多）
@@ -147,6 +184,7 @@ document.getElementById('langBtn').addEventListener('click', () => {
 // Native dialog provides focus management, Escape and a backdrop on desktop and mobile.
 const settingsPanel = document.getElementById('settingsPanel')
 function selectSettingsTab(name) {
+  if (name === 'packs' && !previewOptions.viewer.tools.packs) name = 'general'
   for (const tab of document.querySelectorAll('[data-settings-tab]')) {
     const selected = tab.dataset.settingsTab === name
     tab.setAttribute('aria-selected', String(selected)); tab.tabIndex = selected ? 0 : -1
@@ -165,8 +203,9 @@ for (const tab of document.querySelectorAll('[data-settings-tab]')) {
   tab.onkeydown = event => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
     event.preventDefault()
-    const name = event.key === 'Home' ? 'general' : event.key === 'End' ? 'packs' : tab.dataset.settingsTab === 'general' ? 'packs' : 'general'
-    selectSettingsTab(name); document.querySelector(`[data-settings-tab="${name}"]`).focus()
+    const tabs = [...document.querySelectorAll('[data-settings-tab]')].filter(el => !el.hasAttribute('data-viewer-hidden'))
+    const next = event.key === 'Home' ? tabs[0] : event.key === 'End' ? tabs.at(-1) : tabs[(tabs.indexOf(tab) + (event.key === 'ArrowRight' ? 1 : -1) + tabs.length) % tabs.length]
+    selectSettingsTab(next.dataset.settingsTab); next.focus()
   }
 }
 settingsPanel.addEventListener('click', event => {
@@ -210,7 +249,11 @@ document.getElementById('settingsCloseBtn').addEventListener('click', () => {
   settingsPanel.close()
 })
 document.getElementById('bgColor').addEventListener('input', (e) => {
+  themeBackground = e.target.value
+  previewOptions = normalizeOptions({ background: themeBackground }, previewOptions)
   renderer?.setBackgroundColor(e.target.value)
+  renderer?.setUnderwaterFogEnabled(view.showFog)
+  appearance.update(previewOptions)
 })
 
 // —— 移动模式 / 速度 / 层级 / 设置项 / 区域 的接线 ——
@@ -265,7 +308,7 @@ if (renderer) {
   })
   document.getElementById('showFog').addEventListener('change', (e) => {
     view.showFog = e.target.checked
-    renderer.setUnderwaterFogEnabled(view.showFog)
+    renderer.setUnderwaterFogEnabled(view.showFog && themeBackground !== 'transparent')
   })
   illagerExtraArms.addEventListener('change', async () => {
     if (busy) { illagerExtraArms.checked = view.illagerExtraArms; return }
@@ -274,7 +317,7 @@ if (renderer) {
     setBusy(true); ui.clearError()
     try {
       await renderCurrentEntities()
-      try { localStorage.setItem(ILLAGER_ARMS_PREFERENCE, String(view.illagerExtraArms)) }
+      try { if (!integration.themed) localStorage.setItem(ILLAGER_ARMS_PREFERENCE, String(view.illagerExtraArms)) }
       catch { ui.showError(t('settingsSaveFailed')) }
     } catch (error) {
       view.illagerExtraArms = previous
@@ -337,12 +380,15 @@ window.addEventListener('drop', (e) => {
 })
 
 async function openFile(file, camera) {
-  if (busy) return
+  if (busy) return false
   if (!renderer) {
     ui.showError(t('renderUnavailable'))
-    return
+    return false
   }
   setBusy(true)
+  currentFile = null
+  integrationBridge.loading = true
+  integrationBridge.notify('loading', { message: t('parsingFile'), progress: 0 })
   ui.clearError()
   try {
     ui.setStatusKey('parsingFile')
@@ -384,12 +430,18 @@ async function openFile(file, camera) {
     const entityNote = data.entities?.length ? t('statusEntities', { n: data.entities.length }) : ''
     ui.setStatusKey('statusDone', { faces: stats.faces.toLocaleString(), textures: stats.textures, entities: entityNote })
     ui.setProgress(1)
+    currentFile = file
+    integrationBridge.notify('loaded', { name: file.name, message: ui.statusEl.textContent, progress: 1 })
+    integrationBridge.cameraChanged()
+    return true
   } catch (e) {
     console.error(e)
+    ui.setProgress(0)
     if (e && e.code === 'FILE_TOO_LARGE') ui.showError(t('fileTooLarge'))
     else ui.showError(t('loadFailed') + (e.message || e))
-    ui.setProgress(0)
+    return false
   } finally {
+    integrationBridge.loading = false
     setBusy(false)
   }
 }
@@ -635,6 +687,7 @@ function updateMaterialList() {
 
 // 语言切换后刷新所有文案（静态 data-i18n + 动态面板/状态）
 function refreshLocalizedUI() {
+  previewOptions = normalizeOptions({ lang: getLang() }, previewOptions)
   applyTranslations()
   document.getElementById('langLabel').textContent = getLang() === 'zh' ? '中' : 'EN'
   ui.refreshStatus()
@@ -652,6 +705,7 @@ function refreshLocalizedUI() {
   toggleBtn.setAttribute('aria-label', toggleBtn.title)
   refreshProjectionButton()
   imageExport?.translate()
+  appearance?.update(previewOptions)
 }
 
 // 是否正在输入框里打字（避免 E/Q 等快捷键误触发）
@@ -664,6 +718,7 @@ function isTypingTarget(e) {
 
 const packManager = new ViewerPacks({
   translate: t,
+  ...(integration.themed ? { storage: { getItem: () => null, setItem() {} }, read: async () => [], write: async () => {} } : {}),
   apply: async packs => {
     const previous = [...assets.packs]
     const replace = values => {
@@ -692,6 +747,7 @@ function setBusy(on) {
   }
   updatePackPanels()
   if (!on && !currentData) document.getElementById('welcomeStatus').textContent = ''
+  if (!on) queueMicrotask(() => integrationBridge?.pump())
 }
 
 function updatePackPanels() {
@@ -728,7 +784,7 @@ async function initializePacks() {
   setBusy(true); ui.setPackStatus('loadingPackShort'); ui.setStatusKey('loadingPackShort')
   try {
     const preset = startupParams.get('pack')
-    const warning = await packManager.init({ preset: ['xk', 'vanilla'].includes(preset) ? preset : undefined })
+    const warning = await packManager.init({ preset: ['xk', 'vanilla'].includes(preset) ? preset : integration.themed ? 'xk' : undefined })
     ui.setPackStatus(warning || 'packUpdated', undefined, !!warning)
     ui.setStatusKey('dragHint')
   } catch (error) { ui.setPackStatus('packOperationFailed', { error: t(error.message || String(error)) }, true) }
@@ -750,10 +806,23 @@ async function loadPixelFont() {
 const previewFile = receivePreviewFile()
 await initializePacks()
 refreshLocalizedUI()
+integrationBridge.ready()
 const _sp = new URLSearchParams(location.search)
 if (previewFile) {
   const received = await previewFile
-  if (received) await openFile(received.file, received.camera)
+  if (received) {
+    if (received.appearance && integration.themed) {
+      try {
+        previewOptions = normalizeOptions(viewerAppearance(received.appearance), previewOptions)
+        setLang(previewOptions.lang); appearance.update(previewOptions); refreshLocalizedUI()
+        const url = new URL(location.href)
+        url.searchParams.set('appearance', JSON.stringify(viewerAppearance(previewOptions)))
+        url.searchParams.set('lang', previewOptions.lang)
+        history.replaceState(null, '', url)
+      } catch { /* Keep the validated URL appearance if the sender sent invalid options. */ }
+    }
+    await openFile(received.file, received.camera)
+  }
   else if (_sp.has('file')) await autoLoadDemo()
   else ui.showError(t('previewTransferFailed'))
 } else if (_sp.has('demo') || _sp.has('file')) {

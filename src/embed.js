@@ -183,7 +183,7 @@ function enter() {
   if (!current || !renderer) return
   message.hidden = true
   notify('handoff-start')
-  openFullViewer({ ...current, lang: options.lang, pack, background, camera: cameraSnapshot() }, key => {
+  openFullViewer({ ...current, lang: options.lang, pack, background, camera: cameraSnapshot(), appearance: options }, key => {
     status.textContent = t(key); message.hidden = !options.controls.status; progress.hidden = true; retry.hidden = true
     notify('error', { stage: 'handoff', code: key, message: t(key) })
   }, () => notify('handoff-end'))

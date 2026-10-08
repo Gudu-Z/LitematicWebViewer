@@ -1,3 +1,92 @@
+//#region src/viewerOptions.js
+var VIEWER_DEFAULTS = {
+	header: true,
+	layout: "auto",
+	density: "comfortable",
+	panelOpacity: .94,
+	panels: {
+		file: true,
+		controls: true,
+		metadata: true,
+		regions: true,
+		materials: true
+	},
+	tools: {
+		packs: true,
+		export: true,
+		catalog: true,
+		settings: true,
+		language: true,
+		help: true,
+		interface: true,
+		projection: true
+	},
+	expanded: {
+		regions: true,
+		materials: true
+	},
+	brand: {
+		name: "",
+		logo: "",
+		returnUrl: "",
+		returnLabel: ""
+	}
+};
+function normalizeViewerOptions(patch, previous = VIEWER_DEFAULTS) {
+	if (patch === null) return structuredClone(VIEWER_DEFAULTS);
+	if (!patch || typeof patch !== "object" || Array.isArray(patch)) throw TypeError("viewer must be an object");
+	const next = structuredClone(previous);
+	const check = (valid, key) => {
+		if (!valid) throw TypeError(`Invalid viewer option: ${key}`);
+	};
+	for (const [key, value] of Object.entries(patch)) {
+		check(Object.hasOwn(VIEWER_DEFAULTS, key), key);
+		if (value === null) {
+			next[key] = structuredClone(VIEWER_DEFAULTS[key]);
+			continue;
+		}
+		if ([
+			"panels",
+			"tools",
+			"expanded",
+			"brand"
+		].includes(key)) {
+			check(value && typeof value === "object" && !Array.isArray(value), key);
+			for (const [name, setting] of Object.entries(value)) {
+				check(Object.hasOwn(VIEWER_DEFAULTS[key], name), `${key}.${name}`);
+				if (setting === null) {
+					next[key][name] = VIEWER_DEFAULTS[key][name];
+					continue;
+				}
+				if (key === "brand") {
+					check(typeof setting === "string" && setting.length <= (["logo", "returnUrl"].includes(name) ? 2048 : 80), `brand.${name}`);
+					if (setting && ["logo", "returnUrl"].includes(name)) {
+						let url;
+						try {
+							url = new URL(setting);
+						} catch {}
+						check(url && ["http:", "https:"].includes(url.protocol) && !url.username && !url.password, `brand.${name}`);
+					}
+				} else check(typeof setting === "boolean", `${key}.${name}`);
+				next[key][name] = setting;
+			}
+		} else {
+			check(key === "header" ? typeof value === "boolean" : key === "layout" ? ["auto", "compact"].includes(value) : key === "density" ? ["comfortable", "compact"].includes(value) : Number.isFinite(value) && value >= .3 && value <= 1, key);
+			next[key] = value;
+		}
+	}
+	return next;
+}
+function viewerAppearance(options) {
+	return Object.fromEntries([
+		"lang",
+		"theme",
+		"background",
+		"style",
+		"viewer"
+	].filter((key) => options[key] !== void 0).map((key) => [key, options[key]]));
+}
+//#endregion
 //#region src/previewOptions.js
 var defaults = {
 	lang: "zh",
@@ -30,7 +119,8 @@ var defaults = {
 		target: null,
 		zoom: 1,
 		height: null
-	}
+	},
+	viewer: VIEWER_DEFAULTS
 };
 var palettes = {
 	dark: {
@@ -68,6 +158,7 @@ var choices = {
 function normalizeOptions(patch = {}, previous = defaults) {
 	if (!object(patch)) throw TypeError("Preview options must be an object");
 	const next = structuredClone(previous);
+	if ("viewer" in patch) next.viewer = normalizeViewerOptions(patch.viewer, previous.viewer);
 	const check = (ok, key) => {
 		if (!ok) throw TypeError(`Invalid preview option: ${key}`);
 	};
@@ -164,11 +255,12 @@ var PROTOCOL = "litematic-preview-v1";
 function validFile(file) {
 	return file instanceof Blob && file.size > 0 && file.size <= 67108864;
 }
-function openFullViewer({ file, url, lang, pack, background, camera, baseURL = location.href, readData }, onError, onFinish = () => {}) {
+function openFullViewer({ file, url, lang, pack, background, camera, appearance, baseURL = location.href, readData }, onError, onFinish = () => {}) {
 	const token = crypto.randomUUID();
 	const destination = new URL("./", baseURL);
 	const revision = new URL(baseURL).searchParams.get("v");
 	if (revision) destination.searchParams.set("v", revision);
+	if (appearance) destination.searchParams.set("appearance", JSON.stringify(viewerAppearance(appearance)));
 	if (url) destination.searchParams.set("file", url);
 	destination.searchParams.set("lang", lang);
 	destination.searchParams.set("pack", pack);
@@ -200,7 +292,8 @@ function openFullViewer({ file, url, lang, pack, background, camera, baseURL = l
 				type: "handoff-file",
 				token,
 				file: payload.file,
-				camera: payload.camera
+				camera: payload.camera,
+				appearance: payload.appearance
 			}, destination.origin);
 			cleanup();
 		} catch {
@@ -238,9 +331,12 @@ var serial = 0;
 var activePreview = null;
 function schedule() {
 	const modalVisible = activePreview || [...cards].some((card) => card.visible && card.modal);
-	const candidates = [...cards].filter((card) => card.pinned || card.visible && (!modalVisible || card.modal)).sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.priority - a.priority || a.order - b.order);
+	const candidates = [...cards].filter((card) => !card.full && (card.pinned || card.visible && (!modalVisible || card.modal))).sort((a, b) => Number(b.pinned) - Number(a.pinned) || b.priority - a.priority || a.order - b.order);
 	const selected = new Set(candidates.slice(0, maxActive));
-	for (const card of cards) if (!selected.has(card)) card.unmount();
+	for (const card of cards) if (card.full) {
+		if (card.visible) card.mount();
+		card.setActive(card.visible && (!modalVisible || card.modal));
+	} else if (!selected.has(card)) card.unmount();
 	for (const card of selected) card.mount();
 }
 /** Limit live WebGL cards in this host page. Offscreen/unselected frames are removed. */
@@ -253,16 +349,25 @@ function configureLitematicCards({ maxActive: count = 2 } = {}) {
 function createLitematicCard(container, options = {}) {
 	return createCard(container, options);
 }
-function createCard(container, options, { modal = false, onClose, onOptions } = {}) {
+/** Full viewer with layers, materials, resource packs and image export. */
+function createLitematicViewer(container, options = {}) {
+	return createCard(container, options, { full: true });
+}
+function createCard(container, options, { modal = false, full = false, onClose, onOptions } = {}) {
 	if (!(container instanceof HTMLElement)) throw TypeError("A card container element is required");
 	let config = normalizeOptions(options);
 	const media = matchMedia("(prefers-color-scheme: dark)");
-	const frameURL = new URL(
+	const frameURL = full ? new URL(
+		/* @vite-ignore */
+		"./index.html",
+		import.meta.url
+	) : new URL(
 		/* @vite-ignore */
 		"./embed.html",
 		import.meta.url
 	);
-	frameURL.searchParams.set("v", new URL(import.meta.url).searchParams.get("v") || "customize-1");
+	frameURL.searchParams.set("v", new URL(import.meta.url).searchParams.get("v") || "viewer-1");
+	if (full) frameURL.searchParams.set("embedded", "1");
 	frameURL.searchParams.set("lang", config.lang);
 	frameURL.searchParams.set("pack", options.pack === "vanilla" ? "vanilla" : "xk");
 	frameURL.searchParams.set("parentOrigin", location.origin);
@@ -314,7 +419,7 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
 		if (!ready || !frame || source === void 0) return;
 		post({
 			type: "load",
-			options: config,
+			...full ? {} : { options: config },
 			resumeCamera: latestCamera,
 			...typeof source === "string" ? { url: source } : { file: source }
 		});
@@ -324,6 +429,15 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
 		priority: 0,
 		visible: false,
 		pinned: false,
+		full,
+		active: true,
+		setActive(active) {
+			this.active = active;
+			post({
+				type: "active",
+				active
+			});
+		},
 		get modal() {
 			return modal || !!element.closest("dialog:modal");
 		},
@@ -333,13 +447,14 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
 			ready = false;
 			const url = new URL(frameURL);
 			url.searchParams.set("channel", channel);
+			if (full) url.searchParams.set("appearance", JSON.stringify(viewerAppearance(config)));
 			url.searchParams.set("theme", config.theme);
 			url.searchParams.set("ui", config.ui);
 			if (config.background) url.searchParams.set("background", config.background);
 			frame = document.createElement("iframe");
 			frame.title = options.name || (config.lang === "en" ? "Schematic preview" : "投影预览");
 			frame.referrerPolicy = "no-referrer";
-			frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox");
+			frame.setAttribute("sandbox", "allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox" + (full ? " allow-downloads" : ""));
 			frame.style.cssText = "position:absolute;inset:0;width:100%;height:100%;border:0;";
 			frame.src = url.href;
 			placeholder.hidden = true;
@@ -385,10 +500,14 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
 				type: "configure",
 				options: config
 			});
+			if (full) post({
+				type: "active",
+				active: card.active
+			});
 			send();
 		}
 		if (data.type === "loaded") loaded = true;
-		if (data.type === "loading" || data.type === "error" && data.stage !== "handoff") loaded = false;
+		if (data.type === "waiting" || data.type === "loading" || data.type === "error" && !["handoff", "viewer"].includes(data.stage)) loaded = false;
 		if (data.type === "handoff-start") {
 			card.pinned = true;
 			clearTimeout(pinTimer);
@@ -459,9 +578,10 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
 			if ("camera" in patch) latestCamera = null;
 			appearance();
 			onOptions?.(config, options.name);
+			const update = full ? Object.fromEntries(Object.keys(patch).filter((key) => Object.hasOwn(config, key)).map((key) => [key, patch[key]])) : config;
 			post({
 				type: "configure",
-				options: config,
+				options: update,
 				cameraChanged: "camera" in patch
 			});
 		},
@@ -484,6 +604,7 @@ function createCard(container, options, { modal = false, onClose, onOptions } = 
 				lang: config.lang,
 				pack: options.pack === "vanilla" ? "vanilla" : "xk",
 				background: themeValues(config, media.matches).background,
+				appearance: config,
 				readData: () => new Promise((resolve, reject) => {
 					transfer = {
 						resolve,
@@ -648,4 +769,4 @@ function openLitematicPreview(options = {}) {
 	return api;
 }
 //#endregion
-export { configureLitematicCards, createLitematicCard, openLitematicPreview };
+export { configureLitematicCards, createLitematicCard, createLitematicViewer, openLitematicPreview };

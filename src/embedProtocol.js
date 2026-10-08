@@ -1,4 +1,5 @@
 // Versioned messages shared by the card and full viewer. SDK uses the same v1 schema.
+import { viewerAppearance } from './viewerOptions.js'
 export const PROTOCOL = 'litematic-preview-v1'
 export const MAX_FILE_BYTES = 64 * 1024 * 1024
 
@@ -60,11 +61,12 @@ export async function fetchSchematic(value, base, signal) {
 }
 
 // Files are passed directly between browser windows, without storage or an upload.
-export function openFullViewer({ file, url, lang, pack, background, camera, baseURL = location.href, readData }, onError, onFinish = () => {}) {
+export function openFullViewer({ file, url, lang, pack, background, camera, appearance, baseURL = location.href, readData }, onError, onFinish = () => {}) {
   const token = crypto.randomUUID()
   const destination = new URL('./', baseURL)
   const revision = new URL(baseURL).searchParams.get('v')
   if (revision) destination.searchParams.set('v', revision)
+  if (appearance) destination.searchParams.set('appearance', JSON.stringify(viewerAppearance(appearance)))
   if (url) destination.searchParams.set('file', url)
   destination.searchParams.set('lang', lang)
   destination.searchParams.set('pack', pack)
@@ -79,7 +81,7 @@ export function openFullViewer({ file, url, lang, pack, background, camera, base
       const payload = readData ? await readData() : { file, camera }
       if (finished) return
       if (!validFile(payload.file)) throw Error('fileLimit')
-      popup.postMessage({ protocol: PROTOCOL, type: 'handoff-file', token, file: payload.file, camera: payload.camera }, destination.origin)
+      popup.postMessage({ protocol: PROTOCOL, type: 'handoff-file', token, file: payload.file, camera: payload.camera, appearance: payload.appearance }, destination.origin)
       cleanup()
     } catch { if (!finished) { cleanup(); onError('handoffTimeout') } }
   }
@@ -111,7 +113,7 @@ export function receivePreviewFile() {
     const receive = event => {
       const data = event.data
       if (event.origin !== expectedOrigin || event.source !== opener || data?.protocol !== PROTOCOL || data.type !== 'handoff-file' || data.token !== token || !validFile(data.file)) return
-      cleanup(); resolve({ file: new File([data.file], data.file.name || 'schematic.litematic'), camera: data.camera })
+      cleanup(); resolve({ file: new File([data.file], data.file.name || 'schematic.litematic'), camera: data.camera, appearance: data.appearance })
     }
     window.addEventListener('message', receive)
     timer = setTimeout(() => { cleanup(); resolve(null) }, 60000)

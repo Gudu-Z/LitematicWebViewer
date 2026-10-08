@@ -20,10 +20,10 @@ if (lang === 'en') {
 }
 const sdkURL = new URL('./embed.js', location.href)
 sdkURL.searchParams.set('v', __EMBED_SDK_VERSION__)
-const { createLitematicCard, openLitematicPreview } = await import(/* @vite-ignore */ sdkURL.href)
+const { createLitematicCard, createLitematicViewer, openLitematicPreview } = await import(/* @vite-ignore */ sdkURL.href)
 const sample = new URL('./demo.litematic', location.href).href
 const name = lang === 'en' ? 'Sample schematic' : '示例投影'
-setupConfigurator({ createLitematicCard, openLitematicPreview, lang, sample, sdkURL })
+setupConfigurator({ createLitematicCard, createLitematicViewer, openLitematicPreview, lang, sample, sdkURL })
 document.getElementById('quickPreview').onclick = () => openLitematicPreview({ url: sample, name, lang })
 const input = document.getElementById('file')
 document.getElementById('localPreview').onclick = () => input.click()

@@ -54,6 +54,7 @@
           <div class="config-actions"><button id="tryPopup" type="button">以弹窗方式查看 ↗</button><span id="hostNote">下方代码会包含当前设置。</span></div>
         </div>
         <form id="configForm">
+          <label><span id="modeLabel">预览模式</span><select id="cfgMode"><option value="card" id="modeCard">快速卡片</option><option value="viewer" id="modeViewer">完整预览器</option></select></label>
           <label><span id="themeLabel">主题</span><select id="cfgTheme"><option value="dark" id="themeDark">深色</option><option value="light" id="themeLight">浅色</option><option value="auto" id="themeAuto">跟随系统</option></select></label>
           <label><span id="uiLabel">界面</span><select id="cfgUI"><option value="default" id="uiDefault">内置控件</option><option value="none" id="uiNone">纯模型 · 自己的控件</option></select></label>
           <div class="config-colors"><label><span id="accentLabel">强调色</span><input id="cfgAccent" type="color" value="#83cbff"></label><label><span id="backgroundLabel">背景色</span><input id="cfgBackground" type="color" value="#172332"></label></div>
@@ -62,6 +63,28 @@
           <label><span id="projectionLabel">投影方式</span><select id="cfgProjection"><option value="perspective" id="perspectiveLabel">透视</option><option value="orthographic" id="orthographicLabel">正交</option></select></label>
           <fieldset><legend id="controlLabel">内置控件</legend><div class="checks"><label class="check"><input id="cfgReset" type="checkbox" checked><span id="resetLabel">复位</span></label><label class="check"><input id="cfgOpen" type="checkbox" checked><span id="openLabel">完整预览</span></label><label class="check"><input id="cfgHint" type="checkbox" checked><span id="hintLabel">操作提示</span></label><label class="check"><input id="cfgTitle" type="checkbox" checked><span id="titleLabel">弹窗标题</span></label></div></fieldset>
           <fieldset><legend id="interactionLabel">模型交互</legend><div class="checks"><label class="check"><input id="cfgRotate" type="checkbox" checked><span id="rotateLabel">旋转</span></label><label class="check"><input id="cfgPan" type="checkbox" checked><span id="panLabel">平移</span></label><label class="check"><input id="cfgZoom" type="checkbox" checked><span id="zoomLabel">缩放</span></label><label class="check"><input id="cfgAutoRotate" type="checkbox"><span id="autoRotateLabel">自动旋转</span></label></div></fieldset>
+          <details id="viewerConfig">
+            <summary id="viewerConfigLabel">完整预览器设置</summary>
+            <p id="viewerConfigHint">快速卡片跳转到完整预览时，也会使用这些设置。</p>
+            <label class="check"><input id="cfgHeader" type="checkbox" checked><span id="headerLabel">显示标题栏</span></label>
+            <label><span id="layoutLabel">面板布局</span><select id="cfgLayout"><option value="auto" id="layoutAuto">自动适配</option><option value="compact" id="layoutCompact">收起为底部按钮</option></select></label>
+            <label><span id="densityLabel">界面密度</span><select id="cfgDensity"><option value="comfortable" id="densityComfortable">舒适</option><option value="compact" id="densityCompact">紧凑</option></select></label>
+            <label><span id="opacityLabel">面板不透明度</span><input id="cfgOpacity" type="range" min="30" max="100" value="94"></label>
+            <label><span id="fontLabel">界面字体</span><input id="cfgFont" type="text" placeholder="system-ui, sans-serif" maxlength="200"></label>
+            <fieldset><legend id="panelsLabel">显示面板</legend><div class="checks">
+              <label class="check"><input id="cfgPanelFile" type="checkbox" checked><span id="panelFileLabel">文件</span></label><label class="check"><input id="cfgPanelControls" type="checkbox" checked><span id="panelControlsLabel">视角与层级</span></label><label class="check"><input id="cfgPanelMetadata" type="checkbox" checked><span id="panelMetadataLabel">投影信息</span></label><label class="check"><input id="cfgPanelRegions" type="checkbox" checked><span id="panelRegionsLabel">区域</span></label><label class="check"><input id="cfgPanelMaterials" type="checkbox" checked><span id="panelMaterialsLabel">材料</span></label>
+            </div></fieldset>
+            <fieldset><legend id="toolsLabel">显示工具</legend><div class="checks">
+              <label class="check"><input id="cfgToolPacks" type="checkbox" checked><span id="toolPacksLabel">资源包</span></label><label class="check"><input id="cfgToolExport" type="checkbox" checked><span id="toolExportLabel">图片导出</span></label><label class="check"><input id="cfgToolCatalog" type="checkbox" checked><span id="toolCatalogLabel">模型图鉴</span></label><label class="check"><input id="cfgToolSettings" type="checkbox" checked><span id="toolSettingsLabel">设置</span></label><label class="check"><input id="cfgToolLanguage" type="checkbox" checked><span id="toolLanguageLabel">语言</span></label><label class="check"><input id="cfgToolHelp" type="checkbox" checked><span id="toolHelpLabel">帮助与源码</span></label>
+              <label class="check"><input id="cfgToolInterface" type="checkbox" checked><span id="toolInterfaceLabel">隐藏界面</span></label><label class="check"><input id="cfgToolProjection" type="checkbox" checked><span id="toolProjectionLabel">正交 / 透视</span></label>
+            </div></fieldset>
+            <fieldset><legend id="expandedLabel">默认展开</legend><div class="checks"><label class="check"><input id="cfgExpandedRegions" type="checkbox" checked><span id="expandedRegionsLabel">区域列表</span></label><label class="check"><input id="cfgExpandedMaterials" type="checkbox" checked><span id="expandedMaterialsLabel">材料清单</span></label></div></fieldset>
+            <label><span id="brandNameLabel">档案馆名称</span><input id="cfgBrandName" type="text" maxlength="80" placeholder="我的建筑档案馆"></label>
+            <label><span id="brandLogoLabel">Logo 地址</span><input id="cfgBrandLogo" type="url" placeholder="https://archive.example/logo.svg" maxlength="2048"></label>
+            <label><span id="returnUrlLabel">返回作品页面</span><input id="cfgReturnUrl" type="url" placeholder="https://archive.example/build/123" maxlength="2048"></label>
+            <label><span id="returnLabelLabel">返回按钮提示</span><input id="cfgReturnLabel" type="text" placeholder="返回档案馆" maxlength="80"></label>
+          </details>
+          <p id="configError" role="alert" hidden></p>
         </form>
       </div>
       <div class="code-heading"><label><span id="codeLabel">接入代码</span><select id="codeMode"><option value="inline" id="codeInline">内嵌卡片</option><option value="popup" id="codePopup">点击弹窗</option></select></label><button id="copyCode" type="button">复制代码</button></div>

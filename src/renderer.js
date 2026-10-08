@@ -505,6 +505,7 @@ export class Renderer {
     this._updateUnderwaterFog()
     // 飞行模式下不跑 OrbitControls.update()——它会 lookAt(target) 覆盖掉原地转头的旋转
     if (this.moveMode === 'orbit') this.controls.update()
+    this.onCameraFrame?.()
     this.renderer.render(this.scene, this.camera)
   }
 

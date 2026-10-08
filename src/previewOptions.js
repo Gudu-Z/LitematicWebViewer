@@ -1,10 +1,12 @@
 // Shared by the standalone SDK build and the iframe. Only data crosses the frame boundary.
+import { VIEWER_DEFAULTS, normalizeViewerOptions } from './viewerOptions.js'
 export const defaults = {
   lang: 'zh', theme: 'dark', background: null, ui: 'default',
   controls: { reset: true, open: true, hint: true, status: true, title: true },
   labels: {}, style: {}, dialog: { width: 1040, height: 720 },
   interaction: { rotate: true, pan: true, zoom: true, autoRotate: false, autoRotateSpeed: 2 },
   camera: { projection: 'perspective', position: null, target: null, zoom: 1, height: null },
+  viewer: VIEWER_DEFAULTS,
 }
 const palettes = {
   dark: { background: '#172332', surface: '#1e3147', text: '#e6eef8', muted: '#bed5ec', border: '#496582', accent: '#83cbff', backdrop: '#050b16bc' },
@@ -19,6 +21,7 @@ const choices = { lang: ['zh', 'en'], theme: ['dark', 'light', 'auto'], ui: ['de
 export function normalizeOptions(patch = {}, previous = defaults) {
   if (!object(patch)) throw TypeError('Preview options must be an object')
   const next = structuredClone(previous)
+  if ('viewer' in patch) next.viewer = normalizeViewerOptions(patch.viewer, previous.viewer)
   const check = (ok, key) => { if (!ok) throw TypeError(`Invalid preview option: ${key}`) }
   for (const [key, values] of Object.entries(choices)) if (key in patch) {
     check(values.includes(patch[key]), key); next[key] = patch[key]

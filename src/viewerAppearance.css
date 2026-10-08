@@ -1,0 +1,31 @@
+[data-viewer-hidden] { display: none !important; }
+.brand { min-width: 0; max-width: calc(100% - var(--toolbar-width, 322px) - 22px); }
+.brand > div { min-width: 0; }
+.brand h1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.brand-logo { object-fit: contain; }
+body.viewer-no-header #viewer, body.viewer-no-header #dropOverlay { top: 0; }
+body.viewer-no-header #sidebar, body.viewer-no-header #right-panel { top: 72px; max-height: calc(100% - 92px); }
+body.viewer-no-header #welcome { top: 50%; }
+body.viewer-dense .panel { padding: 12px; }
+body.viewer-dense .panel h2 { margin-bottom: 9px; }
+body.viewer-dense .control-row { margin-bottom: 8px; }
+body.viewer-dense .file-name { margin-bottom: 8px; }
+body.viewer-dense .hint, body.viewer-dense .pack-summary { padding: 9px 12px; }
+body.viewer-dense .region-body li, body.viewer-dense .material-body li { padding: 3px 0; }
+.welcome-actions > [data-viewer-hidden] { display: none; }
+html[data-viewer-theme] .welcome-actions { display: flex; flex-wrap: wrap; justify-content: center; }
+html[data-viewer-theme] .welcome-actions > * { flex: 1; }
+html[data-viewer-theme] #settingsPanel .panel { background: transparent; }
+@media(min-width:901px) {
+  body.viewer-compact #sidebar, body.viewer-compact #right-panel { display: none; top: auto; bottom: 76px; left: 12px; right: 12px; width: min(440px, calc(100% - 24px)); max-height: min(65dvh, 560px); z-index: 26; background: var(--ui-panel, #172638); border: 1px solid var(--line); border-radius: var(--ui-radius, 16px); gap: 0; pointer-events: auto; }
+  body.viewer-compact #right-panel { left: auto; }
+  body.viewer-compact.has-model #sidebar.mobile-open, body.viewer-compact.has-model #right-panel.mobile-open { display: flex; }
+  body.viewer-compact #sidebar .panel, body.viewer-compact #right-panel .panel { border: 0; border-radius: 0; box-shadow: none; background: transparent; }
+  body.viewer-compact #sidebar .hint, body.viewer-compact #sidebar .pack-summary { margin: 0 14px 14px; }
+  body.viewer-compact.has-model #mobilePanels { display: flex; position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); padding: 5px; border-radius: var(--ui-radius, 13px); border: 1px solid var(--line); background: var(--ui-panel, #142235ed); gap: 5px; z-index: 27; }
+  body.viewer-compact #mobilePanels button { min-width: 110px; font-size: 12px; background: transparent; border-color: transparent; }
+  body.viewer-compact #mobilePanels button[aria-expanded=true] { background: var(--ui-selected, #2d4c70); border-color: var(--accent); }
+  body.viewer-compact.ui-hidden #mobilePanels, body.viewer-compact.ui-hidden #sidebar, body.viewer-compact.ui-hidden #right-panel { display: none; }
+}
+@media(max-width:900px) { body.viewer-no-header #sidebar, body.viewer-no-header #right-panel { top: auto; max-height: min(55dvh, 470px); } }
+@media(max-width:600px) { html[data-viewer-theme] .brand > div { display: none; } html[data-viewer-theme] .welcome-actions > * { flex-basis: 40%; } }
