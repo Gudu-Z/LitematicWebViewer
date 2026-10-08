@@ -92,8 +92,9 @@ try {
 
   const base = 'http://127.0.0.1:5178/LitematicWebViewer/'
   const sample = await readFile('public/demo.litematic')
-  let privateDownloads = 0
+  let privateDownloads = 0, generatedMarkup
   archive = createHTTPServer((request, response) => {
+    if (request.url === '/generated' && generatedMarkup) { response.writeHead(200, { 'Content-Type': 'text/html' }); response.end(generatedMarkup); return }
     if (request.url === '/cors.litematic') {
       response.writeHead(200, { 'Content-Type': 'application/octet-stream', 'Access-Control-Allow-Origin': new URL(base).origin }); response.end(sample); return
     }
@@ -107,9 +108,9 @@ try {
     response.writeHead(200, { 'Content-Type': 'text/html' })
     response.end(`<!doctype html><meta charset="utf-8"><style>body{margin:20px;background:#101c2b;color:white}#row{display:flex;gap:20px}.card{width:340px;height:250px;border-radius:12px}#d{margin-top:1400px}dialog{display:none!important}</style><div id="row"><div id="a" class="card"></div><div id="b" class="card"></div><div id="c" class="card"></div></div><div id="d" class="card"></div><button id="launch" style="position:fixed;top:310px;left:20px">Preview modal</button><script type="module">
       import { createLitematicCard, openLitematicPreview } from '${base}embed.js';
-      window.events={};window.cards={};
+      window.events={};window.cards={};window.cameras={};
       const file = new File([await(await fetch('/private.litematic',{headers:{'X-Archive-Session':'example-session'}})).blob()],'private.litematic');
-      for (const id of ['a','b','c','d']) cards[id]=createLitematicCard(document.getElementById(id),{lang:'en',pack:'vanilla',...(id==='a'?{url:'/cors.litematic'}:id==='c'?{url:'/html'}:{file}),onStatus:data=>{events[id]=data;}});
+      for (const id of ['a','b','c','d']) cards[id]=createLitematicCard(document.getElementById(id),{lang:'en',pack:'vanilla',...(id==='a'?{url:'/cors.litematic'}:id==='c'?{url:'/html'}:{file}),onStatus:data=>{events[id]=data;},onCameraChange:data=>{cameras[id]=data;}});
       window.openModal=()=>window.modal=openLitematicPreview({file,name:'Private schematic',lang:'en',pack:'vanilla',onStatus:data=>{events.modal=data;}});
       document.getElementById('launch').onclick=openModal;
     </script>`)
@@ -210,6 +211,12 @@ try {
   assert.equal(await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("dialog").matches(":modal")'), true)
   assert.equal(await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("dialog").getBoundingClientRect().width > 500'), true, 'host dialog CSS does not leak into the modal')
   assert.equal(await evaluate('document.documentElement.style.overflow'), 'hidden')
+  await evaluate(`modal.setOptions({theme:'light',style:{accent:'#21796b',radius:3},dialog:{width:800,height:600},labels:{subtitle:'Archive preview'}})`)
+  assert.equal(await evaluate('getComputedStyle(document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("dialog")).borderRadius'), '3px')
+  assert.equal(await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("p").textContent'), 'Archive preview')
+  await evaluate(`(()=>{const css=document.createElement('style');css.textContent='[data-litematic-preview] { --lwv-dialog-width: 760px; } [data-litematic-preview]::part(title) { letter-spacing: 2px; }';document.head.append(css)})()`)
+  assert.equal(await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("dialog").getBoundingClientRect().width'),760,'public CSS token styles the popup')
+  assert.equal(await evaluate('getComputedStyle(document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("h2")).letterSpacing'),'2px','public part styles the popup title')
   await clickInFrame('modal', 'canvas')
   await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
   await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
@@ -229,9 +236,79 @@ try {
   assert.match(await evaluate('events.c.message'), /web page/)
   await evaluate(`cards.c.load('${host}/cors.litematic')`)
   await waitFor('window.events.c?.type==="loaded"', 'failed card can recover')
+  // Host-controlled UI, genuine canvas alpha, interaction flags and camera persistence.
+  await evaluate('document.querySelector("#b button").click()')
+  await waitFor('window.events.b?.type==="loaded"', 'reactivate custom card')
+  await evaluate(`cards.b.setOptions({ theme:'light', background:'transparent', ui:'none', camera:{projection:'orthographic'}, interaction:{rotate:false,pan:false,zoom:false} })`)
+  await waitFor('cameras.b?.projection==="orthographic"', 'host switches projection')
+  assert.equal(await frameEval('b', 'getComputedStyle(document.getElementById("toolbar")).display'), 'none')
+  assert.equal(await frameEval('b', 'document.documentElement.dataset.theme'), 'light')
+  assert.equal(await frameEval('b', 'getComputedStyle(document.body).backgroundColor'), 'rgba(0, 0, 0, 0)')
+  assert.deepEqual(await frameEval('b', `(async()=>{const source=document.querySelector('canvas'), bitmap=await createImageBitmap(source), copy=document.createElement('canvas');copy.width=bitmap.width;copy.height=bitmap.height;const ctx=copy.getContext('2d');ctx.drawImage(bitmap,0,0);return [...ctx.getImageData(0,0,1,1).data]})()`), [0,0,0,0], 'canvas itself has transparent pixels')
+  const locked = await hash()
+  await mouse('mousePressed', 530, 140, { button: 'right', buttons: 2, clickCount: 1 })
+  await mouse('mouseMoved', 555, 155, { button: 'right', buttons: 2 })
+  await mouse('mouseReleased', 555, 155, { button: 'right', clickCount: 1 })
+  await mouse('mouseWheel', 530, 140, { deltaX: 0, deltaY: -160 }); await delay(150)
+  assert.equal(await hash(), locked, 'disabled pan and zoom do not move the model')
+  await evaluate(`cards.b.setOptions({ui:'default',controls:{open:false,hint:false},labels:{reset:'Archive reset'},style:{text:'#123456',fontFamily:'serif',radius:0},interaction:{rotate:true,pan:true,zoom:true}})`)
+  await delay(100)
+  assert.equal(await frameEval('b', 'document.getElementById("open").hidden && document.getElementById("hint").hidden'), true)
+  assert.equal(await frameEval('b', 'document.getElementById("fit").textContent'), 'Archive reset')
+  assert.equal(await frameEval('b', 'getComputedStyle(document.getElementById("fit")).color'), 'rgb(18, 52, 86)')
+  assert.equal(await frameEval('b', 'getComputedStyle(document.getElementById("fit")).borderRadius'), '0px')
+  await evaluate('cards.b.setCamera({zoom:1.4})'); await delay(150)
+  assert.equal(await evaluate('cameras.b.zoom'), 1.4)
+  assert.notEqual(await hash(), locked, 'host zoom command changes actual rendering')
+  const configuredView = await hash()
+  await mouse('mouseWheel', 530, 140, { deltaX: 0, deltaY: -160 }); await delay(150)
+  assert.notEqual(await hash(), configuredView)
+  await evaluate('cards.b.resetView()'); await delay(150)
+  assert.equal(await hash(), configuredView, 'reset restores the configured camera')
+  await evaluate('cards.b.setOptions({theme:"auto",background:null,style:null})')
+  await send('Emulation.setEmulatedMedia', { features: [{ name:'prefers-color-scheme', value:'dark' }] }); await delay(100)
+  assert.equal(await frameEval('b', 'document.documentElement.dataset.theme'), 'dark')
+  await send('Emulation.setEmulatedMedia', { features: [{ name:'prefers-color-scheme', value:'light' }] }); await delay(100)
+  assert.equal(await frameEval('b', 'document.documentElement.dataset.theme'), 'light')
+  await evaluate('cards.b.setOptions({interaction:{autoRotate:true,autoRotateSpeed:4}})')
+  const spinning = await hash(); await delay(250)
+  assert.notEqual(await hash(), spinning, 'auto-rotation changes rendered view')
+  await evaluate('cards.b.setOptions({interaction:{autoRotate:false}})'); await delay(150)
+  assert.equal(await evaluate(`(()=>{const original=window.open;window.open=()=>null;try{return cards.b.openFullViewer()}finally{window.open=original}})()`),false,'popup blocking is reported without discarding the loaded model')
+  assert.equal(await evaluate('events.b.stage'),'handoff')
+  // A real host click opens synchronously, then the trusted iframe supplies file + camera.
+  await evaluate(`(()=>{const button=document.createElement('button');button.id='host-open';button.textContent='Host full viewer';button.style='position:fixed;top:350px;left:20px';button.onclick=()=>window.hostOpened=cards.b.openFullViewer();document.body.append(button)})()`)
+  await mouse('mousePressed', 70, 360, { button: 'left', buttons: 1, clickCount: 1 })
+  await mouse('mouseReleased', 70, 360, { button: 'left', clickCount: 1 })
+  await waitFor('window.hostOpened===true', 'host button retains user activation')
+  let customPopup
+  for (let i=0;i<100&&!customPopup;i++) { customPopup=(await targets()).find(t=>t.url.startsWith(base)&&!t.url.includes('embed'));if(!customPopup)await delay(100) }
+  assert.ok(customPopup)
+  const customPages=await(await fetch(`http://127.0.0.1:${port}/json/list`)).json()
+  const customSocket=new WebSocket(customPages.find(p=>p.id===customPopup.targetId).webSocketDebuggerUrl)
+  await new Promise((resolve,reject)=>{customSocket.onopen=resolve;customSocket.onerror=reject})
+  let customId=0;const customPending=new Map()
+  customSocket.onmessage=({data})=>{const m=JSON.parse(data);if(m.id){customPending.get(m.id)(m.result);customPending.delete(m.id)}}
+  const customEval=expression=>new Promise(resolve=>{const id=++customId;customPending.set(id,v=>resolve(v.result?.value));customSocket.send(JSON.stringify({id,method:'Runtime.evaluate',params:{expression,returnByValue:true}}))})
+  try {
+    let done=false
+    for(let i=0;i<300&&!done;i++){done=await customEval('document.body.classList.contains("has-model") && document.getElementById("app").getAttribute("aria-busy")==="false"');if(!done)await delay(100)}
+    assert.ok(done,'cross-origin host transfers its private file to the full viewer')
+    assert.equal(await customEval('document.getElementById("fileName").textContent'),'private.litematic')
+    assert.equal(await customEval('document.getElementById("projectionBtn").getAttribute("aria-pressed")'),'true','orthographic projection survives handoff')
+    assert.equal(await customEval('window.opener===null && !location.hash'),true)
+    assert.equal(privateDownloads,1,'host button does not download private file again')
+  } finally {customSocket.close();await send('Target.closeTarget',{targetId:customPopup.targetId})}
+  await send('Page.bringToFront')
+  const savedCamera = await evaluate('cameras.b')
   await evaluate('window.scrollTo(0,1500)')
   await waitFor('!document.querySelector("#a iframe") && !document.querySelector("#b iframe") && !document.querySelector("#c iframe") && window.events.d?.type==="loaded"', 'offscreen contexts released')
   assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 1)
+  await evaluate('window.scrollTo(0,0)')
+  await waitFor('window.events.b?.type==="loaded"','card remounts')
+  await delay(150)
+  assert.deepEqual(await evaluate('cameras.b'),savedCamera,'camera survives offscreen disposal')
+  assert.equal(await frameEval('b','document.getElementById("open").hidden'),true,'options survive remount')
   await evaluate('Object.values(cards).forEach(card=>card.destroy())')
   assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 0, 'destroy removes frames')
   await send('Page.navigate', { url: base + 'embed.html?' + new URLSearchParams({ file: host + '/no-cors.litematic', pack: 'vanilla', lang: 'en' }) })
@@ -268,10 +345,30 @@ try {
   await waitFor('document.querySelector("#detailPreview > div")?.dataset.state==="loaded"', 'gallery resumes after modal closes')
   await evaluate('document.getElementById("imageTab").click()')
   assert.equal(await evaluate('document.querySelectorAll("iframe").length'), 0, 'returning to images releases the preview')
+  await clickElement('#presetCustom')
+  await waitFor('document.querySelector("#customPreview > div")?.dataset.state==="loaded"','custom archive preset')
+  assert.equal(await evaluate('document.getElementById("hostControls").hidden'),false)
+  assert.equal(await evaluate('document.getElementById("hostReset").disabled'),false)
+  assert.match(await evaluate('document.getElementById("configCode").textContent'),/background": "transparent"/)
+  assert.match(await evaluate('document.getElementById("configCode").textContent'),/\.openFullViewer\(\)/)
+  const inlineCode=await evaluate('document.getElementById("configCode").textContent')
+  await evaluate('document.getElementById("customize").scrollIntoView({block:"start"})')
+  await shot('embed-customizer')
+  await evaluate('document.getElementById("codeMode").value="popup";document.getElementById("codeMode").dispatchEvent(new Event("change"))')
+  const popupCode=await evaluate('document.getElementById("configCode").textContent')
+  assert.match(popupCode,/<dialog/,'headless modal code includes a host dialog and accessible controls')
+  await clickElement('#tryPopup')
+  await waitFor('document.querySelector(".custom-preview-dialog .custom-dialog-viewport > div")?.dataset.state==="loaded"','host-owned headless example dialog')
+  assert.equal(await evaluate('document.querySelectorAll("#customPreview iframe").length'),0,'host dialog releases background cards too')
+  assert.equal(await evaluate('document.querySelector(".custom-preview-dialog .custom-dialog-controls button").disabled'),false)
+  await evaluate('document.querySelector(".custom-preview-dialog").close()')
+  await waitFor('!document.querySelector(".custom-preview-dialog")','host dialog disposes')
+  await waitFor('document.querySelector("#customPreview > div")?.dataset.state==="loaded"','inline custom card resumes')
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
   await send('Emulation.setTouchEmulationEnabled', { enabled: true })
   assert.equal(await evaluate('document.documentElement.scrollWidth<=390'), true, 'mobile example fits')
   await shot('embed-example-mobile')
+  assert.equal(await evaluate('document.documentElement.scrollWidth<=390'),true,'mobile configurator fits viewport')
   await evaluate('document.getElementById("quickPreview").click()')
   await waitFor('document.querySelector("[data-litematic-preview]")?.shadowRoot.querySelector(".viewport > div")?.dataset.state==="loaded"', 'mobile popup')
   assert.equal(await evaluate('(()=>{const r=document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("dialog").getBoundingClientRect();return r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=innerHeight})()'), true, 'mobile modal fits viewport')
@@ -283,6 +380,26 @@ try {
   await delay(100)
   assert.notEqual(await frameEval('modal', 'document.querySelector("canvas").toDataURL()'), mobileBefore, 'two-finger pinch changes the preview scale')
   await evaluate('document.querySelector("[data-litematic-preview]").shadowRoot.querySelector("button").click()')
+  // Execute the actual generated examples from a different origin.
+  await send('Emulation.setDeviceMetricsOverride',{width:1200,height:800,deviceScaleFactor:1,mobile:false})
+  await send('Emulation.setTouchEmulationEnabled',{enabled:false})
+  for (const [label, markup] of [['inline',inlineCode],['popup',popupCode]]) {
+    generatedMarkup='<!doctype html><meta charset="utf-8">'+markup.replaceAll('https://lwv.loafing.club/',base)
+    await send('Page.navigate',{url:host+'/generated'})
+    if(label==='popup'){await waitFor('typeof document.getElementById("launch")?.onclick==="function"','generated popup initialized');await clickElement('#launch')}
+    await waitFor('document.querySelector("#preview > div")?.dataset.state==="loaded"','generated '+label+' code renders')
+    assert.equal(await evaluate('document.getElementById("full").disabled'),false)
+    if(label==='popup'){
+      await evaluate('document.getElementById("preview-dialog").close()')
+      await waitFor('document.querySelectorAll("iframe").length===0','generated popup releases renderer')
+    }
+  }
+  await send('Page.navigate',{url:base+'embed-example.html?lang=en#customize'})
+  await waitFor('typeof document.getElementById("presetLight")?.onclick==="function"','English configurator')
+  assert.equal(await evaluate('document.getElementById("customTitle").textContent'),'One model. Your site’s style.')
+  await clickElement('#presetLight')
+  await waitFor('document.querySelector("#customPreview > div")?.dataset.state==="loaded"','light example')
+  await shot('embed-customizer-light')
   await send('Page.navigate', { url: base + '?' + new URLSearchParams({ file: host + '/cors.litematic', lang: 'en', pack: 'vanilla' }) })
   await waitFor('document.body.classList.contains("has-model") && document.getElementById("app").getAttribute("aria-busy")==="false"', 'full viewer loads URL without a handoff')
   assert.equal(await evaluate('document.getElementById("fileName").textContent'), 'cors.litematic')
@@ -291,7 +408,7 @@ try {
   assert.equal(await evaluate('document.getElementById("projectionBtn").getAttribute("aria-pressed")'), 'true', 'full viewer still supports projection switching')
   const exceptions = errors.filter(error => error.exception || error.exceptionId)
   assert.deepEqual(exceptions, [], 'no uncaught JavaScript exceptions')
-  console.log('Passed cross-origin URL/File loading, orbit/pan/wheel/reset, explicit full-viewer handoff, modal Escape/backdrop/focus/cleanup and style isolation, cached SDK upgrade with real list clicks, gallery switching, mobile pinch/layout, source/channel checks, iframe pool/recovery and production paths.')
+  console.log('Passed cross-origin URL/File loading and host/iframe handoff, transparent canvas pixels, dynamic themes/controls/labels, camera commands/events/persistence, interaction locks and auto-rotate, modal CSS parts/tokens and cleanup, cached SDK upgrade, executed generated examples, bilingual/mobile configurator, mouse/touch gestures, source/channel checks, iframe pooling and production paths.')
 } finally {
   socket?.close(); chrome.kill()
   if (archive) await new Promise(resolve => archive.close(resolve))

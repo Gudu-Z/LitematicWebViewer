@@ -9,7 +9,7 @@
 </head>
 <body>
   <main>
-    <a href="./" id="back">← 完整预览器</a>
+    <nav class="page-nav"><a href="./" id="back">← 完整预览器</a><div><a href="#customize" id="customLink">样式定制器 ↓</a><a id="language" href="?lang=en">English</a></div></nav>
     <h1 id="heading">把投影放进你的档案馆</h1>
     <p id="intro">在列表里点击投影，弹出快速预览；也可以在作品详情的图片区直接查看 3D 模型。</p>
     <section id="popup-example" aria-labelledby="popupTitle">
@@ -37,6 +37,35 @@
         </div>
         <div class="details"><p class="eyebrow">LITEMATICA</p><h3 id="buildTitle">示例建筑</h3><p id="buildDescription">切换到「3D 预览」，在原本放图片的位置旋转、平移和放大建筑。</p><p id="buildHint">需要查看材料或逐层检查时，点击预览区内的「完整预览」。</p><a href="./demo.litematic" download id="download">下载投影 ↓</a></div>
       </article>
+    </section>
+    <section id="customize" aria-labelledby="customTitle">
+      <p class="eyebrow" id="customLabel">03 · 适配你的网站</p>
+      <h2 id="customTitle">同一个模型，你的网站风格</h2>
+      <p id="customText">调整主题和交互，实时预览，然后复制接入代码。纯模型模式让你用自己的按钮、加载提示和弹窗。</p>
+      <div class="presets" aria-label="主题预设"><button type="button" data-preset="dark" id="presetDark">深色</button><button type="button" data-preset="light" id="presetLight">浅色</button><button type="button" data-preset="custom" id="presetCustom">自定义档案馆</button></div>
+      <div class="configurator">
+        <div class="config-stage">
+          <div class="archive-shell" id="archiveShell">
+            <div class="archive-heading"><span id="archiveTitle">建筑档案 / 3D 预览</span><span class="live-tag" id="liveTag">实时预览</span></div>
+            <div id="customPreview"><button id="startCustom" type="button"><img src="./demo-preview.png" alt=""><span id="startLabel">点击启用定制预览</span></button></div>
+            <div id="hostControls" hidden><button type="button" id="hostReset" disabled>复位视角</button><button type="button" id="hostOpen" disabled>完整预览 ↗</button></div>
+            <p id="customStatus" role="status"></p>
+          </div>
+          <div class="config-actions"><button id="tryPopup" type="button">以弹窗方式查看 ↗</button><span id="hostNote">下方代码会包含当前设置。</span></div>
+        </div>
+        <form id="configForm">
+          <label><span id="themeLabel">主题</span><select id="cfgTheme"><option value="dark" id="themeDark">深色</option><option value="light" id="themeLight">浅色</option><option value="auto" id="themeAuto">跟随系统</option></select></label>
+          <label><span id="uiLabel">界面</span><select id="cfgUI"><option value="default" id="uiDefault">内置控件</option><option value="none" id="uiNone">纯模型 · 自己的控件</option></select></label>
+          <div class="config-colors"><label><span id="accentLabel">强调色</span><input id="cfgAccent" type="color" value="#83cbff"></label><label><span id="backgroundLabel">背景色</span><input id="cfgBackground" type="color" value="#172332"></label></div>
+          <label class="check"><input id="cfgTransparent" type="checkbox"><span id="transparentLabel">透明背景</span></label>
+          <label><span id="radiusLabel">圆角</span><input id="cfgRadius" type="range" min="0" max="32" value="16"></label>
+          <label><span id="projectionLabel">投影方式</span><select id="cfgProjection"><option value="perspective" id="perspectiveLabel">透视</option><option value="orthographic" id="orthographicLabel">正交</option></select></label>
+          <fieldset><legend id="controlLabel">内置控件</legend><div class="checks"><label class="check"><input id="cfgReset" type="checkbox" checked><span id="resetLabel">复位</span></label><label class="check"><input id="cfgOpen" type="checkbox" checked><span id="openLabel">完整预览</span></label><label class="check"><input id="cfgHint" type="checkbox" checked><span id="hintLabel">操作提示</span></label><label class="check"><input id="cfgTitle" type="checkbox" checked><span id="titleLabel">弹窗标题</span></label></div></fieldset>
+          <fieldset><legend id="interactionLabel">模型交互</legend><div class="checks"><label class="check"><input id="cfgRotate" type="checkbox" checked><span id="rotateLabel">旋转</span></label><label class="check"><input id="cfgPan" type="checkbox" checked><span id="panLabel">平移</span></label><label class="check"><input id="cfgZoom" type="checkbox" checked><span id="zoomLabel">缩放</span></label><label class="check"><input id="cfgAutoRotate" type="checkbox"><span id="autoRotateLabel">自动旋转</span></label></div></fieldset>
+        </form>
+      </div>
+      <div class="code-heading"><label><span id="codeLabel">接入代码</span><select id="codeMode"><option value="inline" id="codeInline">内嵌卡片</option><option value="popup" id="codePopup">点击弹窗</option></select></label><button id="copyCode" type="button">复制代码</button></div>
+      <pre tabindex="0"><code id="configCode"></code></pre><p id="copyStatus" role="status"></p>
     </section>
     <p><a id="docs" href="https://github.com/Gudu-Z/LitematicWebViewer#嵌入预览卡片">查看 README 接入文档 ↗</a></p>
   </main>

@@ -20,8 +20,16 @@ export function validCamera(value) {
 
 export function applyCamera(renderer, value) {
   if (!validCamera(value)) return
+  if (['perspective', 'orthographic'].includes(value.projection)) renderer.setProjectionMode(value.projection)
   renderer.camera.position.fromArray(value.position)
   renderer.controls.target.fromArray(value.target)
+  if (renderer.camera.isOrthographicCamera && Number.isFinite(value.height) && value.height > 0 && value.height <= 1e9) {
+    const aspect = (renderer.container.clientWidth || 1) / (renderer.container.clientHeight || 1)
+    renderer.camera.top = value.height / 2; renderer.camera.bottom = -value.height / 2
+    renderer.camera.left = -value.height * aspect / 2; renderer.camera.right = value.height * aspect / 2
+  }
+  if (Number.isFinite(value.zoom) && value.zoom >= .01 && value.zoom <= 100) renderer.camera.zoom = value.zoom
+  renderer.camera.updateProjectionMatrix()
   renderer.controls.update()
 }
 
@@ -52,31 +60,45 @@ export async function fetchSchematic(value, base, signal) {
 }
 
 // Files are passed directly between browser windows, without storage or an upload.
-export function openFullViewer({ file, url, lang, pack, background, camera }, onError, onFinish = () => {}) {
+export function openFullViewer({ file, url, lang, pack, background, camera, baseURL = location.href, readData }, onError, onFinish = () => {}) {
   const token = crypto.randomUUID()
-  const destination = new URL('./', location.href)
+  const destination = new URL('./', baseURL)
+  const revision = new URL(baseURL).searchParams.get('v')
+  if (revision) destination.searchParams.set('v', revision)
   if (url) destination.searchParams.set('file', url)
   destination.searchParams.set('lang', lang)
   destination.searchParams.set('pack', pack)
-  destination.searchParams.set('background', background)
-  destination.hash = `preview=${token}`
-  let popup, timer
-  const cleanup = () => { window.removeEventListener('message', receive); clearTimeout(timer); onFinish() }
-  const receive = event => {
-    if (event.origin !== location.origin || event.source !== popup || event.data?.protocol !== PROTOCOL || event.data.token !== token || event.data.type !== 'handoff-ready') return
-    popup.postMessage({ protocol: PROTOCOL, type: 'handoff-file', token, file, camera }, location.origin)
-    cleanup()
+  if (background && background !== 'transparent') destination.searchParams.set('background', background)
+  destination.hash = new URLSearchParams({ preview: token, origin: location.origin }).toString()
+  let popup, timer, finished = false, sending = false
+  const cleanup = () => { if (finished) return; finished = true; window.removeEventListener('message', receive); clearTimeout(timer); onFinish() }
+  const receive = async event => {
+    if (finished || sending || event.origin !== destination.origin || event.source !== popup || event.data?.protocol !== PROTOCOL || event.data.token !== token || event.data.type !== 'handoff-ready') return
+    sending = true
+    try {
+      const payload = readData ? await readData() : { file, camera }
+      if (finished) return
+      if (!validFile(payload.file)) throw Error('fileLimit')
+      popup.postMessage({ protocol: PROTOCOL, type: 'handoff-file', token, file: payload.file, camera: payload.camera }, destination.origin)
+      cleanup()
+    } catch { if (!finished) { cleanup(); onError('handoffTimeout') } }
   }
   window.addEventListener('message', receive)
   // An opener is needed for the one-shot, origin-checked transfer. The receiver drops it.
   popup = window.open(destination.href, '_blank')
-  if (!popup) { cleanup(); onError('popupBlocked'); return }
+  if (!popup) { cleanup(); onError('popupBlocked'); return { opened: false, cancel: cleanup } }
   timer = setTimeout(() => { cleanup(); onError('handoffTimeout') }, 60000)
+  return { opened: true, cancel: cleanup }
 }
 
 export function receivePreviewFile() {
-  const token = new URLSearchParams(location.hash.slice(1)).get('preview')
+  const params = new URLSearchParams(location.hash.slice(1))
+  const token = params.get('preview')
   if (!token || !/^[a-f0-9-]{36}$/.test(token) || !window.opener) return null
+  let expectedOrigin = location.origin
+  if (params.has('origin')) {
+    try { const url = new URL(params.get('origin')); if (!['http:', 'https:'].includes(url.protocol) || url.origin !== params.get('origin')) return null; expectedOrigin = url.origin } catch { return null }
+  }
   const opener = window.opener
   return new Promise(resolve => {
     let timer
@@ -88,11 +110,11 @@ export function receivePreviewFile() {
     }
     const receive = event => {
       const data = event.data
-      if (event.origin !== location.origin || event.source !== opener || data?.protocol !== PROTOCOL || data.type !== 'handoff-file' || data.token !== token || !validFile(data.file)) return
+      if (event.origin !== expectedOrigin || event.source !== opener || data?.protocol !== PROTOCOL || data.type !== 'handoff-file' || data.token !== token || !validFile(data.file)) return
       cleanup(); resolve({ file: new File([data.file], data.file.name || 'schematic.litematic'), camera: data.camera })
     }
     window.addEventListener('message', receive)
     timer = setTimeout(() => { cleanup(); resolve(null) }, 60000)
-    opener.postMessage({ protocol: PROTOCOL, type: 'handoff-ready', token }, location.origin)
+    opener.postMessage({ protocol: PROTOCOL, type: 'handoff-ready', token }, expectedOrigin)
   })
 }

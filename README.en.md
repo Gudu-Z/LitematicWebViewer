@@ -36,7 +36,7 @@ Preview Minecraft `.litematic` / `.litematica` schematics—building blueprints 
 - Model catalog with categories, bilingual search, state combinations, and world, item, spawn egg and item-frame views.
 - Settings for background color, entity/region outline/dimension visibility, underwater fog and camera sensitivity.
 - Mobile controls, including a flight joystick and vertical movement buttons.
-- Embedded schematic previews for other websites: open a popup from a schematic list or embed inside a build page's image gallery; rotate, pan and zoom using public URLs or file data.
+- Embedded previews for other websites: popup or inline cards with custom themes, transparent backgrounds, headless UI and host controls. A [style configurator](https://lwv.loafing.club/embed-example.html?lang=en#customize) generates integration code.
 
 For everyday use, open the [online viewer](https://lwv.loafing.club/). The installation instructions below are for local use and development.
 
@@ -73,7 +73,7 @@ Connect an existing schematic list entry, thumbnail or quick-preview button to `
 
 Use the close button, click the backdrop or press Esc to dismiss. Closing releases rendering resources and restores the page's scrolling and focus. Only one popup is open at a time; opening another replaces it. Styles are contained in a Shadow DOM and do not affect the host website.
 
-`openLitematicPreview(options)` accepts the same `url` / `file`, `name`, `lang`, `pack`, `background`, `poster` and `onStatus` options as the card API below. It returns `{ element, load(source, name?), close() }`. Supply `file` instead of `url`, or open the popup first and call `load` when the file becomes available. Call `close()` when leaving an SPA route. `name` sets the popup title. Public file URLs must satisfy the CORS requirements below.
+`openLitematicPreview(options)` shares the card API's source, appearance, interaction and callback options. It returns `element`, `load(source, name?)`, `setOptions()`, `setCamera()`, `resetView()`, `openFullViewer()` and `close()`. Supply `file` instead of `url`, or open the popup first and call `load` when the file becomes available. Call `close()` when leaving an SPA route. `name` sets the popup title. Public file URLs must satisfy the CORS requirements below.
 
 ### Option 2: embed inside a build page's image gallery
 
@@ -97,7 +97,9 @@ This example works as written. When replacing `file`, encode the **entire file U
 | `file` | Direct download URL for `.litematic`, `.litematica` or `.nbt`; not a download landing page | None; waits for a file |
 | `lang` | `zh` / `en` | `zh` |
 | `pack` | `xk` / `vanilla` | `xk` |
-| `background` | Six-digit hexadecimal color, for example `%23172332` after encoding | `#172332` |
+| `background` | Six-digit hex background color, e.g. `%23172332`, or `transparent` | Follows theme |
+| `theme` | `dark` / `light` / `auto` (system preference) | `dark` |
+| `ui` | `default` / `none`; the latter hides the internal interface | `default` |
 
 **CORS:** the file server must allow responses to be read by `https://lwv.loafing.club`, for example with `Access-Control-Allow-Origin: https://lwv.loafing.club`. Public files may use `*`. Redirects must also satisfy CORS requirements. Download requests do not include cookies or authentication credentials. Use HTTPS in production; HTTP is supported for local HTTP development. [CORS documentation](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
 
@@ -139,12 +141,101 @@ Both popup and inline previews accept file data. For authenticated downloads, se
 
 You can also pass `file` during creation, or use `{ url: 'https://archive.example/build.litematic' }`. URL mode still requires CORS as described above. The host must have legitimate access to files it reads; this API does not bypass authentication or cross-origin restrictions.
 
-Other `createLitematicCard(container, options)` options: `name` supplies the accessible card title and the default name for unnamed files; `background` sets the background color; `poster` supplies an HTTP(S) cover image while the card is inactive. The returned object exposes `element`, `load(source, name?)` and `destroy()`. `onStatus` receives `waiting`, `ready` (communication ready), `loading`, `loaded` (model complete), `error`, `handoff-start` and `handoff-end`. Loading events may include `progress` from 0 to 1. Pressing Esc in an inline card also reports `close-request`; popups handle dismissal automatically. `load` throws synchronously for invalid types, empty files and oversized files; network and parsing errors are reported through `onStatus`.
+In `createLitematicCard(container, options)`, `name` supplies the accessible title and default name for unnamed files; `poster` supplies an HTTP(S) cover image while inactive. The returned object exposes `element`, `load(source, name?)`, `setOptions()`, `setCamera()`, `resetView()`, `openFullViewer()` and `destroy()`. `load` throws synchronously for invalid types, empty files and oversized files; network and parsing errors are reported through `onStatus`.
+
+### Match your site and use your own UI
+
+The [style configurator](https://lwv.loafing.club/embed-example.html?lang=en#customize) includes dark, light and custom archive examples. Adjust the settings and copy working inline or popup code. Existing integrations keep working; the default remains dark with orbit, pan and zoom enabled.
+
+![A transparent model with host controls, and options for theme, controls and camera](docs/images/embed-customizer.png)
+
+```js
+const preview = openLitematicPreview({
+  url: schematicURL,
+  name: 'Build name', lang: 'en',
+  theme: 'light',
+  background: '#f2f5f8',
+  style: { accent: '#21796b', radius: 16, fontFamily: 'system-ui, sans-serif' },
+  controls: { hint: false },
+  labels: { open: 'Materials and layers ↗', reset: 'Reset' },
+  dialog: { width: 960, height: 680 },
+  camera: { projection: 'orthographic' },
+  interaction: { autoRotate: true, autoRotateSpeed: 2 },
+});
+// Follow your site's theme switch without downloading or rebuilding the model:
+preview.setOptions({ theme: 'dark', background: null });
+```
+
+| Option | Values and behavior |
+| --- | --- |
+| `theme` | `dark`, `light`, `auto`; `auto` follows the OS. For a site-specific theme switch, call `setOptions` |
+| `background` | `#RRGGBB`, `transparent`, or `null` (theme default). Transparency includes the WebGL canvas, so the model can sit over host images or gradients |
+| `style` | Hex colors for `accent`, `surface`, `text`, `muted`, `border`, `backdrop`; six-digit color for `background`; `radius` from 0–48 px; `fontFamily` as a font list (fonts must be available in the preview) |
+| `ui` | `default` retains built-in UI; `none` hides internal buttons, gesture hints, loading and error messages so the host can provide them |
+| `controls` | Booleans `reset`, `open`, `hint`, `status` control internal UI; `title` controls the popup heading. All default to `true`. The popup close button stays available |
+| `labels` | Plain-text overrides for `reset`, `open`, `hint`, `waiting`, `loading`, `error`, `retry`, `activate`, `subtitle`, `close` |
+| `dialog` | Popup `width` / `height` in pixels, from 240–4096; constrained to the viewport |
+| `interaction` | `rotate`, `pan`, `zoom` default to `true`; `autoRotate` defaults to `false`; `autoRotateSpeed` defaults to 2, range -20–20, negative reverses direction |
+| `camera` | `projection: 'perspective' / 'orthographic'`, `zoom` from 0.01–100. Optional `position: [x,y,z]` and `target: [x,y,z]` must be supplied together, in block coordinates. Orthographic snapshots also contain `height` |
+
+Headless mode suits archives that already have a dialog, toolbar and loading UI. This example uses host buttons. For a popup, put these elements inside your own `<dialog>` or modal component; the configurator can generate that version too.
+
+```html
+<div id="model" style="height:400px;background:linear-gradient(#d7eadd,#f5f2e9)"></div>
+<button id="reset-model" disabled>Reset view</button>
+<button id="open-model" disabled>Full viewer</button>
+<p id="model-status" role="status"></p>
+<script type="module">
+  import { createLitematicCard } from 'https://lwv.loafing.club/embed.js?v=customize-1';
+  const reset = document.getElementById('reset-model');
+  const open = document.getElementById('open-model');
+  const preview = createLitematicCard(document.getElementById('model'), {
+    url: 'https://lwv.loafing.club/demo.litematic', lang: 'en',
+    background: 'transparent', ui: 'none',
+    camera: { projection: 'orthographic' },
+    onStatus(event) {
+      document.getElementById('model-status').textContent = event.message || '';
+      if (event.stage !== 'handoff' && ['loaded', 'loading', 'error', 'inactive'].includes(event.type)) {
+        reset.disabled = open.disabled = event.type !== 'loaded';
+      }
+      // loading events can include progress from 0 to 1; otherwise show indeterminate progress.
+    },
+    onCameraChange(camera) { /* Save this view and restore it with setCamera(camera). */ },
+  });
+  reset.onclick = () => preview.resetView();
+  open.onclick = () => preview.openFullViewer();
+  // When removing the component: preview.destroy();
+</script>
+```
+
+- `setOptions(patch)` merges nested settings. Set a group to `null` to reset it; set a `style` / `labels` entry to `null` to remove its override. Appearance updates preserve the current camera. `pack` and `poster` are creation options; replace sources with `load()`.
+- `setCamera(patch)` updates and saves the initial view; `resetView()` fits the model using that configured view. Options and the latest camera survive offscreen iframe disposal and reactivation.
+- Call `openFullViewer()` **directly in the host button's click handler, before any `await`**, to preserve browser user activation. It returns `true` when a tab opens, or `false` if the model is not ready, a transfer is pending, or popups are blocked. File and camera data follow after the tab opens; private files do not need another download.
+- Window-opening and file-transfer errors include `stage: 'handoff'`. The model remains usable; keep the host's retry button enabled.
+- `onStatus(event)` / the `preview-status` DOM event reports `waiting`, `ready` (communication ready), `loading`, `loaded`, `error`, `inactive` (offscreen disposal), `handoff-start`, `handoff-end`, and `close-request`. These still fire in headless mode or when `status` is hidden; hosts should display loading failures.
+- `onCameraChange(camera)` / the `preview-camera` DOM event provides snapshots at most about every 100ms. Camera events do not overwrite the `onStatus` loading state. Esc inside an inline card reports `close-request`; built-in popups dismiss automatically, while custom dialogs can handle the event themselves.
+
+Popup chrome also exposes CSS custom properties and `::part`:
+
+```css
+[data-litematic-preview] {
+  --lwv-dialog-width: 960px;
+  --lwv-radius: 20px;
+  --lwv-surface: #f7faf8;
+  --lwv-backdrop: #14233488;
+}
+[data-litematic-preview]::part(header) { padding: 12px 20px; }
+[data-litematic-preview]::part(title) { font-weight: 500; }
+```
+
+Public parts: `dialog`, `header`, `title`, `subtitle`, `close-button`, `viewport`. Additional variables: `--lwv-dialog-height`, `--lwv-font`, `--lwv-text`, `--lwv-muted`, `--lwv-border`, `--lwv-accent`. **These affect only the outer shell. Configure the iframe through `style`, `controls`, `labels`, and other options.** Host CSS and font files do not automatically enter a cross-origin iframe.
+
+The SDK remains a single-file ES module. When adopting new APIs, prefer the versioned import URL generated by the configurator to avoid a previously cached SDK. The example page automatically uses its build's SDK revision. Developers should edit `src/embedSdk.js` / `src/previewOptions.js`; `npm run build` (or startup with `npm run dev`) generates `public/embed.js`.
 
 ### Multiple cards, full-viewer navigation and hosting
 
 - **For lists, use cover images with click-to-open previews.** Rendering starts only after a click. If you need several inline previews, the JS module mounts at most two visible cards by default. Other cards show a poster or an “Activate 3D preview” button. Hovering or activating a card changes which cards run. Offscreen frames are removed to release rendering contexts, and reload when selected again. Opening a popup also releases background inline cards and restores them after closing, except cards temporarily retained during file handoff to the full viewer. Import `configureLitematicCards` from the same module and call `configureLitematicCards({ maxActive: 1 })` to change the limit; supported values are 1–4. Plain iframes pause offscreen rendering but do not participate in JS card management.
-- **Clicking Full viewer preserves the file, camera position, language, resource preset and background.** Files are transferred using `postMessage` with origin and window checks, without third-party cookies, browser storage or server uploads. Keep the original page and preview open until loading completes, and allow user-initiated new tabs. [postMessage documentation](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
+- **Opening the full viewer preserves the file, camera position, projection, language, pack preset and opaque background color.** Transparent previews use the full site's default background there. Files pass through origin-, window- and token-checked `postMessage`, without third-party cookies, browser storage or server uploads. Keep the original page and preview open until loading completes, and allow user-initiated new tabs. [postMessage documentation](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
 - **Refreshing a full-viewer tab opened from file data requires reopening the file.** Public URL mode retains the `file` parameter and can download again. Archives must refresh expired signed URLs.
 - Cards and the full-viewer pages they open use the requested `xk` / `vanilla` preset. They do not read personal resource packs or overwrite saved pack preferences. Custom ZIP packs are not currently accepted as embed parameters.
 - The embedded file limit is **64 MiB of compressed file data**, in addition to the block-count and browser-memory limits below. Large schematics still require full downloads and parsing. Prefer cover images in archive lists and interactive previews on detail pages.
@@ -156,7 +247,7 @@ Validation:
 ```bash
 node scripts/verify-embed-protocol.mjs  # URLs, files, error responses and streamed download limits
 npm run build
-node scripts/verify-embed.mjs           # Cross-site handoff, popups, gallery tabs, mouse/touch controls and pooling
+node scripts/verify-embed.mjs           # Cross-site handoff, transparent pixels, theme/camera APIs, generated examples and mouse/touch controls
 ```
 
 Browser validation requires Chrome / Chromium and uses port 5178 plus a temporary test website. On Windows it checks the standard Chrome installation path; set `CHROME_PATH` for other locations.
@@ -322,6 +413,9 @@ npm run build
 src/
   main.js              File loading, drag/drop, resource packs and UI wiring
   embed.js / embed.css Embedded card entry and styles
+  embedSdk.js          Customizable SDK source (built as public/embed.js)
+  previewOptions.js    Shared option validation and themes
+  embedConfigurator.js Style configurator and integration code generator
   embedProtocol.js     Downloads, cross-window transfer and parameter validation
   schematicDetails.js  Shared block entity extraction for the full viewer and cards
   nbt.js               Binary NBT parsing and gzip/zlib decompression

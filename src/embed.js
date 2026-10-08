@@ -5,12 +5,15 @@ import { BlockModelResolver } from './blocks.js'
 import { parseLitematica } from './litematica.js'
 import { ViewerPacks } from './viewerPacks.js'
 import { extractSigns, extractPlayerHeads, extractBanners, extractStatues, extractDecoratedPots } from './schematicDetails.js'
-import { PROTOCOL, validFile, fileURL, fetchSchematic, openFullViewer } from './embedProtocol.js'
+import { PROTOCOL, validFile, fileURL, fetchSchematic, openFullViewer, applyCamera } from './embedProtocol.js'
+import { normalizeOptions, applyTheme } from './previewOptions.js'
 
 const params = new URLSearchParams(location.search)
-const lang = params.get('lang') === 'en' ? 'en' : 'zh'
 const pack = params.get('pack') === 'vanilla' ? 'vanilla' : 'xk'
-const background = /^#[0-9a-f]{6}$/i.test(params.get('background')) ? params.get('background') : '#172332'
+let options = normalizeOptions()
+try { options = normalizeOptions(Object.fromEntries(['lang', 'theme', 'background', 'ui'].filter(key => params.has(key)).map(key => [key, params.get(key)]))) } catch { /* Ignore invalid URL styling. */ }
+const themeMedia = matchMedia('(prefers-color-scheme: dark)')
+let background
 const words = {
   waiting: ['等待投影文件…', 'Waiting for a schematic…'],
   loading: ['正在加载投影…', 'Loading schematic…'],
@@ -27,17 +30,11 @@ const words = {
   handoffTimeout: ['文件传递超时，请保持此页面打开并重试。', 'File transfer timed out. Keep this page open and try again.'],
   webgl: ['无法启动 3D 预览，请检查浏览器的 WebGL 支持。', 'Cannot start 3D preview. Check browser WebGL support.'],
 }
-const t = key => words[key]?.[lang === 'en' ? 1 : 0] || key
-document.documentElement.lang = lang === 'en' ? 'en' : 'zh-CN'
-document.title = (lang === 'en' ? 'Schematic preview' : '投影预览卡片') + ' | LitematicWebViewer'
-document.body.style.background = background
+const t = key => options.labels[({ fit: 'reset', full: 'open', failed: 'error' })[key] || key] ?? words[key]?.[options.lang === 'en' ? 1 : 0] ?? key
 const root = document.getElementById('preview'), message = document.getElementById('message')
 const status = document.getElementById('status'), progress = document.getElementById('progress')
 const retry = document.getElementById('retry'), open = document.getElementById('open')
 const fit = document.getElementById('fit')
-open.title = open.ariaLabel = t('open'); retry.textContent = t('retry')
-open.textContent = t('full'); fit.textContent = t('fit')
-document.getElementById('hint').textContent = t(matchMedia('(pointer: coarse)').matches ? 'touch' : 'ready')
 
 let parentOrigin = null
 try { const value = params.get('parentOrigin'); if (value && new URL(value).origin === value && /^https?:/.test(value)) parentOrigin = value } catch {}
@@ -46,11 +43,65 @@ const notify = (type, detail = {}) => {
   if (parentOrigin && channel && parent !== window) parent.postMessage({ protocol: PROTOCOL, channel, type, ...detail }, parentOrigin)
 }
 let renderer, initialized, current, requested, lastRequest, pumping = false, active = true, controller
+let cameraTimer, viewRevision = 0
 const assets = new AssetProvider(), resolver = new BlockModelResolver(assets)
+
+function refreshUI() {
+  const values = applyTheme(document.documentElement, options, themeMedia.matches)
+  background = values.background
+  document.documentElement.lang = options.lang === 'en' ? 'en' : 'zh-CN'
+  document.documentElement.style.colorScheme = values.theme
+  document.title = (options.lang === 'en' ? 'Schematic preview' : '投影预览卡片') + ' | LitematicWebViewer'
+  document.body.style.background = background
+  root.dataset.ui = options.ui
+  open.title = open.ariaLabel = t('full'); retry.textContent = t('retry')
+  open.textContent = t('full'); fit.textContent = t('fit')
+  if (root.dataset.state === 'waiting') status.textContent = t('waiting')
+  if (root.dataset.state === 'loading') status.textContent = t('loading')
+  fit.hidden = !options.controls.reset; open.hidden = !options.controls.open
+  message.hidden = root.dataset.state === 'loaded' || !options.controls.status
+  const hint = document.getElementById('hint')
+  hint.hidden = !options.controls.hint
+  const touch = matchMedia('(pointer: coarse)').matches, en = options.lang === 'en', i = options.interaction
+  hint.textContent = options.labels.hint ?? [
+    i.rotate && (en ? touch ? 'One finger to orbit' : 'Left-drag orbit' : touch ? '单指旋转' : '左键旋转'),
+    i.pan && (en ? touch ? 'Two fingers to pan' : 'Right-drag pan' : touch ? '双指平移' : '右键平移'),
+    i.zoom && (en ? touch ? 'Pinch to zoom' : 'Scroll to zoom' : touch ? '双指缩放' : '滚轮缩放'),
+  ].filter(Boolean).join(' · ')
+  if (renderer) {
+    renderer.setBackgroundColor(background)
+    renderer.setUnderwaterFogEnabled(background !== 'transparent')
+    Object.assign(renderer.controls, { enableRotate: i.rotate, enablePan: i.pan, enableZoom: i.zoom, autoRotate: i.autoRotate, autoRotateSpeed: i.autoRotateSpeed })
+  }
+}
+function cameraSnapshot() {
+  return { projection: renderer.getProjectionMode(), position: renderer.camera.position.toArray(), target: renderer.controls.target.toArray(), zoom: renderer.camera.zoom, height: renderer.camera.isOrthographicCamera ? renderer.camera.top - renderer.camera.bottom : null }
+}
+function cameraChanged() {
+  if (cameraTimer || !current) return
+  cameraTimer = setTimeout(() => { cameraTimer = null; if (current) notify('camera', { camera: cameraSnapshot() }) }, 100)
+}
+function configureCamera(reset = false) {
+  if (!renderer || !current) return
+  const camera = options.camera
+  renderer.setProjectionMode(camera.projection)
+  if (reset) renderer.fitToBounds(current.bounds)
+  if (camera.position) applyCamera(renderer, camera)
+  else {
+    renderer.camera.zoom = camera.zoom
+    renderer.camera.updateProjectionMatrix(); renderer.controls.update()
+  }
+  cameraChanged()
+}
+function configure(patch, camera = false) {
+  options = normalizeOptions(patch, options)
+  refreshUI()
+  if (camera) { viewRevision++; configureCamera(true) }
+}
 
 function state(type, text, fraction) {
   root.dataset.state = type; root.setAttribute('aria-busy', String(type === 'loading'))
-  message.hidden = type === 'loaded'; status.textContent = text
+  message.hidden = type === 'loaded' || !options.controls.status; status.textContent = text
   retry.hidden = type !== 'error' || !lastRequest
   fit.disabled = type !== 'loaded'
   progress.hidden = type !== 'loading'
@@ -61,9 +112,10 @@ function updateActive() { renderer?.setActive(active && !document.hidden) }
 async function initialize() {
   if (initialized) return initialized
   initialized = (async () => {
-    try { renderer = new Renderer(document.getElementById('canvas'), { orbitOnly: true, pixelRatio: 1.5 }) }
+    try { renderer = new Renderer(document.getElementById('canvas'), { orbitOnly: true, pixelRatio: 1.5, alpha: true }) }
     catch { throw Error('webgl') }
-    renderer.setBackgroundColor(background)
+    refreshUI()
+    renderer.controls.addEventListener('change', cameraChanged)
     renderer.setWireframesVisible(false); renderer.setDimensionsVisible(false)
     updateActive()
     const manager = new ViewerPacks({ apply: async packs => {
@@ -79,8 +131,8 @@ async function initialize() {
   return initialized
 }
 
-function load(source) {
-  requested = { source }; lastRequest = source
+function load(source, resumeCamera) {
+  requested = { source, resumeCamera, viewRevision }; lastRequest = source
   controller?.abort()
   pump()
 }
@@ -116,7 +168,10 @@ async function pump() {
       await renderer.renderEntities(data.entities, assets, data)
       if (requested) continue
       current = { file, url, bounds: data.bounds }
+      configureCamera(true)
+      if (request.resumeCamera && request.viewRevision === viewRevision) applyCamera(renderer, request.resumeCamera)
       state('loaded', t('ready'), 1)
+      notify('camera', { camera: cameraSnapshot() })
       updateActive()
     } catch (error) {
       if (!requested) state('error', words[error.message] ? t(error.message) : `${t('failed')} ${error.message}`)
@@ -126,13 +181,15 @@ async function pump() {
 }
 function enter() {
   if (!current || !renderer) return
+  message.hidden = true
   notify('handoff-start')
-  openFullViewer({ ...current, lang, pack, background, camera: {
-    position: renderer.camera.position.toArray(), target: renderer.controls.target.toArray(),
-  } }, key => { state('error', t(key)); retry.hidden = true }, () => notify('handoff-end'))
+  openFullViewer({ ...current, lang: options.lang, pack, background, camera: cameraSnapshot() }, key => {
+    status.textContent = t(key); message.hidden = !options.controls.status; progress.hidden = true; retry.hidden = true
+    notify('error', { stage: 'handoff', code: key, message: t(key) })
+  }, () => notify('handoff-end'))
 }
 open.addEventListener('click', event => { event.preventDefault(); enter() })
-fit.onclick = () => { if (current) renderer.fitToBounds(current.bounds) }
+fit.onclick = () => configureCamera(true)
 // Keyboard events inside a cross-origin iframe do not bubble to the host dialog.
 window.addEventListener('keydown', event => { if (event.key === 'Escape') notify('close-request') })
 retry.onclick = () => load(lastRequest)
@@ -147,8 +204,18 @@ window.addEventListener('pageshow', updateActive)
 window.addEventListener('message', event => {
   const data = event.data
   if (!parentOrigin || event.source !== parent || event.origin !== parentOrigin || data?.protocol !== PROTOCOL || data.channel !== channel) return
-  if (data.type === 'load' && (typeof data.url === 'string' || data.file instanceof Blob)) load(data.file || data.url)
+  try {
+    if (data.type === 'configure') configure(data.options, data.cameraChanged)
+    if (data.type === 'reset') { viewRevision++; configureCamera(true) }
+    if (data.type === 'handoff-request' && current) notify('handoff-data', { file: current.file, camera: cameraSnapshot() })
+    if (data.type === 'load' && (typeof data.url === 'string' || data.file instanceof Blob)) {
+      if (data.options) configure(data.options)
+      load(data.file || data.url, data.resumeCamera)
+    }
+  } catch (error) { notify('error', { message: error.message }) }
 })
+themeMedia.addEventListener('change', refreshUI)
+refreshUI()
 state('waiting', t('waiting'))
 notify('ready')
 if (params.has('file')) load(params.get('file'))

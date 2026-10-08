@@ -378,6 +378,7 @@ async function openFile(file, camera) {
     await renderCurrentEntities()
     ui.showMetadata(data.metadata)
     applyCamera(renderer, camera)
+    refreshProjectionButton()
     updateRegionUI()
     updateMaterialList()
     const entityNote = data.entities?.length ? t('statusEntities', { n: data.entities.length }) : ''

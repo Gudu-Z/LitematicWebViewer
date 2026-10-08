@@ -36,7 +36,7 @@
 - 模型图鉴：分类、双语搜索、状态组合，以及世界 / 物品 / 刷怪蛋 / 展示框视图
 - 设置面板：背景色、显示实体 / 区域线框 / 尺寸、水下雾、镜头灵敏度
 - 移动端适配：飞行模式下左下角虚拟摇杆移动、右下角上升 / 下降按钮
-- 可嵌入其他网站的投影预览：点击投影弹出卡片，或嵌入详情页图片区；支持旋转、平移、缩放，以及公开链接和文件数据接入
+- 可嵌入其他网站的投影预览：弹窗或内嵌卡片，支持主题定制、透明背景、纯模型模式和宿主控制接口；提供可复制代码的[样式定制器](https://lwv.loafing.club/embed-example.html#customize)
 
 日常使用直接打开[在线预览器](https://lwv.loafing.club/)即可；以下安装步骤适合本地运行或开发。
 
@@ -73,7 +73,7 @@
 
 点击关闭按钮、遮罩或按 Esc 退出；关闭后释放渲染资源，并恢复原页面的滚动和焦点。每次只打开一个弹窗，新弹窗会替换旧弹窗。样式放在 Shadow DOM 内，不影响宿主网站。
 
-`openLitematicPreview(options)` 接受下文卡片 API 相同的 `url` / `file`、`name`、`lang`、`pack`、`background`、`poster`、`onStatus` 选项，返回 `{ element, load(source, name?), close() }`。可用 `file` 代替 `url`，或先打开弹窗，再调用 `load` 传入取得的文件；离开 SPA 路由时调用 `close()`。`name` 设置弹窗标题。公开文件 URL 需要满足下文的 CORS 要求。
+`openLitematicPreview(options)` 与下文卡片 API 共用文件、主题、交互和回调选项，返回 `element`、`load(source, name?)`、`setOptions()`、`setCamera()`、`resetView()`、`openFullViewer()` 和 `close()`。可用 `file` 代替 `url`，或先打开弹窗，再调用 `load` 传入取得的文件；离开 SPA 路由时调用 `close()`。`name` 设置弹窗标题。公开文件 URL 需要满足下文的 CORS 要求。
 
 ### 方式二：在详情页图片区域嵌入
 
@@ -97,7 +97,9 @@
 | `file` | `.litematic`、`.litematica` 或 `.nbt` 的直接下载地址；不是下载介绍页 | 无，等待文件 |
 | `lang` | `zh` / `en` | `zh` |
 | `pack` | `xk` / `vanilla` | `xk` |
-| `background` | 六位十六进制背景色，例如编码后的 `%23172332` | `#172332` |
+| `background` | 六位十六进制背景色，例如 `%23172332`，或 `transparent` | 跟随主题 |
+| `theme` | `dark` / `light` / `auto`（跟随系统） | `dark` |
+| `ui` | `default` / `none`；后者隐藏内部界面 | `default` |
 
 **跨域要求：**文件服务器必须允许 `https://lwv.loafing.club` 读取响应，例如返回 `Access-Control-Allow-Origin: https://lwv.loafing.club`；公开文件也可以返回 `*`。有重定向时，下载链路也需要满足 CORS。文件请求不携带 Cookie 或认证信息。线上使用 HTTPS，HTTP 仅用于本地 HTTP 开发环境。[CORS 说明](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
 
@@ -139,12 +141,101 @@
 
 也可以创建时直接传入 `file`，或使用 `{ url: 'https://档案馆/建筑.litematic' }`。URL 模式仍受上一节的 CORS 限制；宿主读取文件也必须具有正常访问权限，此接口不会绕过登录或跨域限制。
 
-`createLitematicCard(container, options)` 的其他选项：`name` 用于卡片无障碍标题及未命名文件的默认名称，`background` 设置背景色，`poster` 指定等待激活时的 HTTP(S) 封面图片。返回值包含 `element`、`load(source, name?)` 和 `destroy()`。`onStatus` 会收到 `waiting`、`ready`（通信已就绪）、`loading`、`loaded`（模型完成）、`error`、`handoff-start` 和 `handoff-end`；加载事件可包含 0–1 的 `progress`。内嵌卡片按 Esc 还会通知 `close-request`，弹窗会自动处理关闭。`load` 对无效类型、空文件和超限文件会同步抛错，网络或解析失败通过 `onStatus` 报告。
+`createLitematicCard(container, options)` 中，`name` 用于无障碍标题及未命名文件的默认名称，`poster` 指定等待激活时的 HTTP(S) 封面图片。返回值包含 `element`、`load(source, name?)`、`setOptions()`、`setCamera()`、`resetView()`、`openFullViewer()` 和 `destroy()`。`load` 对无效类型、空文件和超限文件会同步抛错，网络或解析失败通过 `onStatus` 报告。
+
+### 适配网站风格与纯模型模式
+
+[打开样式定制器](https://lwv.loafing.club/embed-example.html#customize)，可以试用深色、浅色和自定义档案馆风格，调整参数并复制可运行的内嵌或弹窗代码。已有接入方式继续可用；默认仍是深色主题和完整的旋转、平移、缩放操作。
+
+![透明模型与宿主控件搭配，右侧可调整主题、控件和相机](docs/images/embed-customizer.png)
+
+```js
+const preview = openLitematicPreview({
+  url: schematicURL,
+  name: '建筑名称',
+  theme: 'light',
+  background: '#f2f5f8',
+  style: { accent: '#21796b', radius: 16, fontFamily: 'system-ui, sans-serif' },
+  controls: { hint: false },
+  labels: { open: '查看材料与分层 ↗', reset: '复位' },
+  dialog: { width: 960, height: 680 },
+  camera: { projection: 'orthographic' },
+  interaction: { autoRotate: true, autoRotateSpeed: 2 },
+});
+// 用户切换网站主题时，无需重新下载或生成模型：
+preview.setOptions({ theme: 'dark', background: null });
+```
+
+| 选项 | 可用值与作用 |
+| --- | --- |
+| `theme` | `dark`、`light`、`auto`；`auto` 跟随操作系统，网站自己的主题开关可调用 `setOptions` |
+| `background` | `#RRGGBB`、`transparent`、`null`（跟随主题）；透明模式的 WebGL 画布也透明，可叠在网站的图片或渐变上 |
+| `style` | `accent`、`surface`、`text`、`muted`、`border`、`backdrop` 接受十六进制颜色；`background` 接受六位颜色；`radius` 为 0–48 像素；`fontFamily` 为字体列表（字体需在预览站点可用） |
+| `ui` | `default` 保留内置界面；`none` 隐藏内部按钮、操作提示、加载及错误提示，交给宿主页面呈现 |
+| `controls` | `reset`、`open`、`hint`、`status` 控制内部 UI；`title` 控制弹窗标题；均为布尔值，默认 `true`。弹窗关闭按钮始终保留 |
+| `labels` | 可覆盖 `reset`、`open`、`hint`、`waiting`、`loading`、`error`、`retry`、`activate`、`subtitle`、`close`；全部按纯文本显示 |
+| `dialog` | 弹窗 `width` / `height`，单位像素，范围 240–4096；自动限制在当前屏幕内 |
+| `interaction` | `rotate`、`pan`、`zoom` 默认 `true`；`autoRotate` 默认 `false`；`autoRotateSpeed` 默认 2，范围 -20–20，负数反向 |
+| `camera` | `projection: 'perspective' / 'orthographic'`，`zoom` 范围 0.01–100；可成对提供 `position: [x,y,z]`、`target: [x,y,z]`，单位为方块。正交相机快照还包含 `height` |
+
+纯模型模式适合已有弹窗、工具栏和加载界面的档案馆。下面使用宿主自己的按钮；若需要弹窗，请把这些元素放进宿主自己的 `<dialog>` 或弹窗组件（定制器也会生成这种代码）。
+
+```html
+<div id="model" style="height:400px;background:linear-gradient(#d7eadd,#f5f2e9)"></div>
+<button id="reset-model" disabled>复位视角</button>
+<button id="open-model" disabled>完整预览</button>
+<p id="model-status" role="status"></p>
+<script type="module">
+  import { createLitematicCard } from 'https://lwv.loafing.club/embed.js?v=customize-1';
+  const reset = document.getElementById('reset-model');
+  const open = document.getElementById('open-model');
+  const preview = createLitematicCard(document.getElementById('model'), {
+    url: 'https://lwv.loafing.club/demo.litematic',
+    background: 'transparent', ui: 'none',
+    camera: { projection: 'orthographic' },
+    onStatus(event) {
+      document.getElementById('model-status').textContent = event.message || '';
+      if (event.stage !== 'handoff' && ['loaded', 'loading', 'error', 'inactive'].includes(event.type)) {
+        reset.disabled = open.disabled = event.type !== 'loaded';
+      }
+      // loading 事件的 progress 是 0–1；未提供时可显示不定进度条。
+    },
+    onCameraChange(camera) { /* 可保存视角，之后传给 setCamera(camera) */ },
+  });
+  reset.onclick = () => preview.resetView();
+  open.onclick = () => preview.openFullViewer();
+  // 移除组件时：preview.destroy();
+</script>
+```
+
+- `setOptions(patch)` 合并嵌套设置；分组设置为 `null` 可复位该组，`style` / `labels` 中单项设为 `null` 可移除覆盖。更改外观不会重置当前视角。`pack`、`poster` 是创建选项；更换文件使用 `load()`。
+- `setCamera(patch)` 设置并保存初始视角；`resetView()` 回到配置的视角并适配模型。离屏释放并恢复 iframe 时，会保留最近视角与设置。
+- `openFullViewer()` **直接在宿主按钮的点击回调内调用，不要先 `await`**，以保留浏览器允许打开新标签页的用户操作。成功打开返回 `true`；模型未完成、正在交接或窗口被阻止时返回 `false`。窗口打开后再传递文件和相机，不需要重新下载私有文件。
+- 打开新窗口或文件交接失败的 `error` 带有 `stage: 'handoff'`，模型仍可操作，宿主应保留重试按钮。
+- `onStatus(event)` / `preview-status` DOM 事件包含 `waiting`、`ready`（通信就绪）、`loading`、`loaded`、`error`、`inactive`（离屏释放）、`handoff-start`、`handoff-end`、`close-request`。纯模型模式或隐藏 `status` 时也会发送事件，宿主应显示加载失败信息。
+- `onCameraChange(camera)` / `preview-camera` DOM 事件提供相机快照（最多约每 100ms 一次）；相机变化不会打断 `onStatus` 的加载状态。内嵌卡片按 Esc 发送 `close-request`，内置弹窗自动关闭；自建弹窗可据此处理关闭。
+
+弹窗外框还支持 CSS 自定义属性和 `::part`，可统一匹配宿主的设计：
+
+```css
+[data-litematic-preview] {
+  --lwv-dialog-width: 960px;
+  --lwv-radius: 20px;
+  --lwv-surface: #f7faf8;
+  --lwv-backdrop: #14233488;
+}
+[data-litematic-preview]::part(header) { padding: 12px 20px; }
+[data-litematic-preview]::part(title) { font-weight: 500; }
+```
+
+公开部件为 `dialog`、`header`、`title`、`subtitle`、`close-button`、`viewport`；其他变量有 `--lwv-dialog-height`、`--lwv-font`、`--lwv-text`、`--lwv-muted`、`--lwv-border`、`--lwv-accent`。**这些 CSS 只控制外框；iframe 内部通过 `style`、`controls`、`labels` 等配置控制。**宿主的字体文件和 CSS 不会自动进入跨域 iframe。
+
+SDK 保持单文件 ES module 地址。采用新接口时建议使用定制器生成的带版本号导入地址，避免浏览器保留旧 SDK；示例页会自动匹配构建版本。开发时修改 `src/embedSdk.js` / `src/previewOptions.js`，`npm run build`（或 `npm run dev` 启动时）会生成 `public/embed.js`。
 
 ### 多卡片、完整预览与部署
 
 - **列表页推荐封面图片配合点击弹窗。**只在点击后启动 3D 渲染。若需要同时显示多张内嵌预览，JS 脚本默认最多挂载 2 张可见卡片，其他显示封面或“启用 3D 预览”；悬停或激活可切换运行的卡片。离屏卡片会移除 iframe，释放渲染上下文，回到视野时重新加载。打开弹窗也会释放后台内嵌卡片，关闭后恢复（正在向完整页面传递文件的卡片会临时保留）。可使用同一模块导出的 `configureLitematicCards({ maxActive: 1 })` 调整，范围为 1–4。原始 iframe 只会暂停离屏渲染，不参与 JS 的卡片管理。
-- **点击“完整预览”会保留文件、相机位置、语言、材质预设和背景色。**文件通过经来源和窗口校验的 `postMessage` 交接，不依赖第三方 Cookie 或浏览器存储，也不上传到服务器。请保持原页面和预览卡片打开直到加载完成，并允许用户单击打开新标签页。[postMessage 说明](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
+- **打开“完整预览”会保留文件、相机位置、投影方式、语言、材质预设和不透明背景色。**透明背景在完整网站中使用其默认背景。文件通过经来源、窗口和随机标记校验的 `postMessage` 交接，不依赖第三方 Cookie 或浏览器存储，也不上传到服务器。请保持原页面和预览卡片打开直到加载完成，并允许用户单击打开新标签页。[postMessage 说明](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
 - **文件数据模式的完整页面刷新后需要重新打开文件。**公开 URL 模式保留 `file` 参数，可重新下载；临时签名链接过期后需由档案馆更新。
 - 卡片及其打开的完整页面使用指定的 `xk` / `vanilla` 预设，不读取个人资源包，也不覆盖已有资源包偏好。自定义 ZIP 暂不作为嵌入参数提供。
 - 嵌入文件上限为 **64 MiB（压缩文件大小）**，另受下文投影方块数量与浏览器内存限制。大型投影依然需要完整下载和解析，建议档案馆列表使用封面图片，详情页提供交互预览。
@@ -156,7 +247,7 @@
 ```bash
 node scripts/verify-embed-protocol.mjs  # URL/文件校验、错误响应、流式下载上限
 npm run build
-node scripts/verify-embed.mjs           # 跨站文件交接、弹窗、图片切换、鼠标/触摸操作与卡片池
+node scripts/verify-embed.mjs           # 跨站交接、透明像素、主题/相机接口、生成代码、弹窗与鼠标/触摸操作
 ```
 
 浏览器验证需要 Chrome / Chromium，使用独立的 5178 端口和临时测试页面。Windows 默认查找标准 Chrome 安装路径；其他安装位置可通过 `CHROME_PATH` 环境变量指定。
@@ -326,6 +417,9 @@ npm run build
 src/
   main.js             入口：文件读取、拖拽、资源包、UI 接线
   embed.js / embed.css  嵌入式预览卡片入口与样式
+  embedSdk.js          可定制外站 SDK 源码（构建为 public/embed.js）
+  previewOptions.js    SDK 与 iframe 共用的设置校验及主题
+  embedConfigurator.js 示例页的样式定制器与代码生成
   embedProtocol.js     文件下载、跨窗口传递与参数校验
   schematicDetails.js  主站和卡片共用的方块实体数据提取
   nbt.js               NBT 二进制解析 + gzip/zlib 解压

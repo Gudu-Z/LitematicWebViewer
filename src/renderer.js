@@ -238,7 +238,7 @@ export class Renderer {
     }
   }
 
-  constructor(container, { orbitOnly = false, pixelRatio = 2 } = {}) {
+  constructor(container, { orbitOnly = false, pixelRatio = 2, alpha = false } = {}) {
     this.container = container
     this.orbitOnly = orbitOnly
     this._active = true
@@ -257,7 +257,7 @@ export class Renderer {
     this.camera = new THREE.PerspectiveCamera(PERSPECTIVE_FOV, 1, 0.1, 1000)
     this.camera.position.set(20, 16, 20)
 
-    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true })
+    this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatio))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
     container.appendChild(this.renderer.domElement)
@@ -553,7 +553,7 @@ export class Renderer {
       }
     } else if (this.scene.fog) {
       this.scene.fog = null
-      this.scene.background = new THREE.Color(this._bgColor)
+      this.scene.background = this._bgColor === 'transparent' ? null : new THREE.Color(this._bgColor)
     }
   }
 
@@ -632,7 +632,7 @@ export class Renderer {
     this._bounds = null
     if (this.scene.fog) {
       this.scene.fog = null
-      this.scene.background = new THREE.Color(this._bgColor)
+      this.scene.background = this._bgColor === 'transparent' ? null : new THREE.Color(this._bgColor)
     }
   }
 
@@ -926,7 +926,8 @@ export class Renderer {
   // 动态设置背景色
   setBackgroundColor(color) {
     this._bgColor = color
-    this.scene.background = new THREE.Color(color)
+    this.scene.background = color === 'transparent' ? null : new THREE.Color(color)
+    this.renderer.setClearAlpha(color === 'transparent' ? 0 : 1)
   }
 
   getProjectionMode() {
@@ -1010,7 +1011,7 @@ export class Renderer {
     this._fogEnabled = !!v
     if (!this._fogEnabled && this.scene.fog) {
       this.scene.fog = null
-      this.scene.background = new THREE.Color(this._bgColor)
+      this.scene.background = this._bgColor === 'transparent' ? null : new THREE.Color(this._bgColor)
     }
   }
 

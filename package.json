@@ -4,8 +4,8 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
-    "build": "vite build",
+    "dev": "node scripts/build-embed-sdk.mjs && vite",
+    "build": "node scripts/build-embed-sdk.mjs && vite build",
     "preview": "vite preview",
     "setup": "node scripts/fetch-assets.mjs && node scripts/gen-fluid-flow-blocks.mjs",
     "packs": "node scripts/copy-packs.mjs"

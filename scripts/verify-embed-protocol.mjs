@@ -1,8 +1,26 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { fileURL, validFile, validCamera, fetchSchematic, MAX_FILE_BYTES } from '../src/embedProtocol.js'
+import { normalizeOptions, themeValues } from '../src/previewOptions.js'
 
 const base = 'https://viewer.example/subdir/'
+for (const options of [
+  { background: 'url(https://other.example/tracker)' }, { background: '#ffffff80' },
+  { style: { accent: 'red; display:none' } }, { style: { fontFamily: 'serif; color:red' } },
+  { controls: { pan: true } }, { controls: { open: 'false' } },
+  { camera: { projection: 'invalid' } }, { camera: { zoom: Infinity } },
+  { camera: { position: [1, 2, 3] } }, { camera: { position: [1,2,3], target: [1,2,3] } },
+]) assert.throws(() => normalizeOptions(options), TypeError)
+const initialOptions = normalizeOptions({ theme:'auto', controls:{hint:false}, style:{accent:'#123456'}, camera:{projection:'orthographic'} })
+const mergedOptions = normalizeOptions({ controls:{open:false}, labels:{reset:'<img onerror=alert(1)>'} }, initialOptions)
+assert.equal(mergedOptions.controls.hint,false)
+assert.equal(mergedOptions.controls.open,false)
+assert.equal(initialOptions.controls.open,true,'configuration merging never mutates existing state')
+assert.equal(themeValues(initialOptions,true).theme,'dark')
+assert.equal(themeValues(initialOptions,false).theme,'light')
+assert.equal(themeValues(normalizeOptions({background:'transparent'})).background,'transparent')
+assert.equal(themeValues(normalizeOptions({style:{accent:null}},initialOptions)).accent,'#1268bf','null clears a color override')
+assert.equal(normalizeOptions({controls:null},initialOptions).controls.hint,true,'null resets an option group')
 assert.equal(fileURL('demo.litematic', base), base + 'demo.litematic')
 for (const value of ['javascript:alert(1)', 'data:application/octet-stream,abc', 'file:///etc/passwd', 'https://user:password@archive.example/a', 'http://archive.example/a']) assert.throws(() => fileURL(value, base))
 assert.equal(fileURL('http://localhost:3000/a', 'http://localhost:5173/'), 'http://localhost:3000/a')
