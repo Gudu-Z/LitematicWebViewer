@@ -4,7 +4,7 @@ import { readFileSync, existsSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import * as THREE from 'three'
 import { MOB_TABLE, getMobAppearance } from '../src/entityAppearance.js'
-import { buildEntityMesh } from '../src/entities.js'
+import { buildEntityMesh, buildItemPreview } from '../src/entities.js'
 import { BlockModelResolver } from '../src/blocks.js'
 import { bakeModel } from '../src/modelBaker.js'
 import { movingPistonParts } from '../src/movingPistons.js'
@@ -162,6 +162,21 @@ assert.equal(builder.group.getObjectByName('moving-piston-block').position.x, -9
 signature(builder.group); dispose(builder.group)
 
 const mob = (id, nbt = {}) => ({ id: 'minecraft:' + id, pos: [0, 0, 0], rotation: [0, 0], nbt: { Health: 20, OnGround: 0, ...nbt } })
+for (const age of [0, -24000]) {
+  const cat = getMobAppearance(mob('cat', { Age: age, variant: 'all_black' }), 'cat')
+  assert.equal(cat.texture, 'entity/cat/cat_all_black' + (age < 0 ? '_baby' : ''), 'Use the 26.3 black-cat path, without stale local aliases')
+}
+// Light has no models/item/light.json or textures/item/light.png in a clean 26.3 install.
+const lightAssets = { ...assets, async getJSON(path) {
+  if (path === 'models/item/light.json') return null
+  return assets.getJSON(path)
+} }
+for (const level of [undefined, ...Array.from({ length: 16 }, (_, i) => String(i))]) {
+  const light = await buildItemPreview({ id: 'minecraft:light', components: { 'minecraft:block_state': { level } } }, lightAssets)
+  assert.ok(light, 'Selected generated item must render')
+  assert.equal(light.getObjectByProperty('isMesh', true).material.map.name, 'item/light_' + String(level ?? 15).padStart(2, '0'))
+  dispose(light)
+}
 for (const id of ['camel_husk', 'nautilus', 'zombie_nautilus', 'parched', 'sulfur_cube']) {
   const group = await buildEntityMesh(mob(id), assets)
   assert.equal(group.userData.mobId, id, 'Must not fall back to brown boxes')

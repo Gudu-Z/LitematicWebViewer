@@ -72,7 +72,7 @@ const DYE_COLORS = {
 // special（箱子/头颅/旗帜等）返回空，交由 SPECIAL_MODELS 处理。
 // 注意 composite 的 transformation.translation 单位是「方块」（床 foot 偏移 [0,0,1] 即 1 格），
 // 与 display 变换的 translation（单位像素 1/16）不同。
-function resolveItemModelDef(def, out = [], context = 'fixed') {
+function resolveItemModelDef(def, out = [], context = 'fixed', item = {}) {
   if (!def || typeof def !== 'object') return out
   const t = def.type
   if (t === 'minecraft:model') {
@@ -80,19 +80,21 @@ function resolveItemModelDef(def, out = [], context = 'fixed') {
     return out
   }
   if (t === 'minecraft:composite') {
-    for (const m of def.models || []) resolveItemModelDef(m, out, context)
+    for (const m of def.models || []) resolveItemModelDef(m, out, context, item)
     return out
   }
-  if (t === 'minecraft:condition') return resolveItemModelDef(def.on_false, out, context)
-  if (t === 'minecraft:range_dispatch') return resolveItemModelDef(def.fallback, out, context)
+  if (t === 'minecraft:condition') return resolveItemModelDef(def.on_false, out, context, item)
+  if (t === 'minecraft:range_dispatch') return resolveItemModelDef(def.fallback, out, context, item)
   if (t === 'minecraft:select') {
     const cases = def.cases || []
+    const selected = def.property === 'minecraft:block_state'
+      ? String((item.components?.['minecraft:block_state'] || item.components?.block_state)?.[def.block_state_property]) : context
     for (const c of cases) {
       const w = c.when
       const list = Array.isArray(w) ? w : [w]
-      if (list.includes(context)) return resolveItemModelDef(c.model, out, context)
+      if (list.includes(selected)) return resolveItemModelDef(c.model, out, context, item)
     }
-    return resolveItemModelDef(def.fallback, out, context)
+    return resolveItemModelDef(def.fallback, out, context, item)
   }
   return out
 }
@@ -342,7 +344,15 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
   const holder = new THREE.Group()
 
   // 2D 物品：models/item/NAME.json 含 layer0（fixed 缩放 1，叠加框体 0.5 后总 0.5 = 8px）
-  const itemModel = await assets.getJSON('models/item/' + name + '.json')
+  let itemModel = await assets.getJSON('models/item/' + name + '.json')
+  const itemDef = await assets.getJSON('items/' + name + '.json')
+  const modelDefs = resolveItemModelDef(itemDef?.model, [], context, item)
+  // Modern definitions may select a differently named sprite (light_00..15, for example).
+  // Keep directly supplied resource-pack sprites, and preserve 3D element models.
+  if (!itemModel?.textures?.layer0 && modelDefs.length === 1) {
+    const selected = await resolver.loadModel(modelDefs[0].path)
+    if (!selected?.elements?.length && selected?.textures?.layer0) itemModel = selected
+  }
   const layer0 = itemModel?.textures?.layer0
   if (layer0) {
     const texKey = String(layer0).replace(/^minecraft:/, '')
@@ -391,8 +401,6 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
   // block/anvil），其几何朝向与 display.fixed 变换是烘焙好的——和 blockstate 的 registerDefaultState
   // 无关。这里直接解析该模型并应用 display.fixed（旋转+平移）；composite（床=头+脚）拆成多个
   // 子模型分别烘焙后按子模型 translation 偏移合并、整体居中。
-  const itemDef = await assets.getJSON('items/' + name + '.json')
-  const modelDefs = resolveItemModelDef(itemDef?.model, [], context)
   let baked = null
   let fixedRot = null
   let fixedTrans = null
@@ -542,7 +550,7 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
 export async function buildEquippedItem(item, assets, context = 'thirdperson_righthand') {
   const resolver = new BlockModelResolver(assets), name = shortName(item.id)
   const definition = await assets.getJSON('items/' + name + '.json')
-  const defs = resolveItemModelDef(definition?.model, [], context)
+  const defs = resolveItemModelDef(definition?.model, [], context, item)
   // 原版三叉戟在手中使用专用立体模型，背包/展示框仍使用平面图标。
   const trident = name === 'trident' && !defs.length
   let object

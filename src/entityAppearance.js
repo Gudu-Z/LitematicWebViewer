@@ -189,7 +189,7 @@ export function getMobAppearance(entity, id, data) {
   if (id === 'rabbit') texture = 'entity/rabbit/rabbit_' + (customName(n) === 'Toast' ? 'toast' : n.RabbitType === 99 ? 'caerbannog' : choice(n.RabbitType ?? variant, ['brown', 'white', 'black', 'white_splotched', 'gold', 'salt']))
   if (id === 'cat') {
     const cat = choice(variant ?? n.CatType, ['tabby', 'black', 'red', 'siamese', 'british_shorthair', 'calico', 'persian', 'ragdoll', 'white', 'jellie', 'all_black'])
-    texture = `entity/cat/${cat === 'all_black' ? 'all_black' : 'cat_' + cat}`
+    texture = 'entity/cat/cat_' + cat
     if (n.Owner || n.OwnerUUID) add('collar', 'entity/cat/cat_collar', model, { tint: dye(n.CollarColor ?? 14) })
   }
   if (id === 'wolf') {
@@ -319,7 +319,6 @@ export function getMobAppearance(entity, id, data) {
     const babyTexture = key => {
       if (id === 'sniffer') return key
       if (id === 'fox') key = key.replace('snow_fox', 'fox_snow')
-      if (id === 'cat') key = key.replace('/all_black', '/cat_all_black')
       if (key.includes('/type/')) return key.replace('/type/', '/baby/')
       return key + '_baby'
     }

@@ -454,7 +454,7 @@ node scripts/verify-render-inspection.mjs  # 目录与译名、626 个实体状�
 node scripts/verify-cushion.mjs  # 坐垫 16 色、原版尺寸/UV/朝向、NBT 和物品映射
 node scripts/verify-special-rendering.mjs  # 特殊方块、分组、流向、42 种幼体及变种、1,233 个对应物品、中英文
 node scripts/verify-release-coverage.mjs   # 独立 26.3 生物清单、全部方块状态、旋转、雕像/书本/活塞、新生物及装备
-node scripts/verify-release-browser.mjs    # build 后验证 17 个真实 WebGL 状态；--url=https://站点/ 可检查线上版本
+node scripts/verify-release-browser.mjs    # build 后验证 19 个真实 WebGL 状态；--url=https://站点/ 可检查线上版本
 npm run build
 ```
 

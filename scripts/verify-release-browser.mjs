@@ -79,7 +79,7 @@ try {
     })()`)
     await ready()
   }
-  async function check(label) {
+  async function check(label, minColors = 16) {
     await delay(150)
     const result = await evaluate(`(() => {
       const group=renderCheck.detailView.group; let meshes=0, invalid=0, textures=0;
@@ -96,12 +96,12 @@ try {
       const colors=new Set(); for(let i=0;i<pixels.length;i+=4) colors.add(pixels[i]*65536+pixels[i+1]*256+pixels[i+2]);
       return {meshes,invalid,textures,colors:colors.size,mob:group.userData.mobId,message:document.getElementById('model-message').textContent,failures:renderCheck.failures};
     })()`)
-    assert.ok(result.meshes > 0 && result.textures > 0, label + ' textured geometry')
-    assert.equal(result.invalid, 0, label + ' finite vertices/matrices')
-    assert.ok(result.colors > 16, label + ' rendered pixels, not a blank canvas')
-    assert.deepEqual(result.failures, []); assert.ok(!/失败|Failed/i.test(result.message))
     const screenshot = await send('Page.captureScreenshot', { format: 'png' })
     await writeFile(`scripts/_ref/release-26.3-${label}.png`, Buffer.from(screenshot.data, 'base64'))
+    assert.ok(result.meshes > 0 && result.textures > 0, label + ' textured geometry')
+    assert.equal(result.invalid, 0, label + ' finite vertices/matrices')
+    assert.ok(result.colors > minColors, label + ' rendered pixels, not a blank canvas: ' + JSON.stringify(result))
+    assert.deepEqual(result.failures, []); assert.ok(!/失败|Failed/i.test(result.message))
     results.push({ label, ...result }); console.log('PASS', label, result.meshes, result.colors)
   }
   for (const id of ['camel_husk', 'nautilus', 'zombie_nautilus', 'parched', 'sulfur_cube']) {
@@ -120,6 +120,11 @@ try {
   }
   await open('block', 'moving_piston'); await check('moving-stone')
   await field('preview_moved_block', '黏性活塞|Sticky Piston'); await field('preview_source', '^(是|Yes)$'); await field('preview_extending', '收回|Retracting'); await check('retracting-piston')
+  await open('mob', 'cat'); await field('nbt.variant', '^(黑色|Black)$'); await check('black-cat')
+  await open('block', 'light')
+  await evaluate(`(() => { const select=document.getElementById('view-mode'); select.value='item'; select.dispatchEvent(new Event('change')) })()`)
+  // This flat, nearest-filtered icon has a deliberately small color palette.
+  await ready(); await check('light-item', 4)
   assert.deepEqual(errors, [], 'No WebGL/JavaScript errors')
   await writeFile('scripts/_ref/release-26.3-browser-results.json', JSON.stringify({ base, results, errors }, null, 2))
   console.log('Browser 26.3 coverage passed:', results.length, 'rendered states')
