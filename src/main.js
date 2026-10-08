@@ -10,6 +10,7 @@ import { Renderer } from './renderer.js'
 import { UI } from './ui.js'
 import { t, setLang, getLang, applyTranslations, blockName } from './i18n.js'
 import { fetchSchematic, receivePreviewFile, applyCamera } from './embedProtocol.js'
+import { ImageExport } from './imageExport.js'
 
 const startupParams = new URLSearchParams(location.search)
 if (startupParams.get('lang') === 'en') setLang('en')
@@ -57,6 +58,22 @@ const view = {
   illagerExtraArms: false,
   materialSortAsc: false, // 材料排序：false=多→少，true=少→多
 }
+
+const imageExport = renderer ? new ImageExport({
+  renderer,
+  getData: () => currentData,
+  getFileName: () => currentFileName,
+  openFile: file => openFile(file),
+  openDemo: () => autoLoadDemo(true),
+  getError: () => ui.errorBanner.classList.contains('hidden') ? '' : ui.errorBanner.textContent,
+  changeLanguage: () => { setLang(getLang() === 'zh' ? 'en' : 'zh'); refreshLocalizedUI() },
+}) : null
+document.getElementById('imageExportBtn').addEventListener('click', () => {
+  if (busy || !imageExport) return
+  closeMobilePanels()
+  try { imageExport.open() }
+  catch (error) { ui.showError(t('webglInitFailed') + error.message) }
+})
 
 // 主预览器与模型图鉴分别保存趣味选项。
 const ILLAGER_ARMS_PREFERENCE = 'viewer-illager-extra-arms-v1'
@@ -273,7 +290,7 @@ if (renderer) {
 
 // E / Q 调整渲染层级（E 上一层，Q 下一层；忽略输入框内的按键）
 window.addEventListener('keydown', (e) => {
-  if (busy || settingsPanel.open || isTypingTarget(e)) return
+  if (busy || settingsPanel.open || imageExport?.isOpen || isTypingTarget(e)) return
   if (e.code === 'KeyE') {
     e.preventDefault()
     changeLayer(1)
@@ -633,6 +650,7 @@ function refreshLocalizedUI() {
   toggleBtn.title = bodyHidden ? t('showUi') : t('hideUi')
   toggleBtn.setAttribute('aria-label', toggleBtn.title)
   refreshProjectionButton()
+  imageExport?.translate()
 }
 
 // 是否正在输入框里打字（避免 E/Q 等快捷键误触发）
@@ -666,6 +684,8 @@ function setBusy(on) {
   document.getElementById('app').setAttribute('aria-busy', String(on))
   document.getElementById('packSettings').setAttribute('aria-busy', String(on))
   illagerExtraArms.disabled = on || !renderer
+  document.getElementById('imageExportBtn').disabled = on || !renderer
+  imageExport?.setLoading(on)
   for (const el of document.querySelectorAll('#openBtn, #clearBtn, #welcomeOpenBtn, #demoBtn, #fileInput, #packBtn, #packInput, #controlPanel button, #controlPanel select, #regionListBody button')) {
     el.disabled = on || (el.id === 'clearBtn' && !currentData)
   }

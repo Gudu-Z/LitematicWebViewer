@@ -29,6 +29,7 @@ Preview Minecraft `.litematic` / `.litematica` schematics—building blueprints 
 
 - Orbit and first-person flight camera modes.
 - Perspective and orthographic projection, with perspective as the default. Orthographic views help compare dimensions and inspect structures.
+- Image export studio with isometric views, transparent PNGs, custom resolution and aspect ratios, using the current schematic, resource packs and layer selection.
 - Region visibility and layer slicing: all, below, above or a single layer.
 - Material counts by block, translated names and ascending/descending sorting.
 - Chinese and English interfaces.
@@ -199,8 +200,24 @@ Import multiple local ZIP packs, load or unload them, and change their order. Hi
 - **E / Q**: move to the next/previous layer when using layer slicing.
 - **Locate here**: set the current layer to the camera's height.
 - **Fit view**: center the build while leaving room for the side panels.
-- Top-right buttons: **eye** toggles the interface; **grid** switches perspective/orthographic projection (highlighted in orthographic mode); **block catalog** opens the catalog in a new tab; **globe** switches language; **gear** opens settings; GitHub opens the repository.
+- Top-right buttons: **image download** opens image export; **eye** toggles the interface; **grid** switches perspective/orthographic projection (highlighted in orthographic mode); **block catalog** opens the catalog in a new tab; **globe** switches language; **gear** opens settings; GitHub opens the repository.
 - **Mobile**: bottom controls open the view and information panels as needed. In fly mode, use the lower-left joystick for movement, lower-right ▲/▼ buttons for vertical movement, and one-finger swipes to look around.
+
+### Export PNG images
+
+Click **Export image**, immediately to the left of Hide UI in the top-right toolbar, to enter the export studio. The loaded schematic appears automatically. Without a schematic, open or drop a file, or try the demo from the studio. The workflow takes inspiration from [Isometric Renders](https://github.com/gliscowo/isometric-renders)' isometric rendering and transparent image exports.
+
+![Image export studio with an isometric preview on a transparency grid and composition, canvas and output settings](docs/images/image-export.png)
+
+- Starts in an orthographic isometric view. Choose front, side, top or the viewer's current angle, switch to perspective, adjust angles, orbit, pan and zoom.
+- Choose an aspect ratio, a 1K / 2K / 4K preset or custom dimensions. Fit canvas and margin controls help keep the build within the frame.
+- Export with a transparent background by default, or choose a solid color. The checkerboard, thirds guides and interface controls are excluded from the PNG.
+- Uses the current resource packs, selected layers and visible regions. Independently toggle entities, dimensions, region outlines and animations. Animations start paused; exports capture a single frame.
+- Set a filename and click **Export PNG** to download. Return to the viewer or press Esc to exit; the original camera and display settings remain unchanged.
+
+The default output is 2048 × 2048. Each side can be up to 8192 px, with at most 4096 × 4096 total pixels, subject to the device's rendering limits. Images are generated in the browser without an upload. On mobile, scroll down to adjust settings and export.
+
+Developer checks: `node scripts/verify-image-export-camera.mjs` validates framing and dimension limits. After building, run `node scripts/verify-image-export.mjs` to verify real PNG downloads, alpha, 4K output, input controls, mobile layout and viewer state restoration.
 
 ## 4. Model catalog
 

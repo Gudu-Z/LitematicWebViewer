@@ -1,0 +1,67 @@
+<header class="export-header">
+  <button id="exportBack" type="button" class="export-back" autofocus><span aria-hidden="true">←</span><span data-export-text="back"></span></button>
+  <div class="export-heading"><span class="export-eyebrow">LITEMATIC / STUDIO</span><h1 id="exportTitle" data-export-text="title"></h1></div>
+  <div class="export-source"><span class="export-source-dot"></span><span id="exportSourceName"></span></div>
+  <button id="exportLang" type="button" title="切换语言 / Switch language">EN</button>
+</header>
+<div class="export-layout">
+  <section class="export-stage" aria-label="3D preview">
+    <div class="export-stage-toolbar">
+      <div class="export-presets" role="group" data-export-label="views">
+        <button type="button" data-export-view="iso" data-export-text="iso"></button>
+        <button type="button" data-export-view="front" data-export-text="front"></button>
+        <button type="button" data-export-view="side" data-export-text="side"></button>
+        <button type="button" data-export-view="top" data-export-text="top"></button>
+        <button type="button" data-export-view="current" data-export-text="current"></button>
+      </div>
+      <button id="exportFit" type="button" data-export-text="fit"></button>
+    </div>
+    <div class="export-mat" id="exportMat">
+      <div class="export-frame" id="exportFrame"><div class="export-guides" id="exportGuides" hidden></div></div>
+      <div class="export-empty" id="exportEmpty">
+        <svg viewBox="0 0 80 80" width="72" height="72" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m40 8 28 16v32L40 72 12 56V24zM12 24l28 16 28-16M40 40v32M26 16l28 16v32"/></svg>
+        <h2 data-export-text="emptyTitle"></h2><p data-export-text="emptyHint"></p>
+        <div><button type="button" id="exportEmptyOpen" class="primary" data-export-text="open"></button><button type="button" id="exportDemo" data-export-text="demo"></button></div>
+      </div>
+      <div class="export-loading" id="exportLoading" hidden><span class="export-spinner"></span><p id="exportLoadingText" role="status"></p></div>
+    </div>
+    <footer class="export-stage-footer"><span data-export-text="gesture"></span><span id="exportFrameSize"></span></footer>
+  </section>
+  <aside class="export-sidebar">
+    <div class="export-sidebar-scroll">
+      <section class="export-section">
+        <div class="export-section-heading"><h2 data-export-text="composition"></h2><span>01</span></div>
+        <label class="export-field"><span data-export-text="projection"></span><select id="exportProjection"><option value="orthographic" data-export-text="orthographic"></option><option value="perspective" data-export-text="perspective"></option></select></label>
+        <div class="export-slider"><label for="exportYaw" data-export-text="yaw"></label><output id="exportYawValue" for="exportYaw"></output><input id="exportYaw" type="range" min="0" max="360" step="1" value="45"></div>
+        <div class="export-slider"><label for="exportPitch" data-export-text="pitch"></label><output id="exportPitchValue" for="exportPitch"></output><input id="exportPitch" type="range" min="-90" max="90" step="1" value="35"></div>
+        <div class="export-slider"><label for="exportZoom" data-export-text="zoom"></label><output id="exportZoomValue" for="exportZoom"></output><input id="exportZoom" type="range" min="25" max="300" step="1" value="100"></div>
+        <label class="export-field"><span data-export-text="padding"></span><select id="exportPadding"><option value=".06">6%</option><option value=".12" selected>12%</option><option value=".2">20%</option><option value=".3">30%</option></select></label>
+        <label class="export-check"><input id="exportShowGuides" type="checkbox"><span data-export-text="guides"></span></label>
+      </section>
+      <section class="export-section">
+        <div class="export-section-heading"><h2 data-export-text="canvas"></h2><span>02</span></div>
+        <label class="export-field"><span data-export-text="ratio"></span><select id="exportRatio"><option value="1">1:1</option><option value="1.7777777777777777">16:9</option><option value="1.3333333333333333">4:3</option><option value=".75">3:4</option><option value=".5625">9:16</option><option value="custom" data-export-text="custom"></option></select></label>
+        <div class="export-dimensions"><label><span data-export-text="width"></span><input id="exportWidth" type="number" value="2048" min="64" max="8192" step="1" inputmode="numeric"></label><span aria-hidden="true">×</span><label><span data-export-text="height"></span><input id="exportHeight" type="number" value="2048" min="64" max="8192" step="1" inputmode="numeric"></label></div>
+        <div class="export-resolutions" role="group" data-export-label="resolution"><button type="button" data-export-size="1024">1K</button><button type="button" data-export-size="2048">2K</button><button type="button" data-export-size="4096">4K</button></div>
+        <p class="export-note" id="exportSizeNote"></p>
+        <label class="export-field"><span data-export-text="background"></span><select id="exportBackground"><option value="transparent" data-export-text="transparent"></option><option value="solid" data-export-text="solid"></option></select></label>
+        <label class="export-field" id="exportColorField" hidden><span data-export-text="color"></span><input id="exportColor" type="color" value="#172332"></label>
+      </section>
+      <section class="export-section">
+        <div class="export-section-heading"><h2 data-export-text="scene"></h2><span>03</span></div>
+        <label class="export-check"><input id="exportEntities" type="checkbox" checked><span data-export-text="entities"></span></label>
+        <label class="export-check"><input id="exportDimensions" type="checkbox"><span data-export-text="dimensions"></span></label>
+        <label class="export-check"><input id="exportRegions" type="checkbox"><span data-export-text="regions"></span></label>
+        <label class="export-check"><input id="exportAnimate" type="checkbox"><span data-export-text="animate"></span></label>
+        <p class="export-note" data-export-text="sceneHint"></p>
+        <button id="exportOpen" type="button" class="export-open" data-export-text="open"></button>
+      </section>
+    </div>
+    <div class="export-save">
+      <label for="exportFilename" data-export-text="filename"></label><div class="export-name"><input id="exportFilename" type="text" value="schematic" maxlength="180" spellcheck="false"><span>.png</span></div>
+      <button id="exportSave" type="button" class="primary"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12m-4-4 4 4 4-4M4 16v4h16v-4"/></svg><span data-export-text="save"></span><span id="exportSaveSize"></span></button>
+      <p id="exportMessage" role="status" aria-live="polite"></p>
+    </div>
+  </aside>
+</div>
+<input id="exportFileInput" type="file" accept=".litematic,.litematica,.nbt" hidden>

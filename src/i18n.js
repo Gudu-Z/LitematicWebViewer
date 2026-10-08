@@ -63,6 +63,7 @@ const STRINGS = {
   sortDesc: ['多 → 少', 'Most → least'],
   sortAsc: ['少 → 多', 'Least → most'],
   hideUi: ['隐藏界面', 'Hide UI'],
+  exportImage: ['导出图片', 'Export image'],
   showUi: ['显示界面', 'Show UI'],
   entityPreview: ['模型图鉴（新标签页）', 'Model catalog (new tab)'],
   close: ['关闭', 'Close'],
