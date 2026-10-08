@@ -8,6 +8,7 @@ import { buildFaceGroups, fluidOfEntry, fluidHeight } from './geometry.js'
 import { buildEntityMesh, buildCopperGolemStatueMesh } from './entities.js'
 import { bakeModel } from './modelBaker.js'
 import { addBlockEffects, portalMaterial, animateObject } from './blockEffects.js'
+import { addMovingPistons } from './movingPistons.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
 const PERSPECTIVE_FOV = 60
@@ -847,9 +848,9 @@ export class Renderer {
     for (const s of statues) {
       const tex = await assets.getTexture(s.texKey)
       if (!tex) continue
-      const mesh = buildCopperGolemStatueMesh(tex)
+      const mesh = buildCopperGolemStatueMesh(tex, s.pose)
       if (!mesh) continue
-      mesh.position.set(s.x + 0.5, s.y + 0.05, s.z + 0.5)
+      mesh.position.set(s.x + 0.5, s.y, s.z + 0.5)
       mesh.rotation.y = ((BANNER_FACING_Y[s.facing] ?? 0) * Math.PI) / 180
       this.statuesGroup.add(mesh)
     }
@@ -1134,6 +1135,7 @@ export class Renderer {
   async _buildBlockMeshes(data, assets, onProgress, filter) {
     this._assets = assets
     await addBlockEffects(this.group, data, assets, filter)
+    await addMovingPistons(this.group, data, assets, filter, Renderer.buildBlockPreview)
     const { palette, blocks, bounds } = data
 
     const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45), filter)

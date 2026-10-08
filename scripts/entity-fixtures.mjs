@@ -28,6 +28,6 @@ export const FEATURE_FIXTURES = [
   entity('camel', { LastPoseTick: -500 }, '骆驼 · 坐姿'),
 ]
 export const ALL_MOB_FIXTURES = Object.keys(MOB_TABLE).map(id => entity(id, {
-  OnGround: ['cod', 'salmon', 'tropical_fish', 'pufferfish', 'tadpole', 'squid', 'glow_squid', 'axolotl', 'guardian', 'elder_guardian', 'bee', 'parrot'].includes(id) ? 0 : 1,
+  OnGround: ['cod', 'salmon', 'tropical_fish', 'pufferfish', 'tadpole', 'squid', 'glow_squid', 'axolotl', 'guardian', 'elder_guardian', 'bee', 'parrot', 'nautilus', 'zombie_nautilus'].includes(id) ? 0 : 1,
   ...(id === 'wither' ? { Health: 300 } : id === 'iron_golem' ? { Health: 100 } : {}),
 }))

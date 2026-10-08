@@ -27,6 +27,9 @@ export const MOB_TABLE = {
   frog: ['FrogEntityModel', 'entity/frog/frog_temperate'],
   axolotl: ['AxolotlEntityModel', 'entity/axolotl/axolotl_wild'],
   camel: ['CamelEntityModel', 'entity/camel/camel'],
+  camel_husk: ['CamelEntityModel', 'entity/camel/camel_husk'],
+  nautilus: ['NautilusModel', 'entity/nautilus/nautilus'],
+  zombie_nautilus: ['NautilusModel', 'entity/nautilus/zombie_nautilus'],
   sniffer: ['SnifferEntityModel', 'entity/sniffer/sniffer'],
   armadillo: ['ArmadilloEntityModel', 'entity/armadillo/armadillo'],
   allay: ['AllayEntityModel', 'entity/allay/allay'],
@@ -47,6 +50,7 @@ export const MOB_TABLE = {
   drowned: ['DrownedEntityModel', 'entity/zombie/drowned', 1, ['entity/zombie/drowned_outer_layer']],
   zombie_villager: ['ZombieVillagerEntityModel', 'entity/zombie_villager/zombie_villager'],
   skeleton: ['SkeletonEntityModel', 'entity/skeleton/skeleton'],
+  parched: ['ParchedModel', 'entity/skeleton/parched'],
   stray: ['SkeletonEntityModel', 'entity/skeleton/stray', 1, ['entity/skeleton/stray_overlay']],
   bogged: ['BoggedEntityModel', 'entity/skeleton/bogged', 1, ['entity/skeleton/bogged_overlay']],
   wither_skeleton: ['SkeletonEntityModel', 'entity/skeleton/wither_skeleton', 1.2],
@@ -59,6 +63,7 @@ export const MOB_TABLE = {
   ghast: ['GhastEntityModel', 'entity/ghast/ghast'],
   phantom: ['PhantomEntityModel', 'entity/phantom/phantom'],
   slime: ['SlimeEntityModel', 'entity/slime/slime'],
+  sulfur_cube: ['SulfurCubeModelOuter', 'entity/sulfur_cube/sulfur_cube_outer'],
   magma_cube: ['MagmaCubeEntityModel', 'entity/slime/magmacube'],
   silverfish: ['SilverfishEntityModel', 'entity/silverfish/silverfish'],
   endermite: ['EndermiteEntityModel', 'entity/endermite/endermite'],
@@ -154,13 +159,26 @@ export function getMobAppearance(entity, id, data) {
   const state = {
     ...entity, seed, touchingWater: isInWater(entity, data),
     squidSpeed: 0.2 / (1 + seed % 1000 / 1000),
-    sitting: !!(n.Sitting || n.sitting || (id === 'camel' && Number(n.LastPoseTick) < 0)),
+    sitting: !!(n.Sitting || n.sitting || (['camel', 'camel_husk'].includes(id) && Number(n.LastPoseTick) < 0)),
     rolledUp: ['scared', 'rolling'].includes(short(n.state)),
   }
   let model = getModel(entry[0]), texture = entry[1], scale = entry[2] || model?.scale || 1, tint = 0xffffff
   const layers = []
   const add = (name, tex, layerModel = model, options = {}) => layers.push({ name, texture: tex, model: layerModel, mode: 'cutout', ...options })
   const variant = n['minecraft:variant'] ?? n.variant ?? n.Variant
+  if (id === 'zombie_nautilus' && ['warm', 'coral'].includes(short(variant))) {
+    model = getModel('ZombieNautilusCoralModel')
+    texture = 'entity/nautilus/zombie_nautilus_coral'
+    if (readEquipment(n).body) model = transformEntityModel(model, (part, name) => { if (name === 'corals') { part.cuboids = []; part.children = {} } })
+  }
+  if (id === 'sulfur_cube') {
+    const small = isBaby(n), family = small ? 'SmallSulfurCubeModel' : 'SulfurCubeModel', suffix = small ? '_small' : ''
+    model = getModel(family + 'Outer'); texture += suffix
+    scale = .999 * clamp(n.Size == null ? (small ? 1 : 2) : Number(n.Size) + 1, 1, 127) * (small ? 1 : .5)
+    state.babyModel = small
+    state.containedBlock = readEquipment(n).body
+    if (!state.containedBlock) add('sulfur_inner', 'entity/sulfur_cube/sulfur_cube_inner' + suffix, getModel(family + 'Inner'), { mode: 'translucent', renderOrder: -1 })
+  }
   // 使用投影保存的变种，不把所有个体强制渲染成同一皮肤。
   if (['pig', 'cow', 'chicken'].includes(id)) texture = `entity/${id}/${id}_${choice(variant, ['temperate', 'warm', 'cold'])}`
   if (id === 'mooshroom') texture = `entity/cow/mooshroom_${choice(n.Type ?? variant, ['red', 'brown'])}`
@@ -295,7 +313,7 @@ export function getMobAppearance(entity, id, data) {
     if ((name === 'left_horn' && n.HasLeftHorn != null && !n.HasLeftHorn) || (name === 'right_horn' && n.HasRightHorn != null && !n.HasRightHorn)) node.cuboids = []
   })
   if (id === 'armadillo' && state.rolledUp) model = transformEntityModel(model, (node, name) => { if (name === 'body') node.cuboids = [] })
-  if (BABY_MOBS.has(id) && isBaby(n)) {
+  if (id !== 'sulfur_cube' && BABY_MOBS.has(id) && isBaby(n)) {
     const baby = babyModel(id)
     state.babyModel = !!baby
     const babyTexture = key => {
@@ -324,5 +342,5 @@ export function getMobAppearance(entity, id, data) {
     if (id === 'armadillo') model = transformEntityModel(model, (node, name) => { if (name === (state.rolledUp ? 'body' : 'cube')) node.cuboids = [] })
     if (id === 'goat') model = transformEntityModel(model, (node, name) => { if ((name.includes('left_horn') && n.HasLeftHorn === 0) || (name.includes('right_horn') && n.HasRightHorn === 0)) node.cuboids = [] })
   }
-  return { model, texture, scale, tint, layers, state }
+  return { model, texture, scale, tint, layers, state, ...(id === 'sulfur_cube' ? { mode: 'translucent' } : {}) }
 }

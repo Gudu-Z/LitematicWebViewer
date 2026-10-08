@@ -83,6 +83,8 @@ function createView(group, entry, slot) {
   const radius = Math.max(extent.x, extent.y, extent.z, .6) * .76
   const camera = new THREE.OrthographicCamera(-radius, radius, radius, -radius, .01, 200)
   const direction = entry.kind === 'block' ? new THREE.Vector3(.8, .6, 1)
+    // Nautilus models put the mouth on +Z in model space, opposite most mobs.
+    : ['nautilus', 'zombie_nautilus'].includes(group.userData.mobId) ? new THREE.Vector3(.7, .25, -1)
     : group.userData.vehicleId ? new THREE.Vector3(1, .45, .8) : new THREE.Vector3(.3, .18, 1)
   camera.position.copy(center).add(direction.clone().multiplyScalar(radius * 5)); camera.lookAt(center)
   return { scene, group, entry, slot, center, radius, camera, direction }

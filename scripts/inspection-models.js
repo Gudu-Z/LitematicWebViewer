@@ -3,7 +3,7 @@ import { buildEntityMesh, buildItemPreview } from '../src/entities.js'
 import { Renderer } from '../src/renderer.js'
 import { applyRidingPreview } from './inspection-riding.js'
 import { cushionColor } from '../src/cushion.js'
-import { blockFields, blockIdFor, blockVariantLabel, blockFamily, createFixture, ITEM_IDS } from './inspection-catalog.js'
+import { blockFields, blockIdFor, blockVariantLabel, blockFamily, createFixture, ITEM_IDS, officialName } from './inspection-catalog.js'
 
 export async function fieldsFor(entry, assets, values = {}) {
   const id = blockIdFor(entry, values)
@@ -13,6 +13,12 @@ export async function fieldsFor(entry, assets, values = {}) {
   if (['water', 'lava'].includes(id)) field('preview_flow', '流向', [['auto', '自动'], ['still', '静止'], ['north', '北'], ['south', '南'], ['east', '东'], ['west', '西'], ['northeast', '东北'], ['southeast', '东南'], ['southwest', '西南'], ['northwest', '西北']])
   if (id === 'bell') field('preview_ringing', '敲钟演示', [['false', '关闭'], ['true', '播放']])
   if (id === 'enchanting_table') field('preview_book', '书本', [['closed', '无人靠近'], ['open', '展开翻页']])
+  if (id === 'moving_piston') {
+    field('preview_moved_block', '移动方块', ['stone', 'oak_log', 'glass', 'piston_head', 'piston', 'sticky_piston'].map(id => [id, officialName(id)]))
+    field('preview_progress', '移动进度', ['0.5', '0', '0.25', '0.75', '1'].map(n => [n, String(Number(n) * 100) + '%']))
+    field('preview_extending', '运动方向', [['true', '伸出'], ['false', '收回']])
+    field('preview_source', '活塞源', [['false', '否'], ['true', '是']])
+  }
   if (id === 'conduit') {
     field('preview_active', '激活', [['false', '否'], ['true', '是']])
     field('preview_eye', '眼睛', [['false', '闭合'], ['true', '睁开']])
@@ -45,12 +51,17 @@ export async function createBlockSampleData(entry, assets, values = {}) {
   const blocks = new Map(cells.map((c, i) => [(c.x - bounds.minX) + (c.z - bounds.minZ) * bounds.width + (c.y - bounds.minY) * bounds.width * bounds.depth, i]))
   const data = { palette, blocks, bounds }
   const position = { x: 0, y: 0, z: 0, ...properties }
+  if (id === 'moving_piston') data.tileEntities = [{ id: 'minecraft:piston', x: 0, y: 0, z: 0, nbt: {
+    blockState: { Name: 'minecraft:' + properties.preview_moved_block, Properties: { facing: properties.facing, type: properties.type, axis: 'y', extended: 'false', short: 'false' } },
+    facing: ['down', 'up', 'north', 'south', 'west', 'east'].indexOf(properties.facing),
+    progress: Number(properties.preview_progress), extending: properties.preview_extending === 'true', source: properties.preview_source === 'true',
+  } }]
   if (id.endsWith('_banner')) data.banners = [{ ...position, baseColor: id.replace(/_(wall_)?banner$/, ''), patterns: [] }]
   if (id === 'player_head' || id === 'player_wall_head') data.heads = [position]
   if (id === 'decorated_pot') data.pots = [{ ...position, sherds: {} }]
   if (id.endsWith('copper_golem_statue')) {
     const suffix = ['exposed', 'weathered', 'oxidized'].find(s => id.includes(s))
-    data.statues = [{ ...position, texKey: 'entity/copper_golem/copper_golem' + (suffix ? '_' + suffix : '') }]
+    data.statues = [{ ...position, pose: properties.copper_golem_pose, texKey: 'entity/copper_golem/copper_golem' + (suffix ? '_' + suffix : '') }]
   }
   return data
 }

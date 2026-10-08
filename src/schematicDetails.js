@@ -104,7 +104,7 @@ export function extractStatues(data) {
     const lz = Math.floor(key / W) % b.depth
     const ly = Math.floor(key / strideY)
     const tex = 'entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : '')
-    statues.push({ x: lx + b.minX, y: ly + b.minY, z: lz + b.minZ, facing: p.properties?.facing, texKey: tex })
+    statues.push({ x: lx + b.minX, y: ly + b.minY, z: lz + b.minZ, facing: p.properties?.facing, pose: p.properties?.copper_golem_pose, texKey: tex })
   }
   return statues
 }

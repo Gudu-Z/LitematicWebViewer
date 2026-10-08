@@ -1,10 +1,10 @@
 import { EQUIPMENT_ITEMS } from './equipmentItemData.js'
 export { EQUIPMENT_ITEMS }
-export const HUMANOID_ARMOR = new Set(['armor_stand', 'zombie', 'husk', 'drowned', 'zombie_villager', 'giant', 'skeleton', 'stray', 'bogged', 'wither_skeleton', 'piglin', 'piglin_brute', 'zombified_piglin'])
+export const HUMANOID_ARMOR = new Set(['armor_stand', 'zombie', 'husk', 'drowned', 'zombie_villager', 'giant', 'skeleton', 'stray', 'bogged', 'parched', 'wither_skeleton', 'piglin', 'piglin_brute', 'zombified_piglin'])
 export const ARMED_MOBS = new Set([...HUMANOID_ARMOR, 'pillager', 'allay', 'vex'])
 export const HEAD_ITEMS = new Set([...HUMANOID_ARMOR, 'villager', 'wandering_trader'])
-export const SADDLED_MOBS = new Set(['pig', 'strider', 'horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse', 'camel'])
-export const BODY_EQUIPMENT = { horse: 'horse_body', skeleton_horse: 'horse_body', zombie_horse: 'horse_body', wolf: 'wolf_body', llama: 'llama_body', trader_llama: 'llama_body', happy_ghast: 'happy_ghast_body' }
+export const SADDLED_MOBS = new Set(['pig', 'strider', 'horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse', 'camel', 'camel_husk', 'nautilus', 'zombie_nautilus'])
+export const BODY_EQUIPMENT = { horse: 'horse_body', skeleton_horse: 'horse_body', zombie_horse: 'horse_body', wolf: 'wolf_body', llama: 'llama_body', trader_llama: 'llama_body', happy_ghast: 'happy_ghast_body', nautilus: 'nautilus_body', zombie_nautilus: 'nautilus_body' }
 export const itemName = stack => String(stack?.id || '').replace(/^minecraft:/, '')
 export function equipmentStack(value) {
   return value?.id && itemName(value) !== 'air' && Number(value.count ?? value.Count ?? 1) > 0 ? value : null

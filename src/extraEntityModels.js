@@ -7,7 +7,10 @@
 //   cuboid = { u, v, x, y, z, dx, dy, dz, mirror, dil }
 // 注意：使用 moveOrigin(0,24,0) 的模型（铜傀儡）已把 +24 加到顶层部件 pivot.y 上。
 
+import { RELEASE_MODELS } from './releaseModelData.js'
+
 export const EXTRA_MODELS = {
+  ...RELEASE_MODELS,
   // ---------------------------------------------------------------------------
   // 史莱姆（64×32）。原版用 getOuterTexturedModelData/getInnerTexturedModelData，
   // 内芯与眼/嘴使用原版位置，外壳由独立半透明层绘制。

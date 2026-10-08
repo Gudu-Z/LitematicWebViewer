@@ -2,20 +2,22 @@
 // 不模拟寻路、行走、攻击或临时客户端事件；关键帧来自 entityAnimationData.js。
 import { ENTITY_ANIMATIONS } from './entityAnimationData.js'
 import { BABY_ANIMATIONS } from './babyAnimationData.js'
+import { RELEASE_ANIMATIONS } from './releaseModelData.js'
 import { readEquipment } from './equipmentState.js'
 const PI = Math.PI, DEG = PI / 180
-const BIPEDS = new Set(['zombie', 'husk', 'drowned', 'zombie_villager', 'skeleton', 'stray', 'bogged', 'wither_skeleton', 'piglin', 'piglin_brute', 'zombified_piglin', 'giant', 'enderman'])
+const BIPEDS = new Set(['zombie', 'husk', 'drowned', 'zombie_villager', 'skeleton', 'stray', 'bogged', 'parched', 'wither_skeleton', 'piglin', 'piglin_brute', 'zombified_piglin', 'giant', 'enderman'])
 export const IDLE_ANIMATED_MOBS = new Set([...BIPEDS,
   'breeze', 'blaze', 'ghast', 'happy_ghast', 'phantom', 'bee', 'vex', 'allay', 'bat',
   'endermite', 'silverfish', 'cod', 'salmon', 'tropical_fish', 'pufferfish', 'tadpole',
   'squid', 'glow_squid', 'wither', 'witch', 'strider', 'warden', 'axolotl', 'camel',
+  'camel_husk', 'nautilus', 'zombie_nautilus',
   'copper_golem', 'frog', 'armadillo', 'parrot', 'ender_dragon', 'guardian', 'elder_guardian', 'shulker', 'fox', 'chicken',
 ])
 
 // 对齐 AnimationHelper/Transformation.Interpolations：平移 Y 翻转已由生成器完成；
 // CUBIC 使用与 MathHelper.catmullRom 相同的插值，并按原版夹取首尾帧。
-export function applyKeyframeAnimation(parts, name, seconds) {
-  const animation = ENTITY_ANIMATIONS[name] || BABY_ANIMATIONS[name]
+export function applyKeyframeAnimation(parts, name, seconds, weight = 1) {
+  const animation = ENTITY_ANIMATIONS[name] || BABY_ANIMATIONS[name] || RELEASE_ANIMATIONS[name]
   if (!animation) return
   const t = animation.loop ? seconds % animation.length : Math.min(seconds, animation.length)
   for (const track of animation.tracks) {
@@ -35,7 +37,7 @@ export function applyKeyframeAnimation(parts, name, seconds) {
         const p = frames[Math.max(0, start - 1)][j], q = a[j], r = b[j], s = frames[Math.min(frames.length - 1, end + 1)][j]
         value = 0.5 * ((2 * q) + (-p + r) * f + (2 * p - 5 * q + 4 * r - s) * f * f + (-p + 3 * q - 3 * r + s) * f * f * f)
       } else value = a[j] + (b[j] - a[j]) * f
-      target[['x', 'y', 'z'][axis]] += track.target === 'SCALE' ? value - 1 : value
+      target[['x', 'y', 'z'][axis]] += (track.target === 'SCALE' ? value - 1 : value) * weight
     }
   }
 }
@@ -331,6 +333,12 @@ export function applyIdlePose(parts, id, state, age) {
       }
       break
     }
+    case 'nautilus':
+    case 'zombie_nautilus':
+      set('body', 'x', Math.max(-10 * DEG, Math.min(10 * DEG, pitch)))
+      applyKeyframeAnimation(parts, 'Nautilus.SWIMMING', age / 50, .6)
+      break
+    case 'camel_husk':
     case 'camel':
       if (state.sitting) applyKeyframeAnimation(parts, state.babyModel ? 'CAMEL_BABY_SIT_POSE' : 'Camel.SITTING', age / 20)
       applyKeyframeAnimation(parts, state.babyModel ? 'CAMEL_BABY_IDLE' : 'Camel.IDLING', (age % (80 + state.seed % 40)) / 20)

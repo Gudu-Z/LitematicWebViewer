@@ -102,6 +102,8 @@ export function entityFields(entry, values) {
   if (id === 'slime' || id === 'magma_cube') f.push(state('Size', '体型', [[0, '小'], [1, '中'], [3, '大']]))
   if (id === 'phantom') f.push(range('Size', '大小', [0, 1, 2, 4, 8]))
   if (id === 'salmon') f.push(list('type', '体型', ['medium', 'small', 'large'], ['中', '小', '大']))
+  if (id === 'zombie_nautilus') f.push(list('variant', '变种', ['temperate', 'warm'], ['温带', '暖地']))
+  if (id === 'sulfur_cube') f.push(state('equipment.body', '吞入方块', [[null, '无'], ...['stone', 'glass', 'tnt', 'gold_block', 'oak_log'].map(block => [{ id: 'minecraft:' + block, count: 1 }, officialName(block)])]))
   if (id === 'mooshroom') f.push(list('Type', '变种', ['red', 'brown'], ['红色', '棕色']))
   if (id === 'axolotl') f.push(list('Variant', '变种', ['wild', 'lucy', 'gold', 'cyan', 'blue'], ['棕色', '粉红色', '金色', '青色', '蓝色']))
   if (id === 'cat') f.push(list('variant', '毛色', ['tabby', 'black', 'red', 'siamese', 'british_shorthair', 'calico', 'persian', 'ragdoll', 'white', 'jellie', 'all_black'], ['虎斑', '黑白', '红色', '暹罗', '英国短毛', '三花', '波斯', '布偶', '白色', 'Jellie', '黑色']))
@@ -124,7 +126,7 @@ export function entityFields(entry, values) {
   if (id === 'iron_golem') f.push(state('Health', '裂纹', [[100, '无'], [70, '轻度'], [40, '中度'], [15, '重度']]))
   if (id === 'bogged') f.push(bool('sheared', '蘑菇', '保留', '已剪除'))
   if (id === 'snow_golem') f.push(bool('Pumpkin', '南瓜', '无', '有'))
-  if (id === 'camel') f.push(state('LastPoseTick', '姿态', [[0, '站立'], [-500, '坐下']]))
+  if (id === 'camel' || id === 'camel_husk') f.push(state('LastPoseTick', '姿态', [[0, '站立'], [-500, '坐下']]))
   if (id === 'armadillo') f.push(list('state', '姿态', ['idle', 'scared'], ['伸展', '蜷缩']))
   if (id === 'goat') f.push(bool('HasLeftHorn', '左角', '无', '有'), bool('HasRightHorn', '右角', '无', '有'))
   if (id === 'turtle') f.push(bool('HasEgg', '状态', '普通', '携带海龟蛋'))
@@ -158,8 +160,8 @@ export function createFixture(entry, values = {}, item = '') {
   return applyEquipmentPreview(fixture)
 }
 
-const PROP_LABELS = { attachment: '安装方式', facing: '朝向', axis: '轴向', half: '半部', type: '类型', shape: '形状', open: '开启', powered: '供能', lit: '点亮', waterlogged: '含水', age: '生长阶段', level: '液面等级', power: '红石信号', rotation: '旋转', north: '北侧', south: '南侧', east: '东侧', west: '西侧', up: '上方连接', down: '下方连接', layers: '层数', bites: '食用次数', part: '部件', hinge: '门轴', face: '附着面', attached: '附着', persistent: '持续存在', distance: '距离', enabled: '启用', conditional: '条件制约', mode: '模式', candles: '蜡烛数量', honey_level: '蜂蜜等级', in_wall: '墙内', occupied: '占用', unstable: '不稳定', triggered: '触发', charges: '充能', eggs: '蛋数量', hatch: '孵化阶段', moisture: '湿润度', snowy: '覆雪', stage: '生长阶段', flower_amount: '花朵数量', orientation: '朝向组合', tilt: '倾斜', drag: '向下流动', hanging: '悬挂', vertical_direction: '垂直朝向', thickness: '粗细', sculk_sensor_phase: '感测阶段', shrieking: '尖啸', can_summon: '允许召唤', bloom: '绽放', berries: '浆果', bottom: '底部', delay: '延迟', locked: '锁定', inverted: '反相', note: '音高', instrument: '乐器', extended: '伸出', short: '缩短', has_book: '有书', has_record: '有唱片', has_bottle_0: '左侧药水', has_bottle_1: '中间药水', has_bottle_2: '右侧药水' }
-const VALUE_LABELS = { single_wall: '单墙', double_wall: '双墙', true: '是', false: '否', north: '北', south: '南', west: '西', east: '东', up: '上', down: '下', top: '上', bottom: '下', upper: '上半部', lower: '下半部', double: '双层', single: '单个', left: '左', right: '右', none: '无', low: '低', tall: '高', side: '侧面', straight: '直形', inner_left: '内左', inner_right: '内右', outer_left: '外左', outer_right: '外右', head: '头部', foot: '尾部', floor: '地面', wall: '墙面', ceiling: '顶面', x: '东西', y: '上下', z: '南北', compare: '比较', subtract: '减法', active: '激活', inactive: '静止', cooldown: '冷却' }
+const PROP_LABELS = { copper_golem_pose: '姿势', attachment: '安装方式', facing: '朝向', axis: '轴向', half: '半部', type: '类型', shape: '形状', open: '开启', powered: '供能', lit: '点亮', waterlogged: '含水', age: '生长阶段', level: '液面等级', power: '红石信号', rotation: '旋转', north: '北侧', south: '南侧', east: '东侧', west: '西侧', up: '上方连接', down: '下方连接', layers: '层数', bites: '食用次数', part: '部件', hinge: '门轴', face: '附着面', attached: '附着', persistent: '持续存在', distance: '距离', enabled: '启用', conditional: '条件制约', mode: '模式', candles: '蜡烛数量', honey_level: '蜂蜜等级', in_wall: '墙内', occupied: '占用', unstable: '不稳定', triggered: '触发', charges: '充能', eggs: '蛋数量', hatch: '孵化阶段', moisture: '湿润度', snowy: '覆雪', stage: '生长阶段', flower_amount: '花朵数量', orientation: '朝向组合', tilt: '倾斜', drag: '向下流动', hanging: '悬挂', vertical_direction: '垂直朝向', thickness: '粗细', sculk_sensor_phase: '感测阶段', shrieking: '尖啸', can_summon: '允许召唤', bloom: '绽放', berries: '浆果', bottom: '底部', delay: '延迟', locked: '锁定', inverted: '反相', note: '音高', instrument: '乐器', extended: '伸出', short: '缩短', has_book: '有书', has_record: '有唱片', has_bottle_0: '左侧药水', has_bottle_1: '中间药水', has_bottle_2: '右侧药水' }
+const VALUE_LABELS = { standing: '站立', running: '奔跑', sitting: '坐下', star: '星形', single_wall: '单墙', double_wall: '双墙', true: '是', false: '否', north: '北', south: '南', west: '西', east: '东', up: '上', down: '下', top: '上', bottom: '下', upper: '上半部', lower: '下半部', double: '双层', single: '单个', left: '左', right: '右', none: '无', low: '低', tall: '高', side: '侧面', straight: '直形', inner_left: '内左', inner_right: '内右', outer_left: '外左', outer_right: '外右', head: '头部', foot: '尾部', floor: '地面', wall: '墙面', ceiling: '顶面', x: '东西', y: '上下', z: '南北', compare: '比较', subtract: '减法', active: '激活', inactive: '静止', cooldown: '冷却' }
 const blockRegistry = id => BLOCK_STATES[id] || (id === 'chain' ? BLOCK_STATES.iron_chain : null)
 export function blockFields(blockstate, id) {
   const props = new Map()

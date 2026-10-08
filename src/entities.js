@@ -1,7 +1,7 @@
 // 实体渲染：把 .litematica 里的实体转成 Three.js 网格。
 // 目前支持：item_frame / glow_item_frame（物品展示框）、*_minecart（矿车，含漏斗/箱子/熔炉/TNT）、
 // armor_stand（盔甲架）、*_boat（船，含箱船）、cushion（坐垫）、以及带 Health 的生物实体——用原版实体模型
-// + 真实皮肤贴图渲染（85 种，见 entityAppearance.js；模型数据在 entityModelData.js）。
+// + 真实皮肤贴图渲染（90 种，见 entityAppearance.js；模型数据在 entityModelData.js 等）。
 //
 // 物品展示框严格按原版 ItemFrameEntityRenderer 的变换复现（1.21.11）：
 //   - 实体 Pos = 附着方块中心 − facing × 15/32（新版展示框位置移到支撑方块内，实测 NBT 印证）
@@ -758,15 +758,13 @@ async function buildMinecart(entity, id, assets, data) {
 // 模型数据由 scripts/parse-entity-models.mjs 从原版反编译源码自动生成。
 // 复刻 vanilla ModelPart.Cuboid 的 UV 布局与 ModelPart 的变换约定。
 
-// 铜傀儡雕像：BER 绘制（无 JSON 模型），用铜傀儡实体模型渲染成缩小雕像。
-// 实体模型约 1.5 格高，缩到 0.6 倍后脚底贴方块底部。返回的 mesh 前向为 +z。
-export function buildCopperGolemStatueMesh(tex) {
-  const model = EXTRA_MODELS.CopperGolemEntityModel
+// 铜傀儡雕像：BER 的四套原版姿势，按游戏尺寸绘制，模型原点位于方块底部。
+// 返回的 mesh 前向为 +z；朝向与氧化程度由实例提供。
+export function buildCopperGolemStatueMesh(tex, pose = 'standing') {
+  const model = EXTRA_MODELS['CopperStatue_' + pose] || EXTRA_MODELS.CopperStatue_standing
   if (!model || !tex) return null
   const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
   const mesh = quadsToEntityMesh(compileModel(model), mat)
-  mesh.scale.setScalar(0.6)
-  mesh.position.y = 0.05
   return mesh
 }
 
@@ -800,6 +798,7 @@ async function buildMob(entity, id, assets, data) {
     if (mode === 'swirl') material.color.setRGB(0.5, 0.5, 0.5)
     const mesh = createEntityRig(definition.model, material)
     mesh.name = definition.name
+    mesh.renderOrder = definition.renderOrder || 0
     const sort = ['wind', 'translucent', 'swirl'].includes(mode) ? sortTransparentFaces(mesh) : null
     const update = age => {
       mesh.userData.resetPose()
@@ -828,7 +827,7 @@ async function buildMob(entity, id, assets, data) {
     group.add(mesh)
     return mesh
   }
-  const body = attach({ name: 'body', model, tint }, tex)
+  const body = attach({ name: 'body', model, tint, mode: appearance.mode }, tex)
   body.userData.model = model
   for (const layer of layers) {
     const layerTex = layer.texture === appearance.texture ? tex : await assets.getTexture(layer.texture)
@@ -859,6 +858,24 @@ async function buildMob(entity, id, assets, data) {
 // 原版 MooshroomMushroom / SnowGolemPumpkin feature。复用方块解析器，资源包同样生效。
 async function attachMobBlocks(body, id, state, assets) {
   const n = state.nbt || {}
+  if (id === 'sulfur_cube' && state.containedBlock && typeof assets.getJSON === 'function') {
+    const stack = state.containedBlock, resolver = new BlockModelResolver(assets)
+    const properties = stack.components?.['minecraft:block_state'] || stack.components?.block_state || {}
+    const baked = await resolver.resolve(stack.id, properties)
+    if (!baked?.quads?.length) return
+    const materials = new Map()
+    for (const key of new Set(baked.quads.map(q => q.texKey))) {
+      const map = await assets.getTexture(key)
+      if (map) materials.set(key, new THREE.MeshLambertMaterial({ map, alphaTest: .5, flatShading: true, side: THREE.DoubleSide }))
+    }
+    const block = quadsToMesh(baked.quads, [-.5, -.5, -.5], key => materials.get(key))
+    block.name = 'sulfur_contained_block'
+    const small = state.babyModel
+    block.scale.setScalar(small ? .5 : 1)
+    block.position.y = 1.501 - (small ? 1.24 : .98) + 1 / 16 + .018 * (small ? .5 : 1)
+    body.add(block)
+    return
+  }
   const mushroom = id === 'mooshroom' && !(Number(n.Age) < 0 || n.IsBaby)
   const pumpkin = id === 'snow_golem' && (n.Pumpkin == null || !!n.Pumpkin)
   if ((!mushroom && !pumpkin) || typeof assets.getJSON !== 'function') return

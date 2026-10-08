@@ -65,6 +65,22 @@ export async function buildBlockEffect(id, properties, assets) {
       pivot.rotation.y = open ? 0 : -age * .02
     })
   }
+  if (id === 'lectern' && String(properties.has_book) === 'true') {
+    const rig = await blockRig(BOOK_MODEL, 'entity/enchantment/enchanting_table_book', assets)
+    if (!rig) return root
+    // LecternRenderer: T(.5,17/16,.5) * Ry(-clockwise(facing)) * Rz(67.5) * T(0,-2/16,0).
+    const turn = new THREE.Group(), tilt = new THREE.Group()
+    turn.position.set(.5, 17 / 16, .5)
+    turn.rotation.y = ({ north: 90, east: 180, south: 270, west: 0 }[properties.facing || 'north']) * Math.PI / 180
+    tilt.rotation.z = 67.5 * Math.PI / 180
+    rig.position.y -= 2 / 16
+    root.add(turn); turn.add(tilt); tilt.add(rig)
+    const p = rig.userData.parts, open = 1.5
+    p.left_lid.rotation.y = Math.PI + open; p.right_lid.rotation.y = -open
+    p.left_pages.rotation.y = open; p.right_pages.rotation.y = -open
+    p.flip_page1.rotation.y = open * .8; p.flip_page2.rotation.y = -open * .8
+    for (const name of ['left_pages', 'right_pages', 'flip_page1', 'flip_page2']) p[name].position.x = Math.sin(open)
+  }
   if (id === 'conduit' && properties.preview_active === 'true') {
     const box = (size, w, h) => ({ w, h, parts: { shell: part([cuboid(0, 0, -size / 2, -size / 2, -size / 2, size, size, size)]) } })
     const cage = await blockRig(box(8, 32, 16), 'entity/conduit/cage', assets)
@@ -97,7 +113,7 @@ export async function buildBlockEffect(id, properties, assets) {
 
 export async function addBlockEffects(group, data, assets, visible) {
   const { width: w, depth: d, minX, minY, minZ } = data.bounds
-  const supported = new Set(['bell', 'enchanting_table', 'conduit'])
+  const supported = new Set(['bell', 'enchanting_table', 'conduit', 'lectern'])
   const entries = data.palette.map(p => supported.has(p.name.replace('minecraft:', '')) ? p : null)
   if (!entries.some(Boolean)) return
   for (const [key, index] of data.blocks) {

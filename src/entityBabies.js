@@ -1,4 +1,5 @@
 import { BABY_MODELS } from './babyEntityModels.js'
+import { RELEASE_MODELS } from './releaseModelData.js'
 
 export const BABY_MODEL_KEYS = {
   pig: 'Pig', cow: 'Cow', mooshroom: 'Cow', sheep: 'Sheep', goat: 'Goat', panda: 'Panda', polar_bear: 'PolarBear',
@@ -8,9 +9,13 @@ export const BABY_MODEL_KEYS = {
   zombie: 'Zombie', husk: 'Zombie', drowned: 'Zombie', zombie_villager: 'ZombieVillager', villager: 'Villager',
   piglin: 'Piglin', zombified_piglin: 'Piglin', dolphin: 'Dolphin', squid: 'Squid', glow_squid: 'Squid',
 }
-export const BABY_MOBS = new Set([...Object.keys(BABY_MODEL_KEYS), 'sniffer', 'happy_ghast'])
+export const BABY_MOBS = new Set([...Object.keys(BABY_MODEL_KEYS), 'sniffer', 'happy_ghast', 'nautilus', 'sulfur_cube'])
 export const isBaby = nbt => Number(nbt.Age) < 0 || !!(nbt.IsBaby || nbt.is_baby)
-export function babyModel(id) { return BABY_MODELS[BABY_MODEL_KEYS[id]] }
+export function babyModel(id) {
+  if (id === 'nautilus') return RELEASE_MODELS.BabyNautilusModel
+  if (id === 'sulfur_cube') return RELEASE_MODELS.SmallSulfurCubeModelOuter
+  return BABY_MODELS[BABY_MODEL_KEYS[id]]
+}
 
 // 嗅探兽和快乐恶魂使用原版缩放变换，其余使用 26.3 独立模型。
 export function applyBabyPose(mesh, id, nbt) {

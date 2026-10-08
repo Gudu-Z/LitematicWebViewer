@@ -48,6 +48,7 @@ export function equipmentFields(entry, officialName, itemIds, fixture = null, va
   if (SADDLED_MOBS.has(id) && (!capabilities || capabilities.saddle)) slot('saddle', '鞍具', ['saddle'])
   const type = BODY_EQUIPMENT[id]
   if (type && (!capabilities || capabilities.body)) slot('body', '身体装备', type === 'horse_body' ? MATERIALS.filter(m => m !== 'chainmail').map(m => m + '_horse_armor')
+    : type === 'nautilus_body' ? MATERIALS.map(m => m + '_nautilus_armor')
     : type === 'wolf_body' ? ['wolf_armor'] : COLORS.map(c => c + (type === 'llama_body' ? '_carpet' : '_harness')))
   if ((HUMANOID_ARMOR.has(id) || type) && available('dye')) field('preview.equipment_dye', '装备染色', [[null, '默认'], ...COLORS.map((c, i) => [DYES[i], officialName(c + '_dye', 'item')])])
   if ((HUMANOID_ARMOR.has(id) || type || SADDLED_MOBS.has(id)) && available('glint')) field('preview.equipment_glint', '附魔光效', [[false, '否'], [true, '是']])

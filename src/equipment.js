@@ -1,6 +1,7 @@
 import * as THREE from 'three'
 import { createEntityRig } from './entityModel.js'
 import { EQUIPMENT_MODELS } from './equipmentModelData.js'
+import { RELEASE_MODELS } from './releaseModelData.js'
 import { HUMANOID_ARMOR, ARMED_MOBS, HEAD_ITEMS, BODY_EQUIPMENT, SADDLED_MOBS, readEquipment, equippable, equipmentDye, itemComponent, itemName, hasGlint, EQUIPMENT_ITEMS } from './equipmentState.js'
 import { isBaby } from './entityBabies.js'
 import { BABY_MODELS } from './babyEntityModels.js'
@@ -132,13 +133,14 @@ async function equipmentLayers(group, body, stack, slot, type, model, assets, op
 }
 
 function saddleModel(id, base, ridden) {
+  if (id.includes('nautilus')) return RELEASE_MODELS.NautilusSaddleModel
   const model = clone(base)
   if (['horse', 'donkey', 'mule', 'skeleton_horse', 'zombie_horse'].includes(id)) {
     visit(model.parts, p => { p.cuboids = [] })
     const pieces = clone(EQUIPMENT_MODELS.HorseSaddle.parts)
     model.parts.body.children ||= {}; model.parts.head_parts.children ||= {}
     for (const [key, part] of Object.entries(pieces)) if (ridden || !key.endsWith('_line')) (key === 'saddle' ? model.parts.body.children : model.parts.head_parts.children)[key] = part
-  } else if (id === 'camel') {
+  } else if (id === 'camel' || id === 'camel_husk') {
     visit(model.parts, p => { p.cuboids = [] })
     const pieces = clone(EQUIPMENT_MODELS.CamelSaddle.parts), body = model.parts.body
     body.children.saddle = pieces.saddle; body.children.head.children.bridle = pieces.bridle
@@ -160,6 +162,7 @@ export async function attachEquipment(group, body, entity, assets, buildItem) {
   if (items.body && BODY_EQUIPMENT[id] && (!baby || id.includes('llama') || id === 'happy_ghast')) {
     let model = base
     if (id === 'wolf') model = EQUIPMENT_MODELS.WolfArmor
+    if (id.includes('nautilus')) model = RELEASE_MODELS.NautilusArmorModel
     if (id.includes('horse')) model = EQUIPMENT_MODELS.HorseArmor
     if (id.includes('llama')) {
       model = clone(baby ? BABY_MODELS.Llama : EQUIPMENT_MODELS.LlamaDecor)
@@ -178,7 +181,7 @@ export async function attachEquipment(group, body, entity, assets, buildItem) {
       }
     }
   }
-  if (items.saddle && SADDLED_MOBS.has(id) && !baby) await equipmentLayers(group, body, items.saddle, 'saddle', id + '_saddle', saddleModel(id, base, !!nbt.Passengers?.length), assets)
+  if (items.saddle && SADDLED_MOBS.has(id) && !baby) await equipmentLayers(group, body, items.saddle, 'saddle', id.includes('nautilus') ? 'nautilus_saddle' : id + '_saddle', saddleModel(id, base, !!nbt.Passengers?.length), assets)
   if (!buildItem) return
   const leftMain = !!nbt.LeftHanded
   if (ARMED_MOBS.has(id)) for (const slot of ['mainhand', 'offhand']) {

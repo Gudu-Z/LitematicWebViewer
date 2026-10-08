@@ -69,7 +69,8 @@ for (const id of BABY_MOBS) {
   const e = CATALOG.find(e => e.key === 'mob/' + id); if (!e) continue
   const group = await buildInspectionModel(e, assets, { 'nbt.Age': -24000 })
   assert.ok(meshes(group), id)
-  assert.ok(group.userData.appearance.texture.endsWith('_baby') || id === 'sniffer', id + ' 幼年贴图')
+  assert.ok(group.userData.appearance.texture.endsWith('_baby') || id === 'sniffer'
+    || (id === 'sulfur_cube' && group.userData.appearance.texture.endsWith('_small')), id + ' 幼年贴图')
   if (babyModel(id)) assert.equal(group.userData.appearance.model.w, babyModel(id).w)
   group.traverse(o => {
     if (!o.isSkinnedMesh) return

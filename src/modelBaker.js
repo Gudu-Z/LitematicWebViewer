@@ -4,7 +4,7 @@
 // 参考 Minecraft 方块模型格式与 prismarine-viewer 的实现：
 //   - FACE_CORNERS：每个面 4 个角的 [选max标志x/y/z, uv选择u/v]
 //   - UV 旋转：绕 (0.5,0.5) 旋转 face.rotation 度
-//   - 元素旋转 origin/axis/angle（Minecraft 顺时针 = 右手系负角）
+//   - 元素旋转 origin + axis/angle 或 26.3 的 x/y/z 欧拉角（标准右手系）
 
 const FACE_CORNERS = {
   up:    [[0, 1, 1, 0, 1], [1, 1, 1, 1, 1], [0, 1, 0, 0, 0], [1, 1, 0, 1, 0]],
@@ -41,7 +41,7 @@ export function bakeModel(model, variant, texSize = 16) {
     const from = element.from
     const to = element.to
     if (!element.faces) continue
-    const elRotation = element.rotation
+    const rotateElement = element.rotation ? elementTransform(element.rotation) : null
 
     for (const dir of Object.keys(element.faces)) {
       const face = element.faces[dir]
@@ -61,10 +61,7 @@ export function bakeModel(model, variant, texSize = 16) {
       const uvs = []
       for (const c of corners) {
         let v = [c[0] ? to[0] : from[0], c[1] ? to[1] : from[1], c[2] ? to[2] : from[2]]
-        if (elRotation) {
-          if (elRotation.rescale) v = rescaleAround(v, elRotation.axis, elRotation.angle, elRotation.origin)
-          v = rotateAround(v, elRotation.axis, elRotation.angle, elRotation.origin)
-        }
+        if (rotateElement) v = rotateElement(v)
         verts.push(v)
 
         const bu = c[3]
@@ -151,30 +148,24 @@ function autoUV(dir, from, to) {
   }
 }
 
-// 元素旋转的 rescale：把元素在「垂直于旋转轴」的两个方向上按 1/|cos(angle)| 缩放
-// （缩放中心为旋转 origin），使旋转后元素投影仍占满原包围盒。
-// 对应原版 FaceBakery.computeRescale：RESCALE_45 = 1/cos45° = √2、RESCALE_22_5 = 1/cos22.5°。
-// 例：铁轨斜坡（45° 平板）缩放后 y 恰好从 1/16 到 17/16，与上下两条平轨无缝衔接。
-function rescaleAround([x, y, z], axis, angleDeg, origin) {
-  const a = (angleDeg * Math.PI) / 180
-  const scale = 1 / Math.abs(Math.cos(a))
-  const px = x - origin[0]
-  const py = y - origin[1]
-  const pz = z - origin[2]
-  let rx = px
-  let ry = py
-  let rz = pz
-  if (axis === 'x') {
-    ry = py * scale
-    rz = pz * scale
-  } else if (axis === 'y') {
-    rx = px * scale
-    rz = pz * scale
-  } else {
-    rx = px * scale
-    ry = py * scale
+// 26.3 CuboidRotation: both axis/angle and Euler x/y/z use Rz * Ry * Rx.
+// Rescale divides each matrix column by its largest absolute component before rotation.
+function elementTransform(rotation) {
+  const axes = ['x', 'y', 'z'], origin = rotation.origin || [8, 8, 8]
+  const angles = axes.map(axis => Number(rotation.axis ? (rotation.axis === axis ? rotation.angle : 0) : rotation[axis]) || 0)
+  const columns = axes.map((_, index) => {
+    let vector = axes.map((_, i) => i === index ? 1 : 0)
+    for (let i = 0; i < 3; i++) if (angles[i]) vector = rotateAround(vector, axes[i], angles[i], [0, 0, 0])
+    if (rotation.rescale) {
+      const divisor = Math.max(...vector.map(Math.abs))
+      vector = vector.map(value => value / divisor)
+    }
+    return vector
+  })
+  return vertex => {
+    const point = vertex.map((value, i) => value - origin[i])
+    return origin.map((value, i) => value + columns.reduce((sum, column, j) => sum + column[i] * point[j], 0))
   }
-  return [rx + origin[0], ry + origin[1], rz + origin[2]]
 }
 
 // 绕指定轴旋转（标准右手系正角）。Minecraft 的“变体旋转”是顺时针，
