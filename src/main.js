@@ -68,12 +68,13 @@ const imageExport = renderer ? new ImageExport({
   getError: () => ui.errorBanner.classList.contains('hidden') ? '' : ui.errorBanner.textContent,
   changeLanguage: () => { setLang(getLang() === 'zh' ? 'en' : 'zh'); refreshLocalizedUI() },
 }) : null
-document.getElementById('imageExportBtn').addEventListener('click', () => {
+function openImageExport() {
   if (busy || !imageExport) return
   closeMobilePanels()
   try { imageExport.open() }
   catch (error) { ui.showError(t('webglInitFailed') + error.message) }
-})
+}
+for (const id of ['imageExportBtn', 'welcomeExportBtn']) document.getElementById(id).addEventListener('click', openImageExport)
 
 // 主预览器与模型图鉴分别保存趣味选项。
 const ILLAGER_ARMS_PREFERENCE = 'viewer-illager-extra-arms-v1'
@@ -115,7 +116,6 @@ const packInput = document.getElementById('packInput')
 
 document.getElementById('openBtn').addEventListener('click', () => fileInput.click())
 document.getElementById('welcomeOpenBtn').addEventListener('click', () => fileInput.click())
-document.getElementById('demoBtn').addEventListener('click', () => autoLoadDemo(true))
 document.getElementById('packBtn').addEventListener('click', () => packInput.click())
 document.getElementById('clearBtn').addEventListener('click', () => {
   if (busy) return
@@ -685,9 +685,9 @@ function setBusy(on) {
   document.getElementById('app').setAttribute('aria-busy', String(on))
   document.getElementById('packSettings').setAttribute('aria-busy', String(on))
   illagerExtraArms.disabled = on || !renderer
-  document.getElementById('imageExportBtn').disabled = on || !renderer
+  for (const id of ['imageExportBtn', 'welcomeExportBtn']) document.getElementById(id).disabled = on || !renderer
   imageExport?.setLoading(on)
-  for (const el of document.querySelectorAll('#openBtn, #clearBtn, #welcomeOpenBtn, #demoBtn, #fileInput, #packBtn, #packInput, #controlPanel button, #controlPanel select, #regionListBody button')) {
+  for (const el of document.querySelectorAll('#openBtn, #clearBtn, #welcomeOpenBtn, #fileInput, #packBtn, #packInput, #controlPanel button, #controlPanel select, #regionListBody button')) {
     el.disabled = on || (el.id === 'clearBtn' && !currentData)
   }
   updatePackPanels()

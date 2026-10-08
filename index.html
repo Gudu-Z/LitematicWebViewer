@@ -39,9 +39,12 @@
         <p class="eyebrow">MINECRAFT · 3D VIEWER</p>
         <h2 id="welcomeTitle" data-i18n="welcomeTitle">Minecraft 投影在线预览器</h2>
         <p class="welcome-description" data-i18n="welcomeDescription">打开我的世界 Litematica 投影，3D 查看建筑、逐层浏览并统计材料。无需安装游戏，文件在浏览器本地处理。</p>
-        <div class="welcome-actions"><button id="welcomeOpenBtn" class="primary" data-i18n="openFile">打开投影文件</button><button id="demoBtn" data-i18n="openDemo">体验示例建筑</button></div>
+        <div class="welcome-actions">
+          <button id="welcomeOpenBtn" class="primary" data-i18n="openFile">打开投影文件</button>
+          <a id="welcomeCatalogBtn" href="./scripts/entity-preview.html" target="_blank" rel="noopener" data-i18n="browseCatalog">浏览模型图鉴</a>
+          <button id="welcomeExportBtn" type="button" data-i18n="exportRenderedImage" aria-haspopup="dialog" aria-controls="imageExport">导出渲染图片</button>
+        </div>
         <p class="file-formats">.litematic / .litematica / .nbt</p>
-        <a href="./scripts/entity-preview.html" target="_blank" rel="noopener" class="welcome-catalog" data-i18n="browseCatalog">浏览模型图鉴 ↗</a>
         <p id="welcomeStatus" role="status"></p>
       </section>
 

@@ -92,10 +92,11 @@ body.has-model #welcome { display: none; }
 .eyebrow { color: #8eaacb; font-size: 10px; letter-spacing: .12em; }
 #welcome h2 { margin: 14px 0 12px; font-size: 28px; font-weight: 600; letter-spacing: -.5px; }
 .welcome-description { font-size: 14px; color: #a9bdd6; line-height: 1.9; max-width: 430px; margin: auto; }
-.welcome-actions { display: flex; justify-content: center; gap: 12px; margin-top: 28px; }
-.welcome-actions button { padding: 12px 22px; }
+.welcome-actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 28px; }
+.welcome-actions button, .welcome-actions a { display: flex; align-items: center; justify-content: center; min-height: 44px; padding: 12px 16px; font-size: 13px; line-height: 1.4; }
+.welcome-actions a { color: inherit; border: 1px solid #3a4d67; border-radius: 9px; background: #23334a; transition: background .15s, border-color .15s; }
+.welcome-actions a:hover { border-color: #7397c3; background: #2a405c; }
 .file-formats { color: #829bb9; font: 11px ui-monospace, monospace; margin-top: 16px; }
-.welcome-catalog { display: inline-block; margin-top: 28px; font-size: 12px; }
 #welcomeStatus { min-height: 20px; color: #9bbbdc; font-size: 12px; margin-top: 20px; }
 #settingsPanel { width: min(800px, calc(100vw - 32px)); max-height: calc(100dvh - 40px); margin: auto; padding: 0; color: inherit; background: #172638; border: 1px solid #48617f; border-radius: 18px; box-shadow: 0 24px 100px #0009; overflow-y: auto; scrollbar-width: thin; scrollbar-color: #415b7a transparent; }
 #settingsPanel::backdrop { background: #050e1bc4; backdrop-filter: blur(5px); }
@@ -177,8 +178,9 @@ body.has-model #welcome { display: none; }
   .welcome-mark img { width: 60px; height: 60px; }
   #welcome h2 { font-size: 23px; }
   .welcome-description { font-size: 13px; }
-  .welcome-actions { gap: 8px; margin-top: 23px; }
-  .welcome-actions button { padding: 12px 14px; font-size: 12px; }
+  .welcome-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 23px; }
+  .welcome-actions .primary { grid-column: 1 / -1; }
+  .welcome-actions button, .welcome-actions a { padding: 12px 14px; font-size: 12px; }
   #settingsPanel { width: calc(100vw - 20px); max-height: calc(100dvh - 20px); }
   .settings-head { padding: 20px; }
   .settings-tabs { padding: 0 20px; }

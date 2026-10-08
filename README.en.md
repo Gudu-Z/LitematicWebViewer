@@ -273,7 +273,7 @@ The browser opens `http://localhost:5173` automatically.
 
 ## 3. Usage
 
-1. Click **Open schematic** or drag a `.litematic` file onto the page. You can also select **Try the demo**.
+1. Click **Open schematic** or drag a `.litematic` file onto the page. The home screen also offers **Browse model catalog** and **Export rendered image**.
 2. Wait for the build to appear in 3D.
 3. Use the **Render** and **Layer** controls on the left to view the entire build, a single layer, or everything above/below a layer. Regions and materials appear on the right.
 4. Open the top-right **gear**. **Display & controls** contains background, visibility and camera sensitivity options; **Resource packs** manages textures. The pack summary on the left also opens pack settings.
