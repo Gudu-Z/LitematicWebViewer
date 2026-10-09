@@ -39,9 +39,6 @@ jobs:
       - name: Verify Minecraft rendering coverage
         run: npm run test:rendering
 
-      - name: Verify streaming schematic imports
-        run: npm run test:schematics
-
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

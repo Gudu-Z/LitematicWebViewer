@@ -406,7 +406,7 @@ function writeFace(g, verts, uvs, ox, oy, oz) {
 // 内存减半且无扩容峰值，超大投影（上千万面）也不会撑爆内存。
 // 法线不存（每个面的 4 个顶点本就同法线，渲染用 flatShading 即可得到相同光照）。
 // 返回 { groups: Map<texKey, {positions,uvs,indices}>, emitted: 面数 }
-export async function buildFaceGroups(palette, blocks, bounds, onProgress, filter, maxFaces = Infinity) {
+export async function buildFaceGroups(palette, blocks, bounds, onProgress, filter) {
   const grid = {
     W: bounds.width,
     D: bounds.depth,
@@ -464,7 +464,6 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
   // —— 第一遍：统计每个贴图组的精确面数 ——
   let n = 0
   for (const [key, gi] of blocks) {
-    if (emitted > maxFaces) throw Object.assign(new Error('windowTooComplex'), { code: 'windowTooComplex' })
     if ((++n & 0xffff) === 0) {
       onProgress?.(total ? (0.5 * n) / total : 0)
       await yieldThread()
@@ -494,7 +493,6 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     }
   }
 
-  if (emitted > maxFaces) throw Object.assign(new Error('windowTooComplex'), { code: 'windowTooComplex' })
   // 分配精确大小的 typed arrays。
   // 气泡组是「点」而非面：只存中心坐标（每点 3 个 float），渲染端用 THREE.Points。
   const groups = new Map()
