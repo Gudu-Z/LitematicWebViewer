@@ -4,29 +4,6 @@ const decoder = new TextDecoder()
 const widths = { 1: 1, 2: 2, 3: 4, 4: 8, 5: 4, 6: 8 }
 const MAX_VALUE_BYTES = 16 * 1024 * 1024
 
-// Blob.stream() is allowed to emit the entire compressed file as one chunk.
-// DecompressionStream can expand that chunk before applying output backpressure,
-// queueing gigabytes while the visitor works. Bound each inflate operation too.
-function compressedChunks(stream) {
-  const reader = stream.getReader()
-  let chunk, cursor = 0, released = false
-  const release = () => { if (!released) { released = true; reader.releaseLock() } }
-  return new ReadableStream({
-    async pull(controller) {
-      try {
-        while (!chunk || cursor === chunk.length) {
-          const next = await reader.read()
-          if (next.done) { release(); controller.close(); return }
-          chunk = next.value; cursor = 0
-        }
-        const end = Math.min(cursor + 32768, chunk.length)
-        controller.enqueue(chunk.subarray(cursor, end)); cursor = end
-      } catch (error) { release(); controller.error(error) }
-    },
-    async cancel(reason) { try { await reader.cancel(reason) } finally { release() } },
-  })
-}
-
 export class NBTStreamReader {
   constructor(stream, { onProgress, signal, visit } = {}) {
     this.reader = stream.getReader()
@@ -173,8 +150,8 @@ export class NBTStreamReader {
 export async function readNBTStream(file, options = {}) {
   const header = new Uint8Array(await file.slice(0, 2).arrayBuffer())
   let stream = file.stream()
-  if (header[0] === 0x1f && header[1] === 0x8b) stream = compressedChunks(stream).pipeThrough(new DecompressionStream('gzip'))
-  else if (header[0] === 0x78) stream = compressedChunks(stream).pipeThrough(new DecompressionStream('deflate'))
+  if (header[0] === 0x1f && header[1] === 0x8b) stream = stream.pipeThrough(new DecompressionStream('gzip'))
+  else if (header[0] === 0x78) stream = stream.pipeThrough(new DecompressionStream('deflate'))
   const r = new NBTStreamReader(stream, options)
   try {
     if (await r.number(1) !== 10) throw new Error('Root NBT tag must be a compound')

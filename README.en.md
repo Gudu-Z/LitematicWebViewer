@@ -31,7 +31,7 @@ Preview Minecraft `.litematic` / `.litematica` schematics—building blueprints 
 - Perspective and orthographic projection, with perspective as the default. Orthographic views help compare dimensions and inspect structures.
 - Image export studio with isometric views, transparent PNGs, custom resolution and aspect ratios, using the current schematic, resource packs and layer selection.
 - Region visibility and layer slicing: all, below, above or a single layer.
-- Open large schematics as a complete overview, with simplified distant geometry, automatic nearby detail and cancellable background reads.
+- Load large schematics by coordinate range, with streaming reads in a worker, cancellation, suggested ranges and range switching.
 - Material counts by block, translated names and ascending/descending sorting.
 - Chinese and English interfaces.
 - Model catalog with categories, bilingual search, state combinations, and world, item, spawn egg and item-frame views.
@@ -44,11 +44,11 @@ For everyday use, open the [online viewer](https://lwv.loafing.club/). The insta
 
 ### Large schematics
 
-The full viewer opens large files as a complete scene automatically, without a range picker. Distant geometry uses simplified voxels and average texture colours. Zooming in or moving the camera automatically loads textured blocks and entities near the line of sight. The overview remains visible until the detail is ready, and loading preserves the camera. Files stay local and do not need to be split or saved again.
+The full viewer inspects large files before showing a range picker. Enter inclusive X/Y/Z coordinates, or choose **Suggested range** or **Full-height center column**, then load that portion. Use **Change loaded range** in the file panel to switch areas. Files stay local and do not need to be split or saved again.
 
-Opening a file requires an initial sequential gzip scan, which can be cancelled. A bounded compressed index speeds up subsequent detail reads; when the cache limit is reached, reads fall back to streaming. Only one detailed area is retained at a time, and complex areas automatically use a smaller window. Materials count all source regions, including overlapping regions separately. Distant geometry does not reproduce every block. Region visibility, layer slicing and image export also work with the complete overview.
+Each range can contain up to 1,048,576 cells. Complex geometry or dense entity collections may require a smaller range. Build info retains source totals; the material list counts only loaded blocks. Gzip requires sequential reads, so inspection and each range change scan the file; reading can be cancelled. This provides detailed partial previews, without city-wide LOD or automatic loading as the camera moves.
 
-Run `npm run test:schematics` for regression checks. When both local city files are available, run `node scripts/verify-schematic-overview.mjs --large` for overview and exact-detail checks, and `node scripts/verify-schematic-overview-browser.mjs --large` for automatic opening, detail loading, cancellation, slicing and export in a browser. After building, `node scripts/verify-schematic-window-browser.mjs` checks ordinary files and manual range changes.
+Run `npm run test:schematics` for regression checks, or append `-- --large` when the two local city files are available. After building, run `node scripts/verify-schematic-window-browser.mjs` to verify uploads, cancellation, range changes and WebGL output; append `--large` to include both city files.
 
 ## Embedded preview cards
 
@@ -470,7 +470,7 @@ npm run build
 
 ## 5. Known limitations
 
-- The full viewer uses simplified distant geometry and local detail for very large schematics; it cannot keep every city block at full detail in memory simultaneously. Embedded quick cards still have file and block-count limits.
+- Very large schematics, roughly over 20 million blocks, report “file too large”: browser memory cannot hold all blocks and merged geometry.
 - Without biome data, grass, foliage and vines use default colors instead of vanilla biome gradients.
 - Some model corners, `uvlock` cases and extreme rotation combinations may differ slightly from vanilla.
 - Some textures in very old saves may differ slightly.

@@ -178,9 +178,8 @@ export class ImageExport {
   bounds() {
     const box = new THREE.Box3()
     this.source.scene.updateMatrixWorld(true)
-    for (const key of ['overviewGroup', 'group', 'signsGroup', 'headsGroup', 'bannersGroup', 'statuesGroup', 'potsGroup', ...(this.el.Entities.checked ? ['entitiesGroup'] : [])]) {
+    for (const key of ['group', 'signsGroup', 'headsGroup', 'bannersGroup', 'statuesGroup', 'potsGroup', ...(this.el.Entities.checked ? ['entitiesGroup'] : [])]) {
       const group = this.source[key]
-      if (!group) continue
       // Export's entity checkbox is independent of the main viewer's visibility.
       const visible = group.visible; group.visible = true
       group.traverseVisible(object => {
