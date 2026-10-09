@@ -965,36 +965,33 @@ async function buildBoat(entity, id, assets) {
     model.parts[name].rot[0] = paddlePitch
     model.parts[name].rot[1] = right ? Math.PI - paddleYaw : paddleYaw
   }
-  const tex = await assets.getTexture('entity/boat/' + type)
+  if (isChest) {
+    // 原版 BoatModel / RaftModel 的箱子属于船模型，使用专用 128×128 贴图。
+    // 木筏甲板比普通船的内底高 5.1 像素，三个箱子部件也随之抬高。
+    model.h = 128
+    for (const [name, pivot, size, v] of [
+      ['chest_bottom', [-2, -5, -6], [12, 8, 12], 76],
+      ['chest_lid', [-2, -9, -6], [12, 4, 12], 59],
+      ['chest_lock', [-1, -6, -1], [2, 4, 1], 59],
+    ]) {
+      if (isRaft) pivot[1] -= 5.1
+      model.parts[name] = {
+        pivot, rot: [0, -Math.PI / 2, 0],
+        cuboids: [{ u: 0, v, x: 0, y: 0, z: 0, dx: size[0], dy: size[1], dz: size[2] }],
+        children: {},
+      }
+    }
+  }
+  const tex = await assets.getTexture(`entity/${isChest ? 'chest_boat' : 'boat'}/${type}`)
   const hullMat = tex
     ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     : new THREE.MeshLambertMaterial({ color: 0x8a6a45 })
   const hull = quadsToEntityMesh(compileModel(model), hullMat)
-  // 编译后船体中心在局部 y≈1.406，下移使船体中心落在吃水线（实体 Pos）
-  hull.position.set(0, -22.5 / 16, 0)
+  // AbstractBoatRenderer 在实体 Pos 上方 0.375 格绘制模型原点。
+  // compileModel 已包含 +24/16 的 Y 基准，因此只需抵消该基准，再加原版位移。
+  // 不能按船体几何中心估算吃水线，否则普通船和竹筏都会额外下沉 0.28125 格。
+  hull.position.set(0, 0.375 - 24 / 16, 0)
   group.add(hull)
-
-  // 箱船：船体之上加箱子
-  if (isChest) {
-    const resolver = new BlockModelResolver(assets)
-    const baked = await resolver.resolve('minecraft:chest', { type: 'single', facing: 'north' })
-    if (baked && baked.quads && baked.quads.length) {
-      const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
-      const mats = new Map()
-      await Promise.all(
-        texKeys.map(async (tk) => {
-          const tex = await assets.getTexture(tk)
-          if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, flatShading: true }))
-        }),
-      )
-      const chest = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
-      // 原版箱船的箱子是船模型里 12×12×12（0.75 方块）的 chest_bottom+chest_lid，
-      // 中心在船体后部（x=-0.5，即 back 方向），不是船体正中心
-      chest.scale.setScalar(0.75)
-      chest.position.set(-0.5, 0.28, 0)
-      group.add(chest)
-    }
-  }
 
   group.position.set(x, y, z)
   // 船模型长度沿 X（front 在 +x），实体 yaw 0=南(+z)，故绕 Y 转 -(yaw+90°)
