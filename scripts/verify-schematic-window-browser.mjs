@@ -1,7 +1,8 @@
-// Run after npm run build. --large additionally imports the two private local files.
+// Run after npm run build. --large also runs the automatic whole-scene tests
+// against the two private local originals after the manual-range checks finish.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { readFile, writeFile, mkdir, readdir } from 'node:fs/promises'
+import { readFile, writeFile, mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { preview } from 'vite'
@@ -105,32 +106,6 @@ try {
   await screenshot('light-range'); await click('.load-cancel'); await idle()
   await evaluate(`document.documentElement.style.removeProperty('--ui-surface');document.documentElement.style.removeProperty('--ui-text')`)
 
-  if (process.argv.includes('--large')) {
-    const files = (await readdir('schematics')).filter(n => n.startsWith('完整海盗城') || n.startsWith('Parrots'))
-    assert.equal(files.length, 2, 'Both local originals must be present')
-    for (const [index, name] of files.entries()) {
-      await evaluate('window.loadTicks=0;window.tickTimer=setInterval(()=>window.loadTicks++,20)')
-      await upload('schematics/' + name); await choosing()
-      assert.ok(await evaluate('window.loadTicks>10'), 'Main thread stays responsive during inspection')
-      await evaluate('clearInterval(window.tickTimer)')
-      if (index === 0) {
-        // Cancel while the worker is decompressing, preserving the existing view.
-        await evaluate(`document.querySelector('.load-submit').click();setTimeout(()=>document.querySelector('.load-cancel')?.click(),30)`)
-        await idle(); assert.equal(await evaluate('document.querySelector("#fileName").textContent'), 'demo.litematic')
-        await upload('schematics/' + name); await choosing()
-      }
-      await screenshot(index ? 'pirate-range' : 'council-range')
-      await click('.load-submit'); await check(index ? 'pirate' : 'council')
-      assert.equal(await evaluate('document.querySelector("#fileName").textContent'), name)
-      if (index === 0) {
-        await click('#changeRangeBtn'); await choosing()
-        await evaluate(`for(const [name,value] of Object.entries({minX:514,maxX:514,minY:192,maxY:192,minZ:321,maxZ:321})){document.querySelector('[name='+name+']').value=value}document.querySelector('[name=minX]').dispatchEvent(new Event('input',{bubbles:true}))`)
-        await click('.load-submit'); await idle()
-        assert.match(await evaluate('document.querySelector("#status").textContent'), /没有可显示内容/)
-        await click('#changeRangeBtn'); await choosing(); await click('.range-center'); await click('.load-submit'); await check('council-reloaded')
-      }
-    }
-  }
   await click('#clearBtn')
   assert.equal(await evaluate('document.querySelector("#changeRangeBtn").hidden'), true)
   assert.equal(await evaluate('document.querySelector("#loadedRange").hidden'), true)
@@ -141,3 +116,8 @@ try {
   socket?.close(); chrome.kill()
   await new Promise(resolve => server.httpServer.close(resolve))
 }
+if (process.argv.includes('--large')) await new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, ['scripts/verify-schematic-overview-browser.mjs', '--large'], { windowsHide: true, stdio: 'inherit' })
+  child.once('error', reject)
+  child.once('exit', code => code === 0 ? resolve() : reject(Error('Whole-scene browser checks failed: ' + code)))
+})

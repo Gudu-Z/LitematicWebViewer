@@ -1,15 +1,16 @@
 import { defaultWindow, validateWindow, MAX_WINDOW_VOLUME } from './litematicaWindow.js'
 import { t } from './i18n.js'
 import './schematicLoader.css'
+import { SchematicWorkerClient } from './schematicWorkerClient.js'
 
 const coordinates = ['minX', 'maxX', 'minY', 'maxY', 'minZ', 'maxZ']
 export const rangeLabel = b => ['X', 'Y', 'Z'].map(a => `${a}: ${b['min' + a]}…${b['max' + a]}`).join(' · ')
 
-// A session retains only the File and small inspection result, never unpacked data.
-// Terminating its worker cancels decompression even while NBT fields are being read.
-export function loadSchematic(file, { session, selectRange = false, onProgress } = {}) {
+// Large-file sessions retain a bounded compressed archive in their worker.
+// Terminating the worker cancels scanning and releases the archive immediately.
+export function loadSchematic(file, { session, selectRange = false, forceOverview = false, onProgress } = {}) {
   return new Promise((resolve, reject) => {
-    const worker = new Worker(new URL('./litematica.worker.js', import.meta.url), { type: 'module' })
+    const client = new SchematicWorkerClient()
     const dialog = document.createElement('dialog')
     dialog.id = 'schematicLoad'
     dialog.setAttribute('aria-labelledby', 'schematicLoadTitle')
@@ -34,12 +35,15 @@ export function loadSchematic(file, { session, selectRange = false, onProgress }
     function finish(error, data) {
       if (settled) return
       settled = true
-      worker.terminate()
+      if (error || !data?.overview) client.dispose()
       window.removeEventListener('pagehide', cancel)
       dialog.close(); dialog.remove()
       originalFocus?.focus?.()
       if (error) reject(error)
-      else resolve({ data, session: { file, info, selection } })
+      else resolve({ data, session: { file, info, selection,
+        loadDetail: (bounds, options) => client.request('detail', { selection: bounds }, options).then(result => result.data),
+        dispose: () => client.dispose(),
+      } })
     }
     const cancel = () => finish(new DOMException('Cancelled', 'AbortError'))
     window.addEventListener('pagehide', cancel, { once: true })
@@ -100,36 +104,35 @@ export function loadSchematic(file, { session, selectRange = false, onProgress }
       b.minY = info.bounds.minY; b.maxY = info.bounds.maxY; setSelection(b)
     }
     q('.range-grid').addEventListener('input', validate)
-    function load(value) {
+    function report(bytes) {
+      q('.load-status').textContent = t('streamReadProgress', { n: Math.floor(bytes / 1048576) })
+      if (info) q('progress').value = bytes
+      onProgress?.(phase === 'inspect' ? 0 : Math.min(1, bytes / info.decompressedBytes))
+    }
+    async function load(value, overview = false) {
       phase = 'load'; choosing = false; selection = value
-      q('#schematicLoadTitle').textContent = t('readingSchematicRange')
+      q('#schematicLoadTitle').textContent = t(overview ? 'buildingOverview' : 'readingSchematicRange')
       q('.load-status').textContent = t('streamReadHint')
       q('.load-range').hidden = true; q('.load-submit').hidden = true; q('progress').hidden = false
       q('progress').value = 0; q('progress').max = info.decompressedBytes
-      worker.postMessage({ type: 'load', selection })
-    }
-    q('form').onsubmit = event => { event.preventDefault(); if (!choosing) return; const b = validate(); if (b) load(b) }
-    worker.onmessage = ({ data: message }) => {
-      if (message.type === 'progress') {
-        const mib = Math.floor(message.bytes / 1048576)
-        q('.load-status').textContent = t('streamReadProgress', { n: mib })
-        if (info) q('progress').value = message.bytes
-        onProgress?.(phase === 'inspect' ? 0 : message.bytes / info.decompressedBytes)
-      } else if (message.type === 'inspected') {
-        info = message.info
-        if (info.requiresWindow || selectRange) choose()
-        else load(null)
-      } else if (message.type === 'loaded') finish(null, message.data)
-      else if (message.type === 'error') {
-        if (info && ['windowTooLarge', 'windowTooComplex'].includes(message.error.code)) {
-          choose(); q('.range-error').textContent = t(message.error.code)
-        }
-        else finish(Object.assign(new Error(message.error.message), { code: message.error.code }))
+      try {
+        const result = await client.request(overview ? 'overview' : 'load', { selection }, { onProgress: report })
+        finish(null, result.data)
+      } catch (error) {
+        if (settled) return
+        if (!overview && ['windowTooLarge', 'windowTooComplex'].includes(error.code)) {
+          if (selectRange) { choose(); q('.range-error').textContent = t(error.code) }
+          else void load(null, true)
+        } else finish(error)
       }
     }
-    worker.onerror = event => { event.preventDefault(); finish(new Error(event.message || 'Schematic worker failed')) }
-    worker.onmessageerror = () => finish(new Error('Could not read schematic worker result'))
+    q('form').onsubmit = event => { event.preventDefault(); if (!choosing) return; const b = validate(); if (b) load(b) }
     document.body.append(dialog); dialog.showModal()
-    worker.postMessage({ type: 'inspect', file, info: session?.file === file ? session.info : undefined })
+    client.request('inspect', { file, info: session?.file === file ? session.info : undefined }, { onProgress: report }).then(result => {
+      if (settled) return
+      info = result.info
+      if (selectRange) choose()
+      else void load(null, info.requiresWindow || forceOverview)
+    }, error => finish(error))
   })
 }

@@ -10,6 +10,10 @@ import { bakeModel } from './modelBaker.js'
 import { addBlockEffects, portalMaterial, animateObject } from './blockEffects.js'
 import { addMovingPistons } from './movingPistons.js'
 import { setEntityHitboxesVisible } from './entityHitboxes.js'
+import { createOverview, setOverviewDetail, setOverviewFilter, disposeOverview } from './overviewRenderer.js'
+import { extractSigns, extractPlayerHeads, extractBanners, extractStatues, extractDecoratedPots } from './schematicDetails.js'
+
+const DETAIL_GROUPS = ['group', 'signsGroup', 'headsGroup', 'bannersGroup', 'statuesGroup', 'potsGroup', 'entitiesGroup']
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
 const PERSPECTIVE_FOV = 60
@@ -253,6 +257,8 @@ export class Renderer {
     this._waterFogColor = new THREE.Color(0x050533)
     this._waterFog = new THREE.Fog(this._waterFogColor, -8, 48)
     this._waterSurface = null // Map<方块整数 key -> 该方块内水面世界Y>，用于判断相机是否在水面之下
+    this._waterBounds = null
+    this.detailData = null
     this._fogEnabled = true // 水下雾开关
     this._bounds = null
 
@@ -275,6 +281,8 @@ export class Renderer {
 
     this.group = new THREE.Group() // 方块网格
     this.scene.add(this.group)
+    this.overviewGroup = new THREE.Group() // 超大型投影的完整远景；精细窗口独立替换
+    this.scene.add(this.overviewGroup)
 
     this.signsGroup = new THREE.Group() // 告示牌（方块实体）
     this.scene.add(this.signsGroup)
@@ -508,6 +516,7 @@ export class Renderer {
     // 飞行模式下不跑 OrbitControls.update()——它会 lookAt(target) 覆盖掉原地转头的旋转
     if (this.moveMode === 'orbit') this.controls.update()
     this.onCameraFrame?.()
+    this.onLodFrame?.()
     this.renderer.render(this.scene, this.camera)
   }
 
@@ -535,17 +544,18 @@ export class Renderer {
   // 相机浸入水中时蒙上原版的水下雾（深蓝黑 #050533）。复刻原版 Camera.getFluidInCamera：
   // 相机所在方块含水、且相机眼高低于该方块内的水面，才算水下。相机在结构边界外视为不在水下。
   _updateUnderwaterFog() {
-    if (!this._fogEnabled || !this._waterSurface || !this._bounds) return
+    if (!this._fogEnabled || !this._waterSurface || !this._waterBounds) return
     const cam = this.camera.position
-    const lx = Math.floor(cam.x) - this._bounds.minX
-    const ly = Math.floor(cam.y) - this._bounds.minY
-    const lz = Math.floor(cam.z) - this._bounds.minZ
+    const bounds = this._waterBounds
+    const lx = Math.floor(cam.x) - bounds.minX
+    const ly = Math.floor(cam.y) - bounds.minY
+    const lz = Math.floor(cam.z) - bounds.minZ
     let underwater = false
     if (
       lx >= 0 && ly >= 0 && lz >= 0 &&
-      lx < this._bounds.width && ly < this._bounds.height && lz < this._bounds.depth
+      lx < bounds.width && ly < bounds.height && lz < bounds.depth
     ) {
-      const key = lx + lz * this._bounds.width + ly * (this._bounds.width * this._bounds.depth)
+      const key = lx + lz * bounds.width + ly * (bounds.width * bounds.depth)
       const surfaceY = this._waterSurface.get(key)
       underwater = surfaceY !== undefined && cam.y < surfaceY
     }
@@ -621,6 +631,12 @@ export class Renderer {
   // disposeTextures=true 时连同方块贴图一起释放（资源包切换时贴图缓存已失效）。
   // 层级/区域切换等只重建方块网格的场景传 false，复用缓存里的贴图，避免反复上传。
   clear(disposeTextures = false) {
+    if (this.detailData) this.clearDetail(disposeTextures)
+    disposeOverview(this.overviewGroup)
+    this.overviewGroup?.removeFromParent()
+    this.overviewGroup = new THREE.Group()
+    this.scene.add(this.overviewGroup)
+    this.detailData = null
     this.clearBlocks(disposeTextures)
     this.clearSigns()
     this.clearHeads()
@@ -632,6 +648,7 @@ export class Renderer {
     this.clearRegionWireframes()
     // 清除水下雾状态（下次载入时重新计算水面）
     this._waterSurface = null
+    this._waterBounds = null
     this._bounds = null
     if (this.scene.fog) {
       this.scene.fog = null
@@ -768,8 +785,8 @@ export class Renderer {
     // 分批次渲染，避免「全方块」这类上千个展示框一次性并发加载贴图/模型，
     // 超过浏览器并发上限导致部分贴图瞬时加载失败（进而整框报「实体渲染失败」）。
     const BATCH = 50
-    const meshes = []
     for (let i = 0; i < entities.length; i += BATCH) {
+      this._checkCurrent?.()
       const chunk = entities.slice(i, i + BATCH)
       const results = await Promise.all(
         chunk.map((e) =>
@@ -779,9 +796,9 @@ export class Renderer {
           }),
         ),
       )
-      meshes.push(...results)
+      for (const mesh of results) if (mesh) this.entitiesGroup.add(mesh)
+      this._checkCurrent?.()
     }
-    for (const m of meshes) if (m) this.entitiesGroup.add(m)
     setEntityHitboxesVisible(this.entitiesGroup, this.showEntityHitboxes)
   }
 
@@ -795,10 +812,12 @@ export class Renderer {
     this.clearHeads()
     if (!heads || !heads.length) return
     for (const head of heads) {
+      this._checkCurrent?.()
       // 有皮肤 URL 就加载玩家皮肤，否则用默认 Steve 皮肤
       const skinTex = head.skinUrl
         ? await assets.getExternalTexture(head.skinUrl)
         : await assets.getTexture('entity/player/wide/steve')
+      this._checkCurrent?.()
       if (!skinTex) continue
       // 立地头颅用 rotation(0-15)，墙上头颅用 facing（与 blocks.js headVariant 一致）
       const yDeg = head.facing ? (HEAD_FACING_Y[head.facing] || 0) : (Number(head.rotation) || 0) * 22.5
@@ -816,6 +835,7 @@ export class Renderer {
     this.clearBanners()
     if (!banners || !banners.length) return
     for (const b of banners) {
+      this._checkCurrent?.()
       const tex = await this._makeBannerTexture(b.baseColor, b.patterns, assets)
       if (!tex) continue
       const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
@@ -838,6 +858,7 @@ export class Renderer {
         group.rotation.y = (a * Math.PI) / 180
       }
       this.bannersGroup.add(group)
+      this._checkCurrent?.()
       // BannerFlagBlockModel：旗面绕横杆处轻摆，位置相位由方块坐标决定。
       const resting = mesh.position.clone(), pivot = resting.clone().add(new THREE.Vector3(0, 5 / 6, 0))
       animateObject(mesh, age => {
@@ -854,6 +875,7 @@ export class Renderer {
     if (!statues || !statues.length) return
     for (const s of statues) {
       const tex = await assets.getTexture(s.texKey)
+      this._checkCurrent?.()
       if (!tex) continue
       const mesh = buildCopperGolemStatueMesh(tex, s.pose)
       if (!mesh) continue
@@ -869,20 +891,22 @@ export class Renderer {
     this.clearPots()
     if (!pots || !pots.length) return
     const blankTex = await assets.getTexture('entity/decorated_pot/decorated_pot_side')
+    this._checkCurrent?.()
     if (!blankTex) return
     const SIDES = ['front', 'back', 'left', 'right']
     for (const pot of pots) {
       const group = new THREE.Group()
+      this.potsGroup.add(group)
       for (let i = 0; i < 4; i++) {
         const pattern = potPatternTexture(pot.sherds && pot.sherds[SIDES[i]])
         const tex = pattern ? await assets.getTexture(pattern) : blankTex
+        this._checkCurrent?.()
         if (!tex) continue
         const mat = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide, flatShading: true })
         group.add(new THREE.Mesh(POT_SIDE_GEO[i], mat))
       }
       group.position.set(pot.x + 0.5, pot.y + 0.5, pot.z + 0.5)
       group.rotation.y = ((BANNER_FACING_Y[pot.facing] ?? 0) * Math.PI) / 180
-      this.potsGroup.add(group)
     }
   }
 
@@ -1081,12 +1105,23 @@ export class Renderer {
   // data: { palette: [{name, faces}], blocks: Map<"x,y,z" -> paletteIndex>, bounds }
   // fit=true 时把相机对准结构中心（首次载入）；fit=false 时保持相机不动（切换资源包重渲染）。
   // 返回 { faces, textures }
-  async render(data, assets, onProgress, filter, fit = true) {
+  async render(data, assets, onProgress, filter, fit = true, overviewOptions = {}) {
     this.clear()
     const { bounds } = data
     this._bounds = bounds
-    this._computeWaterSurface(data)
-    const stats = await this._buildBlockMeshes(data, assets, onProgress, filter)
+    this._assets = assets
+    let stats
+    if (data.overview) {
+      const overview = await createOverview(data, assets, overviewOptions.resolver)
+      if (overviewOptions.filter) await setOverviewFilter(overview, overviewOptions.filter)
+      this.overviewGroup.removeFromParent()
+      this.overviewGroup = overview
+      this.scene.add(overview)
+      stats = overview.userData.stats
+    } else {
+      this._computeWaterSurface(data)
+      stats = await this._buildBlockMeshes(data, assets, onProgress, filter)
+    }
     if (fit) this.fitToBounds(bounds)
     this._updateOverlay(bounds)
     this._updateRegionWireframes(data)
@@ -1131,12 +1166,148 @@ export class Renderer {
       surface.set(key, y + h)
     }
     this._waterSurface = surface
+    this._waterBounds = bounds
   }
 
   // 只重建方块网格（层级/区域变化时调用，不动相机、告示牌、头颅、实体）。
   async renderBlocks(data, assets, filter) {
+    if (data.overview) return this.updateOverviewFilter(filter)
     this.clearBlocks()
     return this._buildBlockMeshes(data, assets, null, filter)
+  }
+
+  async updateOverviewFilter(filter) {
+    await setOverviewFilter(this.overviewGroup, filter)
+    return this.overviewGroup.userData.stats || { faces: 0, textures: 0 }
+  }
+
+  // Build a replacement away from the visible scene. Every group belongs to the
+  // stage, so a cancelled request cannot remove the currently displayed window.
+  async prepareDetail(data, assets, { filter, visibleRegions, illagerExtraArms, isCurrent = () => true } = {}) {
+    const stage = Object.create(this)
+    for (const key of DETAIL_GROUPS) stage[key] = new THREE.Group()
+    stage._detailStage = true
+    stage._detailConsumed = false
+    stage._detailSharedTextures = new Set()
+    stage._detailTextureSources = new Map()
+    stage._detailMaterials = new Set()
+    stage._waterSurface = null
+    stage._waterBounds = null
+    stage._checkCurrent = () => {
+      if (!isCurrent()) throw Object.assign(new Error('Detail request superseded'), { name: 'AbortError' })
+    }
+    // Keep shared pack/skin textures alive when an abandoned stage is discarded.
+    const stageAssets = Object.create(assets)
+    for (const name of ['getTexture', 'getExternalTexture']) if (assets[name]) {
+      stageAssets[name] = async (...args) => {
+        const pending = assets[name](...args)
+        // An async accessor wraps the cached promise in a new promise. Record
+        // the cache entry itself before awaiting, including external skins.
+        const cachedPending = assets.textureCache?.get(args[0]) ?? pending
+        const texture = await pending
+        if (texture) {
+          stage._detailSharedTextures.add(texture)
+          if (!stage._detailTextureSources.has(texture)) stage._detailTextureSources.set(texture, new Map())
+          stage._detailTextureSources.get(texture).set(args[0], { cache: assets.textureCache, key: args[0], pending: cachedPending })
+        }
+        return texture
+      }
+    }
+    const visible = entry => (!visibleRegions || visibleRegions.has(entry.region)) &&
+      (!filter || filter(Math.floor(entry.x ?? entry.pos?.[0] ?? 0), Math.floor(entry.y ?? entry.pos?.[1] ?? 0), Math.floor(entry.z ?? entry.pos?.[2] ?? 0)))
+    const tileEntities = (data.tileEntities || []).filter(visible)
+    const entities = (data.entities || []).filter(visible).map(entity => ({ ...entity, renderOptions: { ...entity.renderOptions, illagerExtraArms } }))
+    try {
+      stage._checkCurrent()
+      stage._computeWaterSurface(data)
+      stage.stats = await stage._buildBlockMeshes(data, stageAssets, stage._checkCurrent, filter)
+      stage._checkCurrent()
+      await stage.renderSigns(extractSigns(tileEntities, data), stageAssets)
+      stage._checkCurrent()
+      await stage.renderPlayerHeads(extractPlayerHeads(tileEntities, data), stageAssets)
+      stage._checkCurrent()
+      await stage.renderBanners(extractBanners(tileEntities, data), stageAssets)
+      stage._checkCurrent()
+      await stage.renderStatues(extractStatues(data).filter(entry => !filter || filter(entry.x, entry.y, entry.z)), stageAssets)
+      stage._checkCurrent()
+      await stage.renderDecoratedPots(extractDecoratedPots(tileEntities, data), stageAssets)
+      stage._checkCurrent()
+      await stage.renderEntities(entities, stageAssets, data)
+      stage._checkCurrent()
+      return stage
+    } catch (error) {
+      this.disposeDetail(stage)
+      throw error
+    }
+  }
+
+  installDetail(stage, data) {
+    if (!stage?._detailStage || stage._detailConsumed) return false
+    stage._checkCurrent()
+    this.clearDetail()
+    for (const key of DETAIL_GROUPS) {
+      for (const child of [...stage[key].children]) this[key].add(child)
+    }
+    this.detailData = data
+    this._detailSharedTextures = stage._detailSharedTextures
+    this._detailTextureSources = stage._detailTextureSources
+    this._detailMaterials = stage._detailMaterials
+    this._waterSurface = stage._waterSurface
+    this._waterBounds = stage._waterBounds
+    stage._detailConsumed = true
+    setOverviewDetail(this.overviewGroup, data.bounds)
+    return true
+  }
+
+  // Only stage-owned objects are released; the asset provider owns pack textures
+  // and the renderer owns the shared banner/pot geometry templates.
+  disposeDetail(stage, { disposeTextures = false } = {}) {
+    if (!stage || stage._detailConsumed) return
+    const materials = new Set(stage._detailMaterials || []), textures = new Set(), geometries = new Set()
+    for (const key of DETAIL_GROUPS) {
+      const group = stage[key]
+      for (const child of [...group.children]) {
+        child.traverse(object => {
+          if (object.geometry && object.geometry !== BANNER_FLAG_GEO && !POT_SIDE_GEO.includes(object.geometry)) geometries.add(object.geometry)
+          for (const material of Array.isArray(object.material) ? object.material : [object.material]) if (material) materials.add(material)
+        })
+        group.remove(child)
+      }
+    }
+    for (const geometry of geometries) geometry.dispose()
+    for (const material of materials) {
+      if (material.map && !stage._detailSharedTextures?.has(material.map)) textures.add(material.map)
+      material.dispose()
+    }
+    for (const texture of stage._detailSharedTextures || []) {
+      const references = stage._detailTextureSources?.get(texture)
+      // A resource-pack change can clear the cache while an older stage is
+      // awaiting image decoding. That texture is no longer shared by the new
+      // cache and must be released even when this stage is merely cancelled.
+      const orphaned = references?.size && [...references.values()].every(({ cache, key, pending }) => cache && cache.get(key) !== pending)
+      if (disposeTextures || orphaned) textures.add(texture)
+    }
+    for (const texture of textures) texture.dispose()
+    stage._detailConsumed = true
+    stage._waterSurface = null
+    stage._waterBounds = null
+  }
+
+  clearDetail(disposeTextures = false) {
+    const holder = { _detailSharedTextures: this._detailSharedTextures, _detailTextureSources: this._detailTextureSources, _detailMaterials: this._detailMaterials }
+    for (const key of DETAIL_GROUPS) holder[key] = this[key]
+    this.disposeDetail(holder, { disposeTextures })
+    this.detailData = null
+    this._detailSharedTextures = null
+    this._detailTextureSources = null
+    this._detailMaterials = null
+    this._waterSurface = null
+    this._waterBounds = null
+    if (this.scene.fog) {
+      this.scene.fog = null
+      this.scene.background = this._bgColor === 'transparent' ? null : new THREE.Color(this._bgColor)
+    }
+    setOverviewDetail(this.overviewGroup, null)
   }
 
   async _buildBlockMeshes(data, assets, onProgress, filter) {
@@ -1144,8 +1315,11 @@ export class Renderer {
     const { palette, blocks, bounds } = data
 
     const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45), filter, data.maxFaces)
+    this._checkCurrent?.()
     await addBlockEffects(this.group, data, assets, filter)
+    this._checkCurrent?.()
     await addMovingPistons(this.group, data, assets, filter, Renderer.buildBlockPreview)
+    this._checkCurrent?.()
     if (emitted === 0) {
       return { faces: 0, textures: 0 }
     }
@@ -1154,10 +1328,10 @@ export class Renderer {
     const texKeys = Array.from(groups.keys())
     const materials = new Map()
     let loaded = 0
-    await Promise.all(
-      texKeys.map(async (gKey) => {
+    const textureJobs = texKeys.map(async (gKey) => {
         if (gKey.startsWith('special/end_')) {
           materials.set(gKey, await portalMaterial(assets, gKey === 'special/end_gateway'))
+          this._detailMaterials?.add(materials.get(gKey))
           return
         }
         // 组键可能带强度后缀（如 redstone_dust_dot|p15）
@@ -1202,11 +1376,19 @@ export class Renderer {
             if (fc != null) mat.color.setHex(fc)
           }
           materials.set(gKey, mat)
+          this._detailMaterials?.add(mat)
         }
         loaded++
         onProgress?.(0.45 + 0.5 * (loaded / Math.max(1, texKeys.length)))
       })
-    )
+    // A cancelled progress callback can reject one texture job while siblings
+    // are still running. Finish those jobs before disposing a staged window.
+    if (this._detailStage) {
+      const results = await Promise.allSettled(textureJobs)
+      const failed = results.find(result => result.status === 'rejected')
+      if (failed) throw failed.reason
+    } else await Promise.all(textureJobs)
+    this._checkCurrent?.()
 
     if (materials.size === 0 && groups.size > 0) {
       throw new Error(`贴图加载失败：${texKeys.length} 张贴图都未能加载（请确认已运行 npm run setup）`)
@@ -1240,7 +1422,10 @@ export class Renderer {
       if (mat.uniforms?.gameTime) animateObject(mesh, age => { mat.uniforms.gameTime.value = (age % 24000) / 24000 })
       this.group.add(mesh)
       // 超大几何体上传 GPU 时也定期让出主线程，避免最后一段卡顿
-      if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
+      if ((++i & 3) === 0) {
+        await new Promise((r) => setTimeout(r, 0))
+        this._checkCurrent?.()
+      }
     }
 
     return { faces: emitted, textures: materials.size }

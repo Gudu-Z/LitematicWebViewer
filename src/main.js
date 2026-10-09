@@ -4,6 +4,7 @@ import './styles.css'
 import { extractPlayerHeads, extractSigns, extractBanners, extractStatues, extractDecoratedPots } from './schematicDetails.js'
 import { ViewerPacks } from './viewerPacks.js'
 import { loadSchematic, rangeLabel } from './schematicLoader.js'
+import { SchematicLod } from './schematicLod.js'
 import { AssetProvider } from './assets.js'
 import { BlockModelResolver } from './blocks.js'
 import { Renderer } from './renderer.js'
@@ -53,7 +54,13 @@ let currentData = null
 let busy = false
 let currentFileName = ''
 let currentLoadSession = null
+let lodController = null, lodState = null
 let currentFile = null, integrationBridge, appearance, themeBackground
+
+window.addEventListener('pagehide', event => {
+  lodController?.suspend()
+  if (!event.persisted) { lodController?.dispose(); currentLoadSession?.dispose?.() }
+})
 
 // 视图状态：渲染模式 / 当前层 / 可见区域 / 各显示开关
 const view = {
@@ -80,6 +87,7 @@ const imageExport = renderer ? new ImageExport({
 }) : null
 function openImageExport() {
   if (busy || !imageExport) return
+  lodController?.suspend()
   closeMobilePanels()
   try { imageExport.open() }
   catch (error) { ui.showError(t('webglInitFailed') + error.message) }
@@ -174,6 +182,8 @@ document.getElementById('welcomeOpenBtn').addEventListener('click', () => fileIn
 document.getElementById('packBtn').addEventListener('click', () => packInput.click())
 document.getElementById('clearBtn').addEventListener('click', () => {
   if (busy) return
+  lodController?.dispose(); lodController = null; lodState = null
+  currentLoadSession?.dispose?.()
   renderer?.clear()
   currentData = null
   currentFile = null
@@ -407,12 +417,14 @@ document.getElementById('changeRangeBtn').addEventListener('click', () => {
 
 function updateLoadedRange() {
   const label = document.getElementById('loadedRange')
-  label.hidden = !currentData?.selection
-  label.textContent = currentData?.selection ? t('loadedRange', { n: currentData.blocks.size.toLocaleString(), range: rangeLabel(currentData.selection) }) : ''
-  document.getElementById('changeRangeBtn').hidden = !currentLoadSession
+  label.hidden = !currentData?.selection && !currentData?.overview
+  label.textContent = currentData?.overview
+    ? t('loadedOverview') + '\n' + t(({ loading: 'detailLoading', detail: 'detailReady', limited: 'detailLimited' })[lodState?.kind] || 'detailApproach', { n: (lodState?.count || 0).toLocaleString() })
+    : currentData?.selection ? t('loadedRange', { n: currentData.blocks.size.toLocaleString(), range: rangeLabel(currentData.selection) }) : ''
+  document.getElementById('changeRangeBtn').hidden = !currentLoadSession || !!currentData?.overview
 }
 
-async function openFile(file, camera, selectRange = false) {
+async function openFile(file, camera, selectRange = false, forceOverview = false) {
   if (busy) return false
   if (!renderer) {
     ui.showError(t('renderUnavailable'))
@@ -420,6 +432,7 @@ async function openFile(file, camera, selectRange = false) {
   }
   setBusy(true)
   let renderingStarted = false
+  let nextSession = null
   integrationBridge.loading = true
   integrationBridge.notify('loading', { message: t('parsingFile'), progress: 0 })
   ui.clearError()
@@ -429,22 +442,26 @@ async function openFile(file, camera, selectRange = false) {
     const loaded = await loadSchematic(file, {
       session: currentLoadSession?.file === file ? currentLoadSession : undefined,
       selectRange,
+      forceOverview,
       onProgress: f => {
         ui.setProgress(0.02 + f * 0.18)
         ui.setStatusKey('parsingFilePct', { p: Math.round(f * 100) })
       },
     })
+    nextSession = loaded.session
     const data = loaded.data
     ui.setProgress(0.2)
 
     const palette = data.palette
     ui.setStatusKey('statusParsing', { n: palette.length })
-    const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
-    palette.forEach((p, i) => {
-      p.baked = baked[i]
-    })
+    if (!data.overview) {
+      const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
+      palette.forEach((p, i) => { p.baked = baked[i] })
+    }
     ui.setProgress(0.35)
 
+    lodController?.dispose(); lodController = null; lodState = null
+    currentLoadSession?.dispose?.()
     currentData = data
     currentFile = null
     currentLoadSession = loaded.session
@@ -458,7 +475,7 @@ async function openFile(file, camera, selectRange = false) {
     updateMaterialList()
     ui.setStatusKey('statusGeometry', { n: data.blocks.size.toLocaleString() })
     renderingStarted = true
-    const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
+    const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6), null, true, { resolver, filter: makeOverviewFilter() })
     await renderCurrentSigns()
     await renderCurrentPlayerHeads()
     await renderCurrentBanners()
@@ -473,17 +490,34 @@ async function openFile(file, camera, selectRange = false) {
     const entityNote = data.entities?.length ? t('statusEntities', { n: data.entities.length }) : ''
     ui.setStatusKey('statusDone', { faces: stats.faces.toLocaleString(), textures: stats.textures, entities: entityNote })
     if (data.selection && !data.blocks.size && !data.entities.length) ui.setStatusKey('emptyRange')
+    if (data.overview) {
+      ui.setStatusKey('overviewReady', { faces: stats.faces.toLocaleString() })
+      lodController = new SchematicLod({
+        renderer, data, session: currentLoadSession, assets, resolver,
+        paused: () => busy || !!imageExport?.isOpen || document.hidden,
+        filter: makeOverviewFilter,
+        options: () => ({ filter: makeBlockFilter(), visibleRegions: view.visibleRegions, illagerExtraArms: view.illagerExtraArms }),
+        onState: state => { lodState = state; updateLoadedRange() },
+      })
+    }
     ui.setProgress(1)
     currentFile = file
     integrationBridge.notify('loaded', { name: file.name, message: ui.statusEl.textContent, progress: 1 })
     integrationBridge.cameraChanged()
     return true
   } catch (e) {
+    if (nextSession && currentLoadSession !== nextSession) nextSession.dispose?.()
     if (e?.name === 'AbortError') {
       ui.setProgress(currentData ? 1 : 0)
       ui.setStatusKey('loadCancelled')
       integrationBridge.notify(currentData ? 'loaded' : 'waiting', { message: t('loadCancelled'), progress: currentData ? 1 : 0 })
       return false
+    }
+    if (renderingStarted && !selectRange && !forceOverview && !currentData?.overview && e?.code === 'windowTooComplex') {
+      // A small file can still contain unusually expensive models. Fall back to
+      // the whole-scene overview automatically, without asking for coordinates.
+      setBusy(false)
+      return await openFile(file, camera, false, true)
     }
     console.error(e)
     if (renderingStarted) renderer.clear()
@@ -518,13 +552,14 @@ async function reRenderCurrent() {
   // 资源包集合已变化：贴图缓存已被清空，这里同步移除旧网格并释放其贴图，
   // 避免旧贴图残留（泄漏）或在异步重解析期间被动画循环重新上传。
   renderer.clear(true)
+  lodController?.reset()
   resolver.clear()
   const palette = currentData.palette
-  const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
-  palette.forEach((p, i) => {
-    p.baked = baked[i]
-  })
-  await renderer.render(currentData, assets, (p) => ui.setProgress(p), makeBlockFilter(), false)
+  if (!currentData.overview) {
+    const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
+    palette.forEach((p, i) => { p.baked = baked[i] })
+  }
+  await renderer.render(currentData, assets, (p) => ui.setProgress(p), makeBlockFilter(), false, { resolver, filter: makeOverviewFilter() })
   await renderCurrentSigns()
   await renderCurrentPlayerHeads()
   await renderCurrentBanners()
@@ -534,35 +569,40 @@ async function reRenderCurrent() {
 }
 
 // 渲染当前结构里的告示牌
+function renderedData() { return currentData?.overview ? renderer?.detailData : currentData }
 async function renderCurrentSigns() {
-  if (!currentData || !renderer) return
-  const tes = filterByRegion(currentData.tileEntities || [])
-  await renderer.renderSigns(extractSigns(tes, currentData), assets)
+  const data = renderedData()
+  if (!data || !renderer) return
+  const tes = filterByRegion(data.tileEntities || [])
+  await renderer.renderSigns(extractSigns(tes, data), assets)
 }
 
 // 渲染当前结构里的实体
 async function renderCurrentEntities() {
-  if (!currentData || !renderer) return
-  const ents = filterByRegion(currentData.entities || []).map(entity => ({
+  const data = renderedData()
+  if (!data || !renderer) return
+  const ents = filterByRegion(data.entities || []).map(entity => ({
     ...entity,
     renderOptions: { ...entity.renderOptions, illagerExtraArms: view.illagerExtraArms },
   }))
-  await renderer.renderEntities(ents, assets, currentData)
+  await renderer.renderEntities(ents, assets, data)
 }
 
 // 渲染当前结构里的玩家头颅（用玩家自己的皮肤）
 async function renderCurrentPlayerHeads() {
-  if (!currentData || !renderer) return
-  const tes = filterByRegion(currentData.tileEntities || [])
-  await renderer.renderPlayerHeads(extractPlayerHeads(tes, currentData), assets)
+  const data = renderedData()
+  if (!data || !renderer) return
+  const tes = filterByRegion(data.tileEntities || [])
+  await renderer.renderPlayerHeads(extractPlayerHeads(tes, data), assets)
 }
 
 // 渲染当前结构里的旗帜（底色 + 图案）
 async function renderCurrentBanners() {
-  if (!currentData || !renderer) return
+  const data = renderedData()
+  if (!data || !renderer) return
   try {
-    const tes = filterByRegion(currentData.tileEntities || [])
-    await renderer.renderBanners(extractBanners(tes, currentData), assets)
+    const tes = filterByRegion(data.tileEntities || [])
+    await renderer.renderBanners(extractBanners(tes, data), assets)
   } catch (e) {
     console.error('旗帜渲染失败', e)
   }
@@ -570,9 +610,10 @@ async function renderCurrentBanners() {
 
 // 渲染当前结构里的铜傀儡雕像
 async function renderCurrentStatues() {
-  if (!currentData || !renderer) return
+  const data = renderedData()
+  if (!data || !renderer) return
   try {
-    await renderer.renderStatues(extractStatues(currentData), assets)
+    await renderer.renderStatues(extractStatues(data), assets)
   } catch (e) {
     console.error('铜傀儡雕像渲染失败', e)
   }
@@ -580,10 +621,11 @@ async function renderCurrentStatues() {
 
 // 渲染当前结构里的装饰罐侧面（陶片图案）
 async function renderCurrentPots() {
-  if (!currentData || !renderer) return
+  const data = renderedData()
+  if (!data || !renderer) return
   try {
-    const tes = filterByRegion(currentData.tileEntities || [])
-    await renderer.renderDecoratedPots(extractDecoratedPots(tes, currentData), assets)
+    const tes = filterByRegion(data.tileEntities || [])
+    await renderer.renderDecoratedPots(extractDecoratedPots(tes, data), assets)
   } catch (e) {
     console.error('装饰罐渲染失败', e)
   }
@@ -602,6 +644,11 @@ function filterByRegion(list) {
 }
 
 // 构造方块过滤函数（层级 + 区域），返回 null 表示无需过滤
+function makeOverviewFilter() {
+  return { mode: view.renderMode, layerY: view.layerY,
+    hiddenRegions: view.visibleRegions ? (currentData?.regions || []).filter(r => !view.visibleRegions.has(r.name)) : [],
+  }
+}
 function makeBlockFilter() {
   const mode = view.renderMode
   const layerY = view.layerY
@@ -622,6 +669,11 @@ function makeBlockFilter() {
 // 仅重渲染方块（层级/区域变化时）
 async function reRenderBlocks() {
   if (!currentData || !renderer) return
+  if (currentData.overview) {
+    lodController?.reset()
+    await renderer.updateOverviewFilter(makeOverviewFilter())
+    return
+  }
   await renderer.renderBlocks(currentData, assets, makeBlockFilter())
 }
 
@@ -723,7 +775,8 @@ function updateMaterialList() {
     return
   }
   const counts = new Map()
-  for (const gi of currentData.blocks.values()) {
+  if (currentData.materialCounts) for (const [name, count] of currentData.materialCounts) counts.set(name.replace(/^minecraft:/, ''), count)
+  else for (const gi of currentData.blocks.values()) {
     const p = currentData.palette[gi]
     const name = (p.name || '').replace(/^minecraft:/, '')
     counts.set(name, (counts.get(name) || 0) + 1)
@@ -790,6 +843,7 @@ const packManager = new ViewerPacks({
 
 function setBusy(on) {
   busy = on
+  if (on) lodController?.suspend()
   document.getElementById('app').setAttribute('aria-busy', String(on))
   document.getElementById('packSettings').setAttribute('aria-busy', String(on))
   illagerExtraArms.disabled = on || !renderer
