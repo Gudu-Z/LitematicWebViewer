@@ -3,6 +3,7 @@
 // 用 modelBaker 把模型 elements 烘焙成一组 quad（支持非完整方块的真实形状）。
 
 import { bakeModel } from './modelBaker.js'
+import { fluidHeight } from './geometry.js'
 
 // ===== 无常规 JSON 模型的方块（靠方块实体渲染器或流体系统绘制）=====
 // 这些方块的模型是空的，这里按原版渲染器手工构造几何与 UV。
@@ -166,10 +167,9 @@ function piglinHeadModel() {
   }
 }
 
-// 流体（水/岩浆）：level 决定水面高度。0=满格；1-7 每级下降 2px；8+（下落）近似薄层。
+// 无邻居信息时的流体模型沿用相同的原版自身高度；世界水面另由 geometry.js 混合角点。
 function fluidModel(texKey, level) {
-  const lvl = Number(level) || 0
-  const h = lvl <= 0 ? 16 : lvl < 8 ? 16 - 2 * lvl : 2
+  const h = fluidHeight(level) * 16
   const flow = texKey.replace('_still', '_flow')
   return {
     textures: { still: texKey, flow },

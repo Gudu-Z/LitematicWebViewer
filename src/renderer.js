@@ -1098,7 +1098,7 @@ export class Renderer {
   // 用于判断相机是否浸入水中。复刻原版 Camera.getFluidInCamera + FluidState.getHeightForCamera：
   //   - 上方是同种水 → 水续满，水面到方块顶（高度 1）
   //   - 水源且上方是完整实体方块 → 被顶满（高度 1）
-  //   - 否则 → 按 level 算（源 8/9、流动 level/9），流动水不满一格
+  //   - 否则 → 按 level 算（源/下落 8/9、流动 (8-level)/9），流动水不满一格
   // 这样即使水面不满一整个方块，只要相机眼睛低于该方块内的水面就算水下。
   _computeWaterSurface(data) {
     const { palette, blocks, bounds } = data

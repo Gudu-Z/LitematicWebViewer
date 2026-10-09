@@ -52,11 +52,11 @@ function isRedstoneDustTex(texKey) {
 }
 
 // 流体（水/岩浆）自身高度（0-1）：与原版 FluidState.getOwnHeight() = getAmount()/9 一致。
-// 原版 getAmount()：水源(level 0) → 8；流动水 → 方块状态里的 level 值；下落(level 8) → 8。
-// 故 source / falling → 8/9；flowing L → L/9。这里的 8/9 正是原版 FLUID_HEIGHT 常量。
+// LiquidBlock 的 level 是衰减等级，不是 FluidState 的 amount：
+// 水源(level 0)和下落(level 8..15) → amount 8；流动(level 1..7) → amount 8-level。
 export function fluidHeight(level) {
   const l = Number(level) || 0
-  return (l <= 0 || l >= 8) ? 8 / 9 : l / 9
+  return (l <= 0 || l >= 8) ? 8 / 9 : (8 - l) / 9
 }
 
 // 始终含水的水生植物：这些方块没有 waterlogged 属性（方块状态里永不含它），
@@ -214,8 +214,8 @@ function bubbleScatter(lx, ly, lz) {
 // 收集一个流体方块应生成的面，逐个交给 record(texKey, pos, uvs)。
 // lx/lz/ly 是局部坐标（用于邻居查找与越界判断），x/y/z 是世界坐标（用于顶点）。
 //
-// 表面高度算法按原版 FluidRenderer（1.21.11 反编译源码）移植：
-//   - getFluidHeight：同种流体取 level/9（上方有同种流体视为满格 1）；
+// 表面高度算法按原版 26.3 FluidRenderer：
+//   - getHeight：同种流体取 amount/9（上方有同种流体视为满格 1）；
 //     非同种方块：实心（原版 isSolid，树叶除外）为 -1，其余（空气等）为 0。
 //   - calculateFluidHeight：角点 = 自身 + 两相邻 + 对角 的加权平均；
 //     高度 ≥ 0.8 权重 ×10（让表面贴近高水位），< 0 的实心贡献不参与；
@@ -241,12 +241,15 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
   const giName = (gi2) => (gi2 === undefined ? '' : shortName(palette[gi2].name))
   // 同种流体（水/岩浆分开；含水方块、气泡柱都算水）
   const isFluid = (gi2) => gi2 !== undefined && !!fluidOf[gi2] && fluidOf[gi2].kind === kind
-  // 高度计算用的 isSolid：完整方块（含玻璃等透明完整方块，原版按 isSolid() 判定）→ -1 不参与平均。
-  const isSolid = (gi2) =>
+  const isFullSolid = (gi2) =>
     gi2 !== undefined && !!palette[gi2].baked && palette[gi2].baked.fullCube && !fluidOf[gi2] && !giName(gi2).endsWith('_leaves')
+  // 高度平均按 isSolid()，不等同于整面遮挡。原版半砖/楼梯的碰撞包围盒
+  // 也满足 calculateSolid 的尺寸阈值，不能把这些岸边方块当空气压低水面。
+  const isHeightSolid = (gi2) => isFullSolid(gi2) || (gi2 !== undefined && !fluidOf[gi2]
+    && (giName(gi2).endsWith('_slab') || giName(gi2).endsWith('_stairs')))
   // 面剔除用的 isCullingSolid：只有「不透明」的完整方块才遮挡水面；
   // 玻璃/树叶/格栅等透明方块的 culling shape 为空（原版 TransparentBlock），水应透过它们显示。
-  const isCullingSolid = (gi2) => isSolid(gi2) && !isTransparent(palette[gi2].name)
+  const isCullingSolid = (gi2) => isFullSolid(gi2) && !isTransparent(palette[gi2].name)
 
   // 原版 getFluidHeight
   const fluidH = (dx, dy, dz) => {
@@ -258,7 +261,7 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
       if (isFluid(get(dx, dy + 1, dz))) return 1
       return fluidHeight(nfo.level)
     }
-    return isSolid(ngi) ? -1 : 0
+    return isHeightSolid(ngi) ? -1 : 0
   }
 
   // 当前方块自身高度（原版的 n）
@@ -275,12 +278,11 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
       if (h >= 0.8) {
         sum += h * 10
         cnt += 10
-      } else if (h > 0) {
+      } else if (h >= 0) {
         sum += h
         cnt += 1
       }
-      // h <= 0（空气/实心方块）不参与平均：水面不会被边缘的空气拖低，
-      // 与游戏内实际显示一致（水面保持平齐，仅在水体内部有过渡）。
+      // 空气的 0 高度参与平均，形成水流末端/岸边坡面；仅排除实心的 -1。
     }
     if (a > 0 || b > 0) {
       const f = fluidH(dx, 0, dz)
