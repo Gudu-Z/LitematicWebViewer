@@ -6,6 +6,7 @@ import { buildInspectionModel, disposeInspectionModel, fieldsFor, inspectionItem
 import { t, optionLabel, translateDocument } from './inspection-i18n.js'
 import { createOrientationGizmo } from './orientation-gizmo.js'
 import { createInspectionSettings } from './inspection-settings.js'
+import { setEntityHitboxesVisible } from '../src/entityHitboxes.js'
 
 const $ = id => document.getElementById(id)
 const PAGE_SIZE = 24
@@ -87,6 +88,8 @@ function createView(group, entry, slot) {
     : ['nautilus', 'zombie_nautilus'].includes(group.userData.mobId) ? new THREE.Vector3(.7, .25, -1)
     : group.userData.vehicleId ? new THREE.Vector3(1, .45, .8) : new THREE.Vector3(.3, .18, 1)
   camera.position.copy(center).add(direction.clone().multiplyScalar(radius * 5)); camera.lookAt(center)
+  // Debug lines must not influence model framing (the look arrow is two blocks long).
+  setEntityHitboxesVisible(group, settings.hitboxes)
   return { scene, group, entry, slot, center, radius, camera, direction }
 }
 function animationTime(group) {
@@ -303,6 +306,10 @@ async function changePacks(packs) {
 }
 const settings = createInspectionSettings({
   onPacksChange: changePacks,
+  onHitboxesChange: enabled => {
+    for (const view of scenes) setEntityHitboxesVisible(view.group, enabled)
+    if (detailView) setEntityHitboxesVisible(detailView.group, enabled)
+  },
   onOptionsChange: async () => {
     await renderPage()
     if ($('detail').open) await rebuildDetail()

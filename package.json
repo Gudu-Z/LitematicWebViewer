@@ -7,7 +7,7 @@
     "dev": "node scripts/build-embed-sdk.mjs && vite",
     "build": "node scripts/build-embed-sdk.mjs && vite build",
     "preview": "vite preview",
-    "test:rendering": "node scripts/verify-release-coverage.mjs && node scripts/verify-entities.mjs && node scripts/verify-entity-precision.mjs && node scripts/verify-boats.mjs && node scripts/verify-special-rendering.mjs",
+    "test:rendering": "node scripts/verify-release-coverage.mjs && node scripts/verify-entities.mjs && node scripts/verify-entity-precision.mjs && node scripts/verify-boats.mjs && node scripts/verify-entity-hitboxes.mjs && node scripts/verify-special-rendering.mjs",
     "setup": "node scripts/fetch-assets.mjs && node scripts/gen-fluid-flow-blocks.mjs",
     "packs": "node scripts/copy-packs.mjs"
   },

@@ -12,6 +12,7 @@
 // 矿车在 Minecraft 中没有 JSON 模型（Java 硬编码），故用硬编码盒体 + 真实贴图近似。
 
 import * as THREE from 'three'
+import { registerEntityHitbox } from './entityHitboxes.js'
 import { BlockModelResolver } from './blocks.js'
 import { bakeModel } from './modelBaker.js'
 import { ENTITY_MODELS } from './entityModelData.js'
@@ -107,7 +108,7 @@ export async function buildEntityMesh(entity, assets, data, ancestors = new Set(
   const model = await buildSingleEntityMesh(entity, assets, data)
   if (!model) return null
   const passengers = Array.isArray(entity.nbt?.Passengers) ? entity.nbt.Passengers.filter(p => p && typeof p.id === 'string') : []
-  if (!passengers.length) return model
+  if (!passengers.length) return registerEntityHitbox(model, entity)
   // Keep each model's own orientation: the hull's -90° correction must not rotate its riders.
   const group = new THREE.Group()
   group.position.fromArray(entity.pos)
@@ -123,7 +124,7 @@ export async function buildEntityMesh(entity, assets, data, ancestors = new Set(
     child.userData.isPassenger = true
     group.add(child)
   }
-  return group
+  return registerEntityHitbox(group, entity)
 }
 
 async function buildSingleEntityMesh(entity, assets, data) {

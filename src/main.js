@@ -15,6 +15,7 @@ import { normalizeOptions } from './previewOptions.js'
 import { ViewerAppearance, readViewerAppearance } from './viewerAppearance.js'
 import { FullViewerBridge } from './fullViewerBridge.js'
 import { viewerAppearance } from './viewerOptions.js'
+import { bindEntityHitboxShortcut } from './entityHitboxes.js'
 
 const startupParams = new URLSearchParams(location.search)
 const integration = readViewerAppearance(startupParams)
@@ -59,6 +60,7 @@ const view = {
   layerY: 0,
   visibleRegions: null, // null = 全部显示；否则 Set<regionName>
   showEntities: true,
+  showEntityHitboxes: false,
   showWireframes: true,
   showDimensions: true,
   showFog: true, // 水下雾开关
@@ -117,6 +119,23 @@ try { if (!integration.themed) view.illagerExtraArms = localStorage.getItem(ILLA
 const illagerExtraArms = document.getElementById('illagerExtraArms')
 illagerExtraArms.checked = view.illagerExtraArms
 illagerExtraArms.disabled = !renderer
+
+const HITBOX_PREFERENCE = 'viewer-entity-hitboxes-v1'
+const hitboxesToggle = document.getElementById('showEntityHitboxes')
+try { if (!integration.themed) view.showEntityHitboxes = localStorage.getItem(HITBOX_PREFERENCE) === 'true' } catch {}
+hitboxesToggle.checked = view.showEntityHitboxes
+hitboxesToggle.disabled = !renderer
+renderer?.setEntityHitboxesVisible(view.showEntityHitboxes)
+function toggleEntityHitboxes(enabled) {
+  if (!renderer) return
+  view.showEntityHitboxes = !!enabled
+  hitboxesToggle.checked = view.showEntityHitboxes
+  renderer.setEntityHitboxesVisible(view.showEntityHitboxes)
+  try { if (!integration.themed) localStorage.setItem(HITBOX_PREFERENCE, String(view.showEntityHitboxes)) }
+  catch { ui.showError(t('settingsSaveFailed')) }
+}
+hitboxesToggle.addEventListener('change', () => toggleEntityHitboxes(hitboxesToggle.checked))
+bindEntityHitboxShortcut(() => { if (!busy && !imageExport?.isOpen) toggleEntityHitboxes(!view.showEntityHitboxes) })
 
 // 全局错误捕获，让任何错误都显示在页面上
 window.addEventListener('error', (e) => {

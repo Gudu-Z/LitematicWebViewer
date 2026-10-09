@@ -3,6 +3,8 @@ import { EN_NAMES } from './inspection-english.js'
 import { language } from './inspection-catalog.js'
 
 const words = {
+  '显示': 'Display', '显示实体碰撞箱': 'Show entity hitboxes',
+  'F3+B 切换。白色：碰撞箱；红色：视线高度；蓝色：朝向；黄色：乘坐位置。': 'Toggle with F3+B. White: hitbox; red: eye height; blue: look direction; yellow: riding position.',
   '姿势': 'Pose', '奔跑': 'Running', '星形': 'Star',
   'Minecraft 方块与生物模型图鉴 | LitematicWebViewer': 'Minecraft Block & Mob Model Catalog | LitematicWebViewer',
   '模型图鉴简介': 'Explore Minecraft block, mob, entity and item models in an online 3D model catalog. Search official names, switch states, baby forms, equipment, vehicles and resource packs, and preview item frames.',

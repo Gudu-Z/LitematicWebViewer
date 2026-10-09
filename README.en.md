@@ -343,6 +343,7 @@ Import multiple local ZIP packs, load or unload them, and change their order. Hi
 - **Orbit mode** (default): left-drag to rotate, wheel to zoom, right-drag to pan.
 - **Fly mode** (automatically entered with W/A/S/D): left-drag to look, W/A/S/D to move along the view direction, right-drag to pan, wheel to adjust speed, Space/Shift to move vertically.
 - **E / Q**: move to the next/previous layer when using layer slicing.
+- **F3+B**: toggle entity hitboxes, also available in Settings and the model catalog.
 - **Locate here**: set the current layer to the camera's height.
 - **Fit view**: center the build while leaving room for the side panels.
 - Top-right buttons: **image download** opens image export; **eye** toggles the interface; **grid** switches perspective/orthographic projection (highlighted in orthographic mode); **block catalog** opens the catalog in a new tab; **globe** switches language; **gear** opens settings; GitHub opens the repository.
@@ -371,6 +372,10 @@ Browse the [online model catalog](https://lwv.loafing.club/scripts/entity-previe
 The catalog supports All / Blocks / Mobs / Entities categories, Chinese or English names and IDs, pagination, animation pause and language switching. Settings supports loading, unloading, ordering and importing resource packs. Higher packs take priority; missing assets fall back to vanilla. XK is the default on first use; unload all packs for vanilla. Imported files, ordering and fun options are saved in the browser. Language and search filters remain in the URL, including compatibility with older `pack=xk` / `pack=vanilla` links.
 
 Both the main viewer's **Display & controls** settings and the catalog include the “巨儒卫道士” fun toggle, disabled by default. It displays both crossed and separate arms on vindicators, evokers and illusioners. Each page remembers its own setting; changing it in the main viewer updates mobs in the current schematic immediately.
+
+Both settings panels also offer **Show entity hitboxes**, disabled by default and remembered separately. Following vanilla F3+B, white outlines show logical entity bounds, red shows eye height, blue shows look direction, and yellow shows riding positions. Dimensions use Minecraft 26.3 definitions and saved schematic state, including babies, slime sizes, pufferfish inflation, shulker opening, armor stands and boat passengers. Boxes remain aligned to world axes, independent of idle model animations.
+
+The ender dragon also has eight green part boxes for its head, neck, body, wings and tail. Schematics do not save flight history, so these use stationary history samples; transient poses use saved state rather than replaying game physics. Developer checks: `node scripts/verify-entity-hitboxes.mjs`, and after building, `node scripts/verify-entity-hitboxes-browser.mjs` for the actual pages.
 
 ![Mob category in the catalog, with searchable cards and state inspection](docs/images/render-catalog.png)
 

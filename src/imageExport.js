@@ -183,7 +183,7 @@ export class ImageExport {
       // Export's entity checkbox is independent of the main viewer's visibility.
       const visible = group.visible; group.visible = true
       group.traverseVisible(object => {
-        if (!object.geometry) return
+        if (!object.geometry || object.userData.isEntityHitbox) return
         if (!object.geometry.boundingBox) object.geometry.computeBoundingBox()
         box.union(object.geometry.boundingBox.clone().applyMatrix4(object.matrixWorld))
       })

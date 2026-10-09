@@ -70,6 +70,8 @@ const STRINGS = {
   bgColor: ['背景颜色', 'Background color'],
   sectionDisplay: ['显示', 'Display'],
   showEntities: ['显示实体', 'Show entities'],
+  showEntityHitboxes: ['显示实体碰撞箱', 'Show entity hitboxes'],
+  entityHitboxesHint: ['F3+B 切换。白色：碰撞箱；红色：视线高度；蓝色：朝向；黄色：乘坐位置。', 'Toggle with F3+B. White: hitbox; red: eye height; blue: look direction; yellow: riding position.'],
   showWireframes: ['显示区域线框', 'Show region wireframes'],
   showDimensions: ['显示尺寸', 'Show dimensions'],
   showFog: ['水下雾气', 'Underwater fog'],

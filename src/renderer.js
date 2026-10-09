@@ -9,6 +9,7 @@ import { buildEntityMesh, buildCopperGolemStatueMesh } from './entities.js'
 import { bakeModel } from './modelBaker.js'
 import { addBlockEffects, portalMaterial, animateObject } from './blockEffects.js'
 import { addMovingPistons } from './movingPistons.js'
+import { setEntityHitboxesVisible } from './entityHitboxes.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
 const PERSPECTIVE_FOV = 60
@@ -781,6 +782,12 @@ export class Renderer {
       meshes.push(...results)
     }
     for (const m of meshes) if (m) this.entitiesGroup.add(m)
+    setEntityHitboxesVisible(this.entitiesGroup, this.showEntityHitboxes)
+  }
+
+  setEntityHitboxesVisible(visible) {
+    this.showEntityHitboxes = !!visible
+    setEntityHitboxesVisible(this.entitiesGroup, visible)
   }
 
   // 渲染玩家头颅：加载对应玩家的皮肤，画成 8×8×8 头颅。heads: [{x, y, z, rotation?, facing?, skinUrl}]

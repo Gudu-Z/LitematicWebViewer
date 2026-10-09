@@ -1,11 +1,12 @@
 import { t } from './inspection-i18n.js'
 import { readResourcePack as readInspectionPack, readLocalPacks, saveLocalPack } from '../src/resourcePacks.js'
+import { bindEntityHitboxShortcut } from '../src/entityHitboxes.js'
 
 const PREFERENCES = 'model-catalog-settings-v1'
-export function createInspectionSettings({ onPacksChange, onOptionsChange }) {
+export function createInspectionSettings({ onPacksChange, onOptionsChange, onHitboxesChange }) {
   const $ = id => document.getElementById(id)
   const library = new Map()
-  let loaded = [], extraArms = false, busy = false, status = null
+  let loaded = [], extraArms = false, hitboxes = false, busy = false, status = null
   const renderOptions = () => ({ illagerExtraArms: extraArms })
   function message(key, detail = '', error = false) {
     status = key ? { key, detail, error } : null
@@ -13,7 +14,7 @@ export function createInspectionSettings({ onPacksChange, onOptionsChange }) {
     $('settings-status').dataset.error = String(error)
   }
   function save() {
-    try { localStorage.setItem(PREFERENCES, JSON.stringify({ loaded, extraArms })) }
+    try { localStorage.setItem(PREFERENCES, JSON.stringify({ loaded, extraArms, hitboxes })) }
     catch { message('无法保存设置，当前会话仍可使用。', '', true) }
   }
   async function resolvePacks(ids) {
@@ -82,6 +83,7 @@ export function createInspectionSettings({ onPacksChange, onOptionsChange }) {
     renderList('available-packs', [...library.keys()].filter(id => !loaded.includes(id)), false)
     $('import-packs').disabled = busy; $('pack-files').disabled = busy
     $('illager-extra-arms').disabled = busy; $('illager-extra-arms').checked = extraArms
+    $('entity-hitboxes').disabled = busy; $('entity-hitboxes').checked = hitboxes
     $('settings').setAttribute('aria-busy', String(busy))
     if (status) message(status.key, status.detail, status.error)
   }
@@ -90,6 +92,7 @@ export function createInspectionSettings({ onPacksChange, onOptionsChange }) {
     let preferences = {}, warning = ''
     try { preferences = JSON.parse(localStorage.getItem(PREFERENCES) || '{}') || {} } catch {}
     extraArms = preferences.extraArms === true
+    hitboxes = preferences.hitboxes === true
     try {
       const response = await fetch(new URL('../resourcepacks/manifest.json', location.href))
       if (!response.ok) throw Error(t('资源包下载失败'))
@@ -147,5 +150,12 @@ export function createInspectionSettings({ onPacksChange, onOptionsChange }) {
     const enabled = $('illager-extra-arms').checked
     run(async () => { extraArms = enabled; await onOptionsChange(); save() })
   }
-  return { init, render, renderOptions, get loaded() { return [...loaded] }, get busy() { return busy } }
+  function toggleHitboxes(enabled) {
+    if (busy) { $('entity-hitboxes').checked = hitboxes; return }
+    hitboxes = !!enabled; $('entity-hitboxes').checked = hitboxes
+    onHitboxesChange?.(hitboxes); save()
+  }
+  $('entity-hitboxes').onchange = () => toggleHitboxes($('entity-hitboxes').checked)
+  bindEntityHitboxShortcut(() => toggleHitboxes(!hitboxes))
+  return { init, render, renderOptions, get hitboxes() { return hitboxes }, get loaded() { return [...loaded] }, get busy() { return busy } }
 }
