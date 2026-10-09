@@ -3,7 +3,7 @@
 import './styles.css'
 import { extractPlayerHeads, extractSigns, extractBanners, extractStatues, extractDecoratedPots } from './schematicDetails.js'
 import { ViewerPacks } from './viewerPacks.js'
-import { parseLitematica } from './litematica.js'
+import { loadSchematic, rangeLabel } from './schematicLoader.js'
 import { AssetProvider } from './assets.js'
 import { BlockModelResolver } from './blocks.js'
 import { Renderer } from './renderer.js'
@@ -52,6 +52,7 @@ try {
 let currentData = null
 let busy = false
 let currentFileName = ''
+let currentLoadSession = null
 let currentFile = null, integrationBridge, appearance, themeBackground
 
 // 视图状态：渲染模式 / 当前层 / 可见区域 / 各显示开关
@@ -143,7 +144,7 @@ window.addEventListener('error', (e) => {
 })
 window.addEventListener('unhandledrejection', (e) => {
   const r = e.reason
-  ui.showError(t('runtimeError') + ((r && (r.message || r)) || '未知错误'))
+  ui.showError(t('runtimeError') + (r?.code ? t(r.code) : ((r && (r.message || r)) || '未知错误')))
 })
 
 // 启动自检
@@ -176,6 +177,8 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   renderer?.clear()
   currentData = null
   currentFile = null
+  currentLoadSession = null
+  updateLoadedRange()
   currentFileName = ''; document.body.classList.remove('has-model')
   closeMobilePanels()
   resetViewForClear()
@@ -398,26 +401,40 @@ window.addEventListener('drop', (e) => {
   else openFile(f)
 })
 
-async function openFile(file, camera) {
+document.getElementById('changeRangeBtn').addEventListener('click', () => {
+  if (currentLoadSession) openFile(currentLoadSession.file, undefined, true)
+})
+
+function updateLoadedRange() {
+  const label = document.getElementById('loadedRange')
+  label.hidden = !currentData?.selection
+  label.textContent = currentData?.selection ? t('loadedRange', { n: currentData.blocks.size.toLocaleString(), range: rangeLabel(currentData.selection) }) : ''
+  document.getElementById('changeRangeBtn').hidden = !currentLoadSession
+}
+
+async function openFile(file, camera, selectRange = false) {
   if (busy) return false
   if (!renderer) {
     ui.showError(t('renderUnavailable'))
     return false
   }
   setBusy(true)
-  currentFile = null
+  let renderingStarted = false
   integrationBridge.loading = true
   integrationBridge.notify('loading', { message: t('parsingFile'), progress: 0 })
   ui.clearError()
   try {
     ui.setStatusKey('parsingFile')
     ui.setProgress(0.02)
-    const buffer = await file.arrayBuffer()
-
-    const data = await parseLitematica(buffer, (f) => {
-      ui.setProgress(0.02 + f * 0.18)
-      ui.setStatusKey('parsingFilePct', { p: Math.round(f * 100) })
+    const loaded = await loadSchematic(file, {
+      session: currentLoadSession?.file === file ? currentLoadSession : undefined,
+      selectRange,
+      onProgress: f => {
+        ui.setProgress(0.02 + f * 0.18)
+        ui.setStatusKey('parsingFilePct', { p: Math.round(f * 100) })
+      },
     })
+    const data = loaded.data
     ui.setProgress(0.2)
 
     const palette = data.palette
@@ -429,11 +446,18 @@ async function openFile(file, camera) {
     ui.setProgress(0.35)
 
     currentData = data
+    currentFile = null
+    currentLoadSession = loaded.session
     currentFileName = file.name
     document.getElementById('fileName').textContent = currentFileName
     document.body.classList.add('has-model'); closeMobilePanels()
     resetViewForData(data)
+    updateLoadedRange()
+    ui.showMetadata(data.metadata)
+    updateRegionUI()
+    updateMaterialList()
     ui.setStatusKey('statusGeometry', { n: data.blocks.size.toLocaleString() })
+    renderingStarted = true
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
     await renderCurrentSigns()
     await renderCurrentPlayerHeads()
@@ -448,15 +472,24 @@ async function openFile(file, camera) {
     updateMaterialList()
     const entityNote = data.entities?.length ? t('statusEntities', { n: data.entities.length }) : ''
     ui.setStatusKey('statusDone', { faces: stats.faces.toLocaleString(), textures: stats.textures, entities: entityNote })
+    if (data.selection && !data.blocks.size && !data.entities.length) ui.setStatusKey('emptyRange')
     ui.setProgress(1)
     currentFile = file
     integrationBridge.notify('loaded', { name: file.name, message: ui.statusEl.textContent, progress: 1 })
     integrationBridge.cameraChanged()
     return true
   } catch (e) {
+    if (e?.name === 'AbortError') {
+      ui.setProgress(currentData ? 1 : 0)
+      ui.setStatusKey('loadCancelled')
+      integrationBridge.notify(currentData ? 'loaded' : 'waiting', { message: t('loadCancelled'), progress: currentData ? 1 : 0 })
+      return false
+    }
     console.error(e)
+    if (renderingStarted) renderer.clear()
     ui.setProgress(0)
     if (e && e.code === 'FILE_TOO_LARGE') ui.showError(t('fileTooLarge'))
+    else if (e?.code) ui.showError(t(e.code))
     else ui.showError(t('loadFailed') + (e.message || e))
     return false
   } finally {
@@ -711,6 +744,7 @@ function refreshLocalizedUI() {
   document.getElementById('langLabel').textContent = getLang() === 'zh' ? '中' : 'EN'
   ui.refreshStatus()
   ui.showMetadata(currentData?.metadata || {})
+  updateLoadedRange()
   updateRegionUI()
   updateMaterialList()
   updatePackPanels()
@@ -761,7 +795,7 @@ function setBusy(on) {
   illagerExtraArms.disabled = on || !renderer
   for (const id of ['imageExportBtn', 'welcomeExportBtn']) document.getElementById(id).disabled = on || !renderer
   imageExport?.setLoading(on)
-  for (const el of document.querySelectorAll('#openBtn, #clearBtn, #welcomeOpenBtn, #fileInput, #packBtn, #packInput, #controlPanel button, #controlPanel select, #regionListBody button')) {
+  for (const el of document.querySelectorAll('#openBtn, #clearBtn, #changeRangeBtn, #welcomeOpenBtn, #fileInput, #packBtn, #packInput, #controlPanel button, #controlPanel select, #regionListBody button')) {
     el.disabled = on || (el.id === 'clearBtn' && !currentData)
   }
   updatePackPanels()

@@ -1141,11 +1141,11 @@ export class Renderer {
 
   async _buildBlockMeshes(data, assets, onProgress, filter) {
     this._assets = assets
-    await addBlockEffects(this.group, data, assets, filter)
-    await addMovingPistons(this.group, data, assets, filter, Renderer.buildBlockPreview)
     const { palette, blocks, bounds } = data
 
-    const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45), filter)
+    const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45), filter, data.maxFaces)
+    await addBlockEffects(this.group, data, assets, filter)
+    await addMovingPistons(this.group, data, assets, filter, Renderer.buildBlockPreview)
     if (emitted === 0) {
       return { faces: 0, textures: 0 }
     }

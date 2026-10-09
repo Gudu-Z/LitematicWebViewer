@@ -31,6 +31,7 @@ Preview Minecraft `.litematic` / `.litematica` schematics—building blueprints 
 - Perspective and orthographic projection, with perspective as the default. Orthographic views help compare dimensions and inspect structures.
 - Image export studio with isometric views, transparent PNGs, custom resolution and aspect ratios, using the current schematic, resource packs and layer selection.
 - Region visibility and layer slicing: all, below, above or a single layer.
+- Load large schematics by coordinate range, with streaming reads in a worker, cancellation, suggested ranges and range switching.
 - Material counts by block, translated names and ascending/descending sorting.
 - Chinese and English interfaces.
 - Model catalog with categories, bilingual search, state combinations, and world, item, spawn egg and item-frame views.
@@ -40,6 +41,14 @@ Preview Minecraft `.litematic` / `.litematica` schematics—building blueprints 
 - Full-viewer embeds with archive branding, configurable panels and tools, compact layouts, and theme continuity when opening from a quick preview.
 
 For everyday use, open the [online viewer](https://lwv.loafing.club/). The installation instructions below are for local use and development.
+
+### Large schematics
+
+The full viewer inspects large files before showing a range picker. Enter inclusive X/Y/Z coordinates, or choose **Suggested range** or **Full-height center column**, then load that portion. Use **Change loaded range** in the file panel to switch areas. Files stay local and do not need to be split or saved again.
+
+Each range can contain up to 1,048,576 cells. Complex geometry or dense entity collections may require a smaller range. Build info retains source totals; the material list counts only loaded blocks. Gzip requires sequential reads, so inspection and each range change scan the file; reading can be cancelled. This provides detailed partial previews, without city-wide LOD or automatic loading as the camera moves.
+
+Run `npm run test:schematics` for regression checks, or append `-- --large` when the two local city files are available. After building, run `node scripts/verify-schematic-window-browser.mjs` to verify uploads, cancellation, range changes and WebGL output; append `--large` to include both city files.
 
 ## Embedded preview cards
 
