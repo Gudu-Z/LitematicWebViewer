@@ -13,6 +13,7 @@
 
 import * as THREE from 'three'
 import { registerEntityHitbox } from './entityHitboxes.js'
+import { minecartRenderPose } from './entityMinecart.js'
 import { BlockModelResolver } from './blocks.js'
 import { bakeModel } from './modelBaker.js'
 import { ENTITY_MODELS } from './entityModelData.js'
@@ -654,49 +655,15 @@ async function buildArmorStand(entity, assets) {
   return group
 }
 
-// 矿车：原版 MinecartEntityModel（5 部件）+ minecart.png 贴图（+ 内容方块）。
-// 原版模型不含车轮（轮子在旧版由渲染器单独绘制、这份源码里已移除），故不加。
-// 铁轨 shape -> 前进方向 [dx, dy, dz]（dy=1 表示上坡）。方向取「正方向」，矿车左右对称故无碍。
-const RAIL_SHAPES = {
-  north_south: [0, 0, 1],
-  east_west: [1, 0, 0],
-  ascending_east: [1, 1, 0],
-  ascending_west: [-1, 1, 0],
-  ascending_north: [0, 1, -1],
-  ascending_south: [0, 1, 1],
-  south_east: [1, 0, 1],
-  south_west: [-1, 0, 1],
-  north_west: [-1, 0, -1],
-  north_east: [1, 0, -1],
-}
-
-const RAIL_NAMES = new Set(['rail', 'powered_rail', 'detector_rail', 'activator_rail'])
-
-// 查找矿车所在铁轨的前进方向：先查脚下方块，再查下一格（矿车可能停在 ascending 铁轨顶端）。
-function railDirectionAt(data, x, y, z) {
-  if (!data?.blocks || !data?.palette || !data?.bounds) return null
-  const { blocks, palette, bounds } = data
-  const cx = Math.floor(x)
-  const cz = Math.floor(z)
-  const W = bounds.width
-  const strideY = W * bounds.depth
-  for (const cy of [Math.floor(y), Math.floor(y) - 1]) {
-    const key = (cx - bounds.minX) + (cz - bounds.minZ) * W + (cy - bounds.minY) * strideY
-    const gi = blocks.get(key)
-    if (gi === undefined) continue
-    const p = palette[gi]
-    const name = (p?.name || '').replace(/^minecraft:/, '')
-    if (RAIL_NAMES.has(name)) {
-      const shape = p.properties?.shape
-      if (shape && RAIL_SHAPES[shape]) return RAIL_SHAPES[shape]
-    }
-  }
-  return null
-}
-
+// 矿车：逻辑实体位置与模型变换分开，坡轨修正不能移动碰撞箱或乘客。
 async function buildMinecart(entity, id, assets, data) {
   const group = new THREE.Group()
-  const [x, y, z] = entity.pos
+  group.position.fromArray(entity.pos)
+  const visual = new THREE.Group(), pose = minecartRenderPose(entity, data)
+  visual.name = 'minecart-model'
+  visual.position.fromArray(pose.offset)
+  visual.rotation.set(0, pose.yaw, pose.pitch, 'YXZ')
+  group.add(visual)
 
   const model = ENTITY_MODELS.MinecartEntityModel
   const tex = await assets.getTexture('entity/minecart/minecart')
@@ -704,13 +671,16 @@ async function buildMinecart(entity, id, assets, data) {
     ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     : new THREE.MeshLambertMaterial({ color: 0x7a7a7a })
   const body = quadsToEntityMesh(compileModel(model), bodyMat)
-  // 编译后车底在局部 y=19/16，下移使车底贴到铁轨（原版车底在 Pos 上方 1/16=0.0625）
-  body.position.set(0, -1.125, 0)
-  group.add(body)
+  // compileModel 将 Y/Z 翻转且抬高 24/16；还原到原版 scale(-1,-1,1) 的模型坐标。
+  // 0.375 的渲染抬高已放到旋转前，不能合并进这里的局部偏移。
+  body.name = 'minecart-body'
+  body.position.y = -24 / 16
+  body.rotation.y = Math.PI
+  visual.add(body)
 
   // 内容方块（漏斗/箱子/熔炉/TNT/命令方块/刷怪笼）。原版缩放 DISPLAY_BLOCK_SCALE=0.75，
   // 并按 displayOffset 上下偏移（chest=8 最高、hopper=1 最低、其余默认 6），
-  // translate(-0.5,(offset-8)/16,0.5) 后块中心 y = 0.375 + 0.75*(0.5 + (offset-8)/16)。
+  // 缩放后 translate(-0.5,(offset-8)/16,0.5)，再绕 Y 转 90°。
   const resolver = new BlockModelResolver(assets)
   let contentName = null
   let contentProps = {}
@@ -733,32 +703,14 @@ async function buildMinecart(entity, id, assets, data) {
         }),
       )
       const content = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
+      content.name = 'minecart-contents'
       content.scale.setScalar(0.75)
-      content.position.set(0, 0.375 + 0.75 * (0.5 + (contentOffset - 8) / 16), 0)
-      group.add(content)
+      content.rotation.y = Math.PI / 2
+      content.position.y = 0.75 * (0.5 + (contentOffset - 8) / 16)
+      visual.add(content)
     }
   }
 
-  group.position.set(x, y, z)
-  // 矿车朝向与铁轨一致：原版默认控制器渲染时不读实体存储的 Rotation，而是
-  // snapPositionToRail + simulateMovement(±0.3) 算出 railDirection，再
-  // yaw=atan2(dz,dx)、pitch=atan(dy)*73。本渲染器矿车模型 front 在 -x，
-  // 故 rotation.y=atan2(dz,-dx) 让车头指向铁轨前进方向，上坡时 rotation.z=-pitch 车头上仰。
-  const railDir = railDirectionAt(data, x, y, z)
-  let yawDeg, pitchDeg
-  if (railDir) {
-    const [dx, dy, dz] = railDir
-    yawDeg = (Math.atan2(dz, -dx) * 180) / Math.PI
-    const invLen = 1 / Math.hypot(dx, dy, dz)
-    pitchDeg = dy ? Math.atan(dy * invLen) * 73 : 0
-  } else {
-    // 找不到铁轨时回退到实体存储的 Rotation
-    yawDeg = 90 - (Number(entity.rotation?.[0]) || 0)
-    pitchDeg = Number(entity.rotation?.[1]) || 0
-  }
-  group.rotation.order = 'YXZ'
-  group.rotation.y = (yawDeg * Math.PI) / 180
-  group.rotation.z = -(pitchDeg * Math.PI) / 180
   return group
 }
 
