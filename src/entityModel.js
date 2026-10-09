@@ -122,6 +122,43 @@ export function quadsToEntityMesh(quads, mat) {
   return new THREE.Mesh(geo, mat)
 }
 
+// Three 默认把骨骼 matrixWorld 转成 float32，再在 shader 中消去实体世界变换。
+// 这会在大坐标处丢失模型的小数（甚至压扁模型）。原版先以 double 计算实体与相机
+// 的相对位置，ModelPart 始终在局部空间计算；这里同样不把世界坐标放进骨骼纹理。
+class EntitySkeleton extends THREE.Skeleton {
+  constructor(bones) {
+    super(bones)
+    const indices = new Map(bones.map((bone, index) => [bone, index]))
+    this.parentIndices = bones.map(bone => indices.get(bone.parent) ?? -1)
+    this.modelMatrices = bones.map(() => new THREE.Matrix4())
+    this.offsetMatrix = new THREE.Matrix4()
+  }
+
+  update() {
+    // createEntityRig 按父先子后的顺序创建骨骼；只累乘骨骼本身，不包含网格或实体的变换。
+    for (let i = 0; i < this.bones.length; i++) {
+      const matrix = this.modelMatrices[i].copy(this.bones[i].matrix)
+      const parent = this.parentIndices[i]
+      if (parent >= 0) matrix.premultiply(this.modelMatrices[parent])
+      this.offsetMatrix.multiplyMatrices(matrix, this.boneInverses[i]).toArray(this.boneMatrices, i * 16)
+    }
+    if (this.boneTexture) this.boneTexture.needsUpdate = true
+  }
+}
+
+class EntitySkinnedMesh extends THREE.SkinnedMesh {
+  // CPU 包围盒、拾取、透明面排序也使用局部蒙皮。每个顶点仅绑定一个 ModelPart，
+  // 权重恒为 1；骨骼仍留在场景树中，手持物和头部附件继续继承完整的世界变换。
+  applyBoneTransform(index, target) {
+    const boneIndex = this.geometry.attributes.skinIndex.getX(index)
+    target.applyMatrix4(this.skeleton.boneInverses[boneIndex])
+    for (let bone = this.skeleton.bones[boneIndex]; bone && bone !== this; bone = bone.parent) {
+      target.applyMatrix4(bone.matrix)
+    }
+    return target
+  }
+}
+
 // 每个原版 ModelPart 对应一根骨骼，每个顶点只受所属部件影响。
 // 保留一层一个 draw call；动画只更新骨骼矩阵，不重建几何或材质。
 export function createEntityRig(model, material) {
@@ -159,9 +196,12 @@ export function createEntityRig(model, material) {
   }
   geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndices, 4))
   geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeights, 4))
-  const mesh = new THREE.SkinnedMesh(geometry, material)
+  const mesh = new EntitySkinnedMesh(geometry, material)
+  // 在原点绑定，bindMatrix 与 bindMatrixInverse 保持单位矩阵。世界变换由 Three
+  // 的 modelViewMatrix 在双精度中合并相机变换后，再交给 GPU。
+  mesh.bindMode = THREE.DetachedBindMode
   mesh.add(root)
-  mesh.bind(new THREE.Skeleton(bones))
+  mesh.bind(new EntitySkeleton(bones))
   mesh.computeBoundingSphere()
   // 待机摆动可越出绑定姿态，留出局部空间余量，避免边缘部件被误剔除。
   mesh.boundingSphere.radius += 1.5
