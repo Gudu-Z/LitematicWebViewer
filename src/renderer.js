@@ -12,6 +12,7 @@ import { addMovingPistons } from './movingPistons.js'
 import { setEntityHitboxesVisible } from './entityHitboxes.js'
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
+const LAYER_GROUPS = ['entitiesGroup', 'signsGroup', 'headsGroup', 'bannersGroup', 'statuesGroup', 'potsGroup']
 const PERSPECTIVE_FOV = 60
 
 // 墙上告示牌的 facing -> 方向向量（文字朝向）
@@ -781,7 +782,9 @@ export class Renderer {
       )
       meshes.push(...results)
     }
-    for (const m of meshes) if (m) this.entitiesGroup.add(m)
+    for (let i = 0; i < meshes.length; i++) {
+      if (meshes[i]) this._addLayerObject(this.entitiesGroup, meshes[i], entities[i].pos[1])
+    }
     setEntityHitboxesVisible(this.entitiesGroup, this.showEntityHitboxes)
   }
 
@@ -806,7 +809,7 @@ export class Renderer {
       const mat = new THREE.MeshLambertMaterial({ map: skinTex, alphaTest: 0.5, flatShading: true })
       const mesh = new THREE.Mesh(quadsToHeadGeometry(quads), mat)
       mesh.position.set(head.x, head.y, head.z)
-      this.headsGroup.add(mesh)
+      this._addLayerObject(this.headsGroup, mesh, head.y)
     }
   }
 
@@ -837,7 +840,7 @@ export class Renderer {
         group.position.set(b.x + 0.5, b.y + 1.0, b.z + 0.5)
         group.rotation.y = (a * Math.PI) / 180
       }
-      this.bannersGroup.add(group)
+      this._addLayerObject(this.bannersGroup, group, b.y)
       // BannerFlagBlockModel：旗面绕横杆处轻摆，位置相位由方块坐标决定。
       const resting = mesh.position.clone(), pivot = resting.clone().add(new THREE.Vector3(0, 5 / 6, 0))
       animateObject(mesh, age => {
@@ -859,7 +862,7 @@ export class Renderer {
       if (!mesh) continue
       mesh.position.set(s.x + 0.5, s.y, s.z + 0.5)
       mesh.rotation.y = ((BANNER_FACING_Y[s.facing] ?? 0) * Math.PI) / 180
-      this.statuesGroup.add(mesh)
+      this._addLayerObject(this.statuesGroup, mesh, s.y)
     }
   }
 
@@ -882,7 +885,7 @@ export class Renderer {
       }
       group.position.set(pot.x + 0.5, pot.y + 0.5, pot.z + 0.5)
       group.rotation.y = ((BANNER_FACING_Y[pot.facing] ?? 0) * Math.PI) / 180
-      this.potsGroup.add(group)
+      this._addLayerObject(this.potsGroup, group, pot.y)
     }
   }
 
@@ -1013,6 +1016,31 @@ export class Renderer {
   }
 
   // —— 显示开关 ——
+  // Use the saved anchor, not the model's centre or animated bounds. Frames can
+  // contain world-space vertices, and banners deliberately extend below/above
+  // their block. A vehicle and its passengers follow the vehicle's saved layer.
+  _addLayerObject(group, object, y) {
+    object.userData.schematicLayer = Math.floor(y)
+    object.userData.layerBaseVisible = object.visible
+    this._applyLayerVisibility(object)
+    group.add(object)
+  }
+
+  _applyLayerVisibility(object) {
+    const y = object.userData.schematicLayer
+    const mode = this._layerMode || 'all', layer = this._layerY
+    const visible = mode === 'single' ? y === layer : mode === 'below' ? y <= layer : mode === 'above' ? y >= layer : true
+    object.visible = object.userData.layerBaseVisible && visible
+  }
+
+  setLayerVisibility(mode, layerY) {
+    this._layerMode = mode
+    this._layerY = layerY
+    for (const key of LAYER_GROUPS) {
+      for (const object of this[key].children) this._applyLayerVisibility(object)
+    }
+  }
+
   setEntitiesVisible(v) { this.entitiesGroup.visible = !!v }
   setWireframesVisible(v) { this.regionGroup.visible = !!v }
   setDimensionsVisible(v) { this.overlay.visible = !!v }
@@ -1054,7 +1082,7 @@ export class Renderer {
       const textPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.4), textMat)
       textPlane.position.copy(boardCenter).addScaledVector(front, 0.05)
       textPlane.setRotationFromQuaternion(quat)
-      this.signsGroup.add(textPlane)
+      this._addLayerObject(this.signsGroup, textPlane, sign.y)
     }
   }
 

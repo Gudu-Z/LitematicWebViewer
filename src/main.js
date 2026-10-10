@@ -586,10 +586,11 @@ function makeBlockFilter() {
   }
 }
 
-// 仅重渲染方块（层级/区域变化时）
+// 层级/区域变化：重建方块网格，复用实体和方块实体模型并同步层级显隐。
 async function reRenderBlocks() {
   if (!currentData || !renderer) return
   await renderer.renderBlocks(currentData, assets, makeBlockFilter())
+  renderer.setLayerVisibility(view.renderMode, view.layerY)
 }
 
 // 载入新文件时重置视图状态
@@ -597,6 +598,7 @@ function resetViewForData(data) {
   view.renderMode = 'all'
   view.layerY = data.bounds.minY
   view.visibleRegions = null
+  renderer?.setLayerVisibility('all', view.layerY)
   ui.setLayerLabel(view.layerY)
   setRenderModeControl('all')
   // 显示左侧控制面板
@@ -608,6 +610,7 @@ function resetViewForClear() {
   view.renderMode = 'all'
   view.layerY = 0
   view.visibleRegions = null
+  renderer?.setLayerVisibility('all', 0)
   ui.setLayerLabel('-')
   setRenderModeControl('all')
   updateRegionUI()
