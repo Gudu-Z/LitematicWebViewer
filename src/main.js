@@ -8,6 +8,7 @@ import { AssetProvider } from './assets.js'
 import { BlockModelResolver } from './blocks.js'
 import { Renderer } from './renderer.js'
 import { UI } from './ui.js'
+import { MaterialIcons } from './materialIcons.js'
 import { t, setLang, getLang, applyTranslations, blockName } from './i18n.js'
 import { fetchSchematic, receivePreviewFile, applyCamera } from './embedProtocol.js'
 import { ImageExport } from './imageExport.js'
@@ -25,6 +26,7 @@ setLang(previewOptions.lang)
 const container = document.getElementById('viewer')
 const ui = new UI(document.body)
 const assets = new AssetProvider()
+const materialIcons = new MaterialIcons(ui.materialListBody, assets)
 const resolver = new BlockModelResolver(assets)
 
 // 初始状态文案（默认中文）
@@ -697,6 +699,7 @@ function updateRegionUI() {
 function updateMaterialList() {
   if (!currentData) {
     ui.renderMaterialList([], view.materialSortAsc)
+    materialIcons.observe()
     return
   }
   const counts = new Map()
@@ -712,6 +715,7 @@ function updateMaterialList() {
   }))
   list.sort((a, b) => (view.materialSortAsc ? a.count - b.count : b.count - a.count))
   ui.renderMaterialList(list, view.materialSortAsc)
+  materialIcons.observe()
 }
 
 // 语言切换后刷新所有文案（静态 data-i18n + 动态面板/状态）
@@ -753,6 +757,7 @@ const packManager = new ViewerPacks({
     const replace = values => {
       assets.clearPacks()
       for (const pack of values) assets.addPack(pack.zip, pack.id ?? pack.name)
+      materialIcons.reset()
     }
     replace(packs)
     try { await reRenderCurrent() }

@@ -173,6 +173,7 @@ export class UI {
       .map(
         (m) => `
         <li>
+          <span class="material-icon" data-material="${escapeHtml(m.key || m.name)}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zm-8 4.5 8 4.5 8-4.5M12 12v9"/></svg><img width="32" height="32" alt="" hidden /></span>
           <span class="material-name" title="${escapeHtml(m.key || m.name)}">${escapeHtml(m.name)}</span>
           <span class="material-count">${m.count.toLocaleString()}</span>
         </li>`

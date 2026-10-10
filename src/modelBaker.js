@@ -86,6 +86,7 @@ export function bakeModel(model, variant, texSize = 16) {
 
       quads.push({
         texKey,
+        tintIndex: Number.isInteger(face.tintindex) ? face.tintindex : -1,
         cullface,
         shade: element.shade !== false,
         normal: computeNormal(finalVerts),

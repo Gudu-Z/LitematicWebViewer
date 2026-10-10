@@ -90,6 +90,10 @@ input[type=range] { min-width: 0; accent-color: var(--ui-accent, #8dc8ff); }
 .material-body { max-height: min(50dvh, 440px); overscroll-behavior: contain; border-top: 1px solid var(--line); }
 .material-body li { padding: 12px 4px; gap: 20px; border-bottom: 1px solid var(--line); font-size: 13px; }
 .material-body .material-name { white-space: normal; overflow-wrap: anywhere; }
+.material-icon { width: 32px; height: 32px; flex: 0 0 32px; display: grid; place-items: center; color: var(--muted); }
+.material-icon img { display: block; width: 32px; height: 32px; object-fit: contain; image-rendering: pixelated; }
+.material-icon svg { width: 24px; height: 24px; opacity: .45; }
+.material-icon.loaded svg { display: none; }
 .material-scope { margin-top: 18px; }
 .pack-empty { color: var(--muted); font-size: 12px; line-height: 1.7; }
 #welcome { position: absolute; top: calc(50% + 36px); left: 50%; transform: translate(-50%, -50%); width: min(540px, calc(100% - 40px)); text-align: center; }

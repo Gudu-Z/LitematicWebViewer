@@ -71,14 +71,19 @@ const DYE_COLORS = {
 // 返回 [{ path: "block/xxx"|"item/xxx", transform: {translation,scale,...}|null }]。
 // 各类解析为默认分支：composite 拆成多个（如床的 head+foot）；condition 取 on_false；
 // range_dispatch 取 fallback；select 取 fixed/gui/ground 的 case，否则 fallback；
-// special（箱子/头颅/旗帜等）返回空，交由 SPECIAL_MODELS 处理。
+// special（箱子/头颅/旗帜等）默认交由 SPECIAL_MODELS 处理；GUI 保留 base 以读取显示变换。
 // 注意 composite 的 transformation.translation 单位是「方块」（床 foot 偏移 [0,0,1] 即 1 格），
 // 与 display 变换的 translation（单位像素 1/16）不同。
 function resolveItemModelDef(def, out = [], context = 'fixed', item = {}) {
   if (!def || typeof def !== 'object') return out
   const t = def.type
   if (t === 'minecraft:model') {
-    if (typeof def.model === 'string') out.push({ path: def.model.replace(/^minecraft:/, ''), transform: def.transformation || null })
+    if (typeof def.model === 'string') out.push({ path: def.model.replace(/^minecraft:/, ''), transform: def.transformation || null, tints: def.tints || [] })
+    return out
+  }
+  // Special items still inherit GUI transforms from their base (heads use template_skull).
+  if (t === 'minecraft:special' && context === 'gui' && typeof def.base === 'string') {
+    out.push({ path: def.base.replace(/^minecraft:/, ''), transform: null, tints: [] })
     return out
   }
   if (t === 'minecraft:composite') {
@@ -167,7 +172,7 @@ function quadGeometry(w, h) {
 // 把一组烘焙好的 quads（verts/uvs/texKey，局部坐标 0..1）转成 Three.js 网格。
 // offset 统一加到顶点上（展示框传 -0.5，使模型居中于方块）；materialFor 按 texKey、shade 取材质。
 const quadMaterialKey = (texKey, shade) => `${texKey}|${shade !== false}`
-function quadsToMesh(quads, offset, materialFor) {
+function quadsToMesh(quads, offset, materialFor, vertexColors = false) {
   const byTex = new Map()
   for (const q of quads) {
     const key = quadMaterialKey(q.texKey, q.shade)
@@ -184,16 +189,19 @@ function quadsToMesh(quads, offset, materialFor) {
     if (!mat) continue
     const n = qs.length
     const positions = new Float32Array(n * 12)
+    const colors = vertexColors ? new Float32Array(n * 12) : null
     const uvs = new Float32Array(n * 8)
     const indices = new Uint32Array(n * 6)
     for (let i = 0; i < n; i++) {
       const q = qs[i]
+      const color = colors ? new THREE.Color(q.color ?? 0xffffff) : null
       for (let k = 0; k < 4; k++) {
         positions[i * 12 + k * 3] = q.verts[k][0] + offset[0]
         positions[i * 12 + k * 3 + 1] = q.verts[k][1] + offset[1]
         positions[i * 12 + k * 3 + 2] = q.verts[k][2] + offset[2]
         uvs[i * 8 + k * 2] = q.uvs[k][0]
         uvs[i * 8 + k * 2 + 1] = q.uvs[k][1]
+        if (color) color.toArray(colors, i * 12 + k * 3)
       }
       const b = i * 4
       // 与 geometry.js 的 writeFace 相同三角化：0,1,2 + 2,1,3
@@ -207,6 +215,7 @@ function quadsToMesh(quads, offset, materialFor) {
     const geo = new THREE.BufferGeometry()
     geo.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+    if (colors) geo.setAttribute('color', new THREE.BufferAttribute(colors, 3))
     geo.setIndex(new THREE.BufferAttribute(indices, 1))
     group.add(new THREE.Mesh(geo, mat))
   }
@@ -349,13 +358,29 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
   let itemModel = await assets.getJSON('models/item/' + name + '.json')
   const itemDef = await assets.getJSON('items/' + name + '.json')
   const modelDefs = resolveItemModelDef(itemDef?.model, [], context, item)
+  if (context === 'gui') itemModel = await resolver.loadModel(modelDefs[0]?.path || 'item/' + name) || itemModel
   // Modern definitions may select a differently named sprite (light_00..15, for example).
   // Keep directly supplied resource-pack sprites, and preserve 3D element models.
   if (!itemModel?.textures?.layer0 && modelDefs.length === 1) {
     const selected = await resolver.loadModel(modelDefs[0].path)
     if (!selected?.elements?.length && selected?.textures?.layer0) itemModel = selected
   }
-  const layer0 = itemModel?.textures?.layer0
+  const layer0 = context === 'gui' && itemModel?.elements?.length ? null : itemModel?.textures?.layer0
+  if (context === 'gui' && layer0) {
+    for (let layer = 0; layer < 5; layer++) {
+      let key = itemModel.textures['layer' + layer]
+      if (!key) continue
+      for (let i = 0; i < 16 && key?.startsWith('#'); i++) key = itemModel.textures[key.slice(1)]
+      if (!key || key.startsWith('#')) continue
+      const map = await assets.getTexture(key.replace(/^minecraft:/, ''))
+      if (!map) continue
+      const material = new THREE.MeshBasicMaterial({ map, color: guiItemTint(modelDefs[0]?.tints?.[layer]), alphaTest: .5, side: THREE.DoubleSide })
+      const sprite = new THREE.Mesh(quadGeometry(1, 1), material)
+      sprite.position.z = layer * .001
+      holder.add(sprite)
+    }
+    return holder.children.length ? holder : null
+  }
   if (layer0) {
     const texKey = String(layer0).replace(/^minecraft:/, '')
     const tex = await assets.getTexture(texKey)
@@ -415,6 +440,7 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
       const model = await resolver.loadModel(md.path)
       if (model && model.elements) {
         const b = bakeModel(model, { x: 0, y: 0 })
+        if (context === 'gui') for (const q of b.quads) q.color = guiItemTint(md.tints[q.tintIndex])
         if (b && b.quads && b.quads.length) {
           const tr = md.transform?.translation || [0, 0, 0]
           parts.push({ quads: b.quads, ox: Number(tr[0]) || 0, oy: Number(tr[1]) || 0, oz: Number(tr[2]) || 0 })
@@ -466,6 +492,8 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
       if (tex) {
         const golem = buildCopperGolemStatueMesh(tex)
         if (golem) {
+          // The GUI base expects the entity model's Y-down/Z-forward axes.
+          if (context === 'gui') golem.rotation.x = Math.PI
           golem.position.y = -0.3125
           holder.add(golem)
           holder.scale.setScalar(0.5)
@@ -501,6 +529,9 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
     }
   }
   if (baked && baked.quads && baked.quads.length) {
+    if (context === 'gui' && !usesItemModel) {
+      for (const q of baked.quads) if (q.tintIndex >= 0) q.color = 0x7cbd6b
+    }
     const materialQuads = new Map(baked.quads.map(q => [quadMaterialKey(q.texKey, q.shade), q]))
     const mats = new Map()
     // 旗帜旗面（entity/banner/base 灰度遮罩）按底色上色
@@ -515,14 +546,14 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
           // BasicItemModel 的 entityCutout/itemTranslucentCull 都会剔除背面。
           // XK 用 from > to 的反向外壳描边；双面渲染会把黄色描边变成遮住本体的实心壳。
           const Material = q.shade === false ? THREE.MeshBasicMaterial : THREE.MeshLambertMaterial
-          const mat = new Material({ map: tex, alphaTest: 0.5, side: usesItemModel ? THREE.FrontSide : THREE.DoubleSide, ...(q.shade === false ? {} : { flatShading: true }) })
+          const mat = new Material({ map: tex, alphaTest: 0.5, side: usesItemModel ? THREE.FrontSide : THREE.DoubleSide, vertexColors: context === 'gui', ...(q.shade === false ? {} : { flatShading: true }) })
           if (bannerColor && tk === 'entity/banner/base') mat.color = new THREE.Color(bannerColor)
           mats.set(key, mat)
         }
       }),
     )
     const center = baked.center || [-0.5, -0.5, -0.5]
-    holder.add(quadsToMesh(baked.quads, center, (tk, shade) => mats.get(quadMaterialKey(tk, shade))))
+    holder.add(quadsToMesh(baked.quads, center, (tk, shade) => mats.get(quadMaterialKey(tk, shade)), context === 'gui'))
     // 展示框物品总缩放 = 框体 0.5 × 模型 display.fixed 缩放（方块/床/铁砧等 0.5 → 0.25；头颅/盾牌等 1 → 0.5）。
     // 特殊 BER 方块（SPECIAL_MODELS）几何已按原版外观手工定死，fixedScale 为 null 时保持 0.4 略缩。
     const fs = fixedScale || [1, 1, 1]
@@ -613,6 +644,29 @@ export async function buildItemPreview(item, assets) {
   if (model.userData.fixedTrans) model.position.fromArray(model.userData.fixedTrans).multiplyScalar(.5)
   root.add(model)
   return root
+}
+
+// Inventory thumbnails use GUI transforms, without item-frame scaling or sprite extrusion.
+function guiItemTint(tint) {
+  if (tint?.type === 'minecraft:constant' && Number.isFinite(tint.value)) return tint.value & 0xffffff
+  // Use the same default grass tint as the schematic renderer (no biome data).
+  if (tint?.type === 'minecraft:grass') return 0x7cbd6b
+  return Number.isFinite(tint?.default) ? tint.default & 0xffffff : 0xffffff
+}
+
+export async function buildGuiItem(item, assets) {
+  const resolver = new BlockModelResolver(assets), name = shortName(item.id)
+  const definition = await assets.getJSON('items/' + name + '.json')
+  const defs = resolveItemModelDef(definition?.model, [], 'gui', item)
+  const object = await buildFrameItem(item, resolver, assets, 'gui')
+  if (!object) return null
+  const model = await resolver.loadModel(defs[0]?.path || 'item/' + name)
+  const transform = model?.display?.gui || (model ? {} : { rotation: [30, 225, 0], scale: [.625, .625, .625] })
+  object.scale.fromArray(transform.scale || [1, 1, 1])
+  object.quaternion.copy(fixedRotQuaternion(transform.rotation))
+  object.position.fromArray(transform.translation || [0, 0, 0]).multiplyScalar(1 / 16)
+  object.traverse(o => { if (o.isMesh) o.geometry.computeVertexNormals() })
+  return object
 }
 
 // 盔甲架的一个立方体部件：按原版 ModelPart.Cuboid 的 auto-UV 布局生成各面贴图。
