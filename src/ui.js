@@ -36,8 +36,9 @@ export class UI {
     // 材料清单折叠
     if (this.materialListToggle) {
       this.materialListToggle.addEventListener('click', () => {
-        this.materialListBody.classList.toggle('collapsed')
-        this.materialListToggle.classList.toggle('collapsed')
+        const collapsed = this.materialListBody.classList.toggle('collapsed')
+        this.materialListToggle.classList.toggle('collapsed', collapsed)
+        this.materialListToggle.setAttribute('aria-expanded', String(!collapsed))
       })
     }
 
@@ -160,6 +161,10 @@ export class UI {
   renderMaterialList(materials, sortAsc) {
     if (!this.materialListBody) return
     if (this.materialSortBtn) this.materialSortBtn.textContent = sortAsc ? t('sortAsc') : t('sortDesc')
+    const kinds = (materials?.length || 0).toLocaleString()
+    const total = (materials || []).reduce((sum, m) => sum + m.count, 0).toLocaleString()
+    document.getElementById('materialSummary').textContent = t('materialKinds', { n: kinds })
+    document.getElementById('materialTotals').textContent = t('materialTotals', { kinds, total })
     if (!materials || !materials.length) {
       this.materialListBody.innerHTML = `<li class="pack-empty">${t('noBlocks')}</li>`
       return

@@ -329,7 +329,7 @@ The browser opens `http://localhost:5173` automatically.
 
 1. Click **Open schematic** or drag a `.litematic` file onto the page. The home screen also offers **Browse model catalog** and **Export rendered image**.
 2. Wait for the build to appear in 3D.
-3. Use the **Render** and **Layer** controls on the left to view the entire build, a single layer, or everything above/below a layer. Regions and materials appear on the right.
+3. Use the **Render** and **Layer** controls on the left to view the entire build, a single layer, or everything above/below a layer. Toggle regions on the right, or click **Material list** to open a separate card with sortable block counts for the entire schematic. On mobile, open **Build info** first.
 4. Open the top-right **gear**. **Display & controls** contains background, visibility and camera sensitivity options; **Resource packs** manages textures. The pack summary on the left also opens pack settings.
 
 Import multiple local ZIP packs, load or unload them, and change their order. Higher packs have priority; newly imported packs go to the top. Unloaded local packs remain available for reuse. **Unload all** restores vanilla textures. Files and loading order are saved in the current browser and restored on refresh. Changing packs preserves the camera, layer and region selection.

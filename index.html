@@ -93,7 +93,7 @@
           </div>
         </div>
 
-        <button id="packSummaryBtn" class="pack-summary" type="button" aria-haspopup="dialog" aria-controls="settingsPanel"><span data-i18n="resourcePacks">资源包</span><span id="packSummary"></span><span aria-hidden="true">›</span></button>
+        <button id="packSummaryBtn" class="panel-summary" type="button" aria-haspopup="dialog" aria-controls="settingsPanel"><span data-i18n="resourcePacks">资源包</span><span id="packSummary" class="summary-value"></span><span aria-hidden="true">›</span></button>
         <details class="hint" id="operationHelp"><summary data-i18n="operationHelp">操作提示</summary>
           <p data-i18n="hint1">环绕模式：左键旋转 · 右键平移 · 滚轮缩放</p>
           <p data-i18n="hint2">飞行模式（按 WASD 切换）：左键转头 · WASD 移动 · 右键平移 · 滚轮调速</p>
@@ -162,7 +162,7 @@
       </div>
 
       <aside id="right-panel">
-        <div class="panel">
+        <div class="panel" id="infoPanelContent">
           <div id="metadataPanel"><h2 data-i18n="info">信息</h2>
           <dl id="metadata" class="metadata">
             <div class="row empty" data-i18n="metaNotLoaded">尚未加载文件</div>
@@ -175,17 +175,25 @@
             <ul id="regionListBody" class="region-body"></ul>
           </div>
 
-          <div id="materialList" class="material-list">
-            <div class="material-head">
-              <button id="materialListToggle" class="material-toggle" data-i18n-title="materialsToggleTitle" title="展开/收起材料">
-                <span data-i18n="materials">材料</span>
-              </button>
-              <button id="materialSortBtn" class="material-sort" data-i18n-title="materialSortTitle" title="切换排序">多 → 少</button>
-            </div>
-            <ul id="materialListBody" class="material-body"></ul>
-          </div>
         </div>
+        <button id="materialSummaryBtn" class="panel-summary" type="button" aria-haspopup="dialog" aria-controls="materialPanel"><span data-i18n="materialListTitle">材料列表</span><span id="materialSummary" class="summary-value"></span><span aria-hidden="true">›</span></button>
       </aside>
+
+      <dialog id="materialPanel" aria-labelledby="materialTitle">
+        <div class="settings-head">
+          <div><p class="eyebrow" data-i18n="viewerSubtitle">Minecraft 投影预览器</p><h2 id="materialTitle" data-i18n="materialListTitle">材料列表</h2></div>
+          <button id="materialCloseBtn" class="icon-btn" type="button" data-i18n-title="close" data-i18n-aria-label="close" title="关闭">×</button>
+        </div>
+        <div id="materialList" class="material-list settings-section">
+          <p id="materialTotals" class="settings-note material-totals"></p>
+          <div class="material-head">
+            <button id="materialListToggle" class="material-toggle" type="button" aria-expanded="true" aria-controls="materialListBody" data-i18n-title="materialsToggleTitle" title="展开/收起材料"><span data-i18n="materials">材料</span></button>
+            <button id="materialSortBtn" class="material-sort" type="button" data-i18n-title="materialSortTitle" title="切换排序">多 → 少</button>
+          </div>
+          <ul id="materialListBody" class="material-body" tabindex="0" data-i18n-aria-label="materialListTitle" aria-label="材料列表"></ul>
+          <p class="settings-note material-scope" data-i18n="materialScopeHint">统计整个投影的方块数量，包含所有区域和层级。</p>
+        </div>
+      </dialog>
 
       <dialog id="settingsPanel" aria-labelledby="settingsTitle">
         <div class="panel settings">

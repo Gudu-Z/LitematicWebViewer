@@ -63,7 +63,9 @@ export class ViewerAppearance {
     document.body.classList.toggle('viewer-compact', v.layout === 'compact')
     document.body.classList.toggle('viewer-dense', v.density === 'compact')
     visible('app-header', v.header)
-    for (const [key, id] of Object.entries({ file: 'filePanel', controls: 'controlPanel', metadata: 'metadataPanel', regions: 'regionList', materials: 'materialList' })) visible(id, p[key])
+    for (const [key, id] of Object.entries({ file: 'filePanel', controls: 'controlPanel', metadata: 'metadataPanel', regions: 'regionList', materials: 'materialSummaryBtn' })) visible(id, p[key])
+    visible('infoPanelContent', p.metadata || p.regions)
+    if (!p.materials) document.getElementById('materialPanel').close()
     const left = p.file || p.controls || tools.packs || tools.help, right = p.metadata || p.regions || p.materials
     visible('sidebar', left); visible('right-panel', right)
     visible('controlsPanelBtn', left); visible('infoPanelBtn', right); visible('mobilePanels', left || right)
@@ -73,6 +75,7 @@ export class ViewerAppearance {
     for (const [key, prefix] of [['regions', 'region'], ['materials', 'material']]) {
       if (previous && previous.viewer.expanded[key] === v.expanded[key]) continue
       for (const suffix of ['Body', 'Toggle']) document.getElementById(`${prefix}List${suffix}`).classList.toggle('collapsed', !v.expanded[key])
+      if (key === 'materials') document.getElementById('materialListToggle').setAttribute('aria-expanded', String(v.expanded[key]))
     }
     this.refreshLabels(options.lang)
     if (!previous || JSON.stringify([previous.theme, previous.style, previous.background, previous.viewer.panelOpacity]) !== JSON.stringify([options.theme, options.style, options.background, v.panelOpacity])) this.applyTheme()

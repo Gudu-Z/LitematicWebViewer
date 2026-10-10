@@ -202,6 +202,7 @@ document.getElementById('langBtn').addEventListener('click', () => {
 
 // Native dialog provides focus management, Escape and a backdrop on desktop and mobile.
 const settingsPanel = document.getElementById('settingsPanel')
+const materialPanel = document.getElementById('materialPanel')
 function selectSettingsTab(name) {
   if (name === 'packs' && !previewOptions.viewer.tools.packs) name = 'general'
   for (const tab of document.querySelectorAll('[data-settings-tab]')) {
@@ -217,6 +218,12 @@ function openSettings(tab) {
 }
 document.getElementById('settingsBtn').addEventListener('click', () => openSettings())
 document.getElementById('packSummaryBtn').addEventListener('click', () => openSettings('packs'))
+document.getElementById('materialSummaryBtn').addEventListener('click', () => {
+  if (!currentData || !previewOptions.viewer.panels.materials) return
+  renderer?.keys.clear()
+  if (!materialPanel.open) materialPanel.showModal()
+})
+document.getElementById('materialCloseBtn').addEventListener('click', () => materialPanel.close())
 for (const tab of document.querySelectorAll('[data-settings-tab]')) {
   tab.onclick = () => selectSettingsTab(tab.dataset.settingsTab)
   tab.onkeydown = event => {
@@ -227,10 +234,10 @@ for (const tab of document.querySelectorAll('[data-settings-tab]')) {
     selectSettingsTab(next.dataset.settingsTab); next.focus()
   }
 }
-settingsPanel.addEventListener('click', event => {
-  if (event.target !== settingsPanel) return
-  const r = settingsPanel.getBoundingClientRect()
-  if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) settingsPanel.close()
+for (const panel of [settingsPanel, materialPanel]) panel.addEventListener('click', event => {
+  if (event.target !== panel) return
+  const r = panel.getBoundingClientRect()
+  if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) panel.close()
 })
 function closeMobilePanels() {
   for (const [button, panel] of [['controlsPanelBtn', 'sidebar'], ['infoPanelBtn', 'right-panel']]) {
@@ -352,7 +359,7 @@ if (renderer) {
 
 // E / Q 调整渲染层级（E 上一层，Q 下一层；忽略输入框内的按键）
 window.addEventListener('keydown', (e) => {
-  if (busy || settingsPanel.open || imageExport?.isOpen || isTypingTarget(e)) return
+  if (busy || document.querySelector('dialog[open]') || isTypingTarget(e)) return
   if (e.code === 'KeyE') {
     e.preventDefault()
     changeLayer(1)
