@@ -36,6 +36,9 @@ jobs:
       - name: Build
         run: npm run build
 
+      - name: Verify schematic loading
+        run: npm run test:loading
+
       - name: Verify Minecraft rendering coverage
         run: npm run test:rendering
 

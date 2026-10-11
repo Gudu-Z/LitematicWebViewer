@@ -1,61 +1,54 @@
-// 校验新 decodeBlockStates 与旧 BigInt 逐块实现结果一致（覆盖跨 word / 跨半区 / 任意 startIdx）。
+// Independent BigInt reference, without requiring a huge private schematic.
+// Optional: node scripts/verify-decode.mjs <file> checks slices of every region.
+import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { gunzipSync } from 'node:zlib'
-import { parseNBT } from '../src/nbt.js'
+import { parseNBT, decompressNBT } from '../src/nbt.js'
 import { decodeBlockStates } from '../src/litematica.js'
 
-const buf = readFileSync(process.argv[2])
-const raw = new Uint8Array(gunzipSync(buf))
-const root = parseNBT(raw)
-const region = Object.values(root.Regions || {})[0]
-const longs = region.BlockStates
-const bits = Math.max(2, Math.ceil(Math.log2(region.BlockStatePalette.length)))
-
-// 旧 BigInt 实现（参考基线）
-function decodeOld(longs, bits, total, startIdx = 0) {
-  const out = new Uint32Array(total)
+function reference(longs, bits, total, start = 0) {
   const mask = (1n << BigInt(bits)) - 1n
-  for (let j = 0; j < total; j++) {
-    const i = startIdx + j
-    const start = i * bits
-    const word = Math.floor(start / 64)
-    const off = start % 64
-    let v
-    if (off + bits <= 64) {
-      v = (BigInt.asUintN(64, longs[word]) >> BigInt(off)) & mask
-    } else {
-      const low = BigInt.asUintN(64, longs[word]) >> BigInt(off)
-      const hi = BigInt.asUintN(64, longs[word + 1]) & ((1n << BigInt(off + bits - 64)) - 1n)
-      v = (low | (hi << BigInt(64 - off))) & mask
-    }
-    out[j] = Number(v)
+  return Uint32Array.from({ length: total }, (_, j) => {
+    const bit = (start + j) * bits, word = Math.floor(bit / 64), offset = bit % 64
+    let value = BigInt.asUintN(64, longs[word]) >> BigInt(offset)
+    if (offset + bits > 64) value |= BigInt.asUintN(64, longs[word + 1]) << BigInt(64 - offset)
+    return Number(value & mask)
+  })
+}
+
+const storage = new BigInt64Array(2052)
+for (let i = 0; i < storage.length; i++) {
+  storage[i] = BigInt.asIntN(64, BigInt(i) * 0x9e3779b97f4a7c15n ^ 0xfedcba9876543210n)
+}
+storage[10] = -1n; storage[11] = 0n; storage[12] = -0x8000000000000000n
+const longs = storage.subarray(2, -2) // Nonzero byteOffset must be respected.
+for (let bits = 2; bits <= 32; bits++) {
+  for (const start of [0, 1, 7, 17, 31, 32, 63, 64, 127, 1023]) {
+    const count = 1025, expected = reference(longs, bits, count, start)
+    assert.deepEqual(decodeBlockStates(longs, bits, count, start), expected, 'bits=' + bits + ', start=' + start)
+    const scratch = new Uint32Array(count + 11).fill(0xdeadbeef)
+    assert.equal(decodeBlockStates(longs, bits, count, start, scratch), scratch)
+    assert.deepEqual(scratch.subarray(0, count), expected)
+    assert.ok(scratch.subarray(count).every(n => n === 0xdeadbeef), 'Leave unused scratch space intact')
   }
-  return out
+  const end = Math.floor(longs.length * 64 / bits) - 5
+  assert.deepEqual(decodeBlockStates(longs, bits, 5, end), reference(longs, bits, 5, end))
 }
+assert.deepEqual(decodeBlockStates([...longs], 5, 111, 7), reference(longs, 5, 111, 7))
+assert.deepEqual(decodeBlockStates(new BigInt64Array(), 2, 0), new Uint32Array())
+assert.throws(() => decodeBlockStates(new BigInt64Array(1), 5, 13), RangeError, 'Reject truncated input')
+assert.throws(() => decodeBlockStates(longs, 5, 3, 0, new Uint32Array(2)), RangeError)
+console.log('PASS packed states: 2–32 bits, signed longs, word boundaries, offsets, reusable buffers and truncated input')
 
-function cmp(a, b, label) {
-  let diff = 0
-  const n = Math.min(a.length, b.length)
-  for (let i = 0; i < n; i++) if (a[i] !== b[i]) diff++
-  console.log(`${label}: 长度 ${n}, 差异 ${diff}${diff ? '  ❌' : '  ✅'}`)
-  return diff
+if (process.argv[2]) {
+  const root = parseNBT(await decompressNBT(readFileSync(process.argv[2])))
+  for (const [name, region] of Object.entries(root.Regions || root.SubRegions || {})) {
+    const { x, y, z } = region.Size, total = Math.abs(x * y * z)
+    const bits = Math.max(2, Math.ceil(Math.log2(region.BlockStatePalette.length)))
+    for (const start of new Set([0, 1, 63, Math.floor(total / 2), Math.max(0, total - 4096)])) {
+      if (start >= total) continue
+      const count = Math.min(4096, total - start)
+      assert.deepEqual(decodeBlockStates(region.BlockStates, bits, count, start), reference(region.BlockStates, bits, count, start), name)
+    }
+  }
+  console.log('PASS real schematic: sampled beginning, middle and end of every region')
 }
-
-let totalDiff = 0
-// 1) 各种 startIdx（含跨 word 起始：offsets 覆盖 0、非整 word、跨 32 半区）
-const starts = [0, 1, 7, 63, 64, 100, 1000, 123456, 1093070, 1093070 + 12345]
-for (const s of starts) {
-  const n = 10000
-  totalDiff += cmp(decodeOld(longs, bits, n, s), decodeBlockStates(longs, bits, n, s), `startIdx=${s}`)
-}
-// 2) 全量对比（4.2 亿块，会分配 1.6GB 两个数组，需足够内存）
-console.log('全量对比（较慢，请稍候）…')
-const t = Date.now()
-const a = decodeOld(longs, bits, Math.abs(region.Size.x) * Math.abs(region.Size.y) * Math.abs(region.Size.z))
-const b = decodeBlockStates(longs, bits, a.length)
-console.log(`全量解码 old ${Date.now() - t} ms`)
-let diff = 0
-for (let i = 0; i < a.length; i++) if (a[i] !== b[i]) diff++
-console.log(`全量差异：${diff} / ${a.length} ${diff ? '❌' : '✅'}`)
-totalDiff += diff
-process.exit(totalDiff ? 1 : 0)

@@ -404,7 +404,7 @@ function writeFace(g, verts, uvs, ox, oy, oz) {
 // onProgress(fraction) 每处理约 6.5 万方块回调一次进度，并让出主线程。
 //
 // 采用「两遍扫描」：第一遍统计每个贴图组的精确面数，据此分配精确大小的
-// Float32/Uint32 数组，第二遍填充。相比普通 JS 数组（每个数 8 字节 + push 扩容），
+// Float32/Uint16/Uint32 数组，第二遍填充。相比普通 JS 数组（每个数 8 字节 + push 扩容），
 // 内存减半且无扩容峰值，超大投影（上千万面）也不会撑爆内存。
 // 法线不存（每个面的 4 个顶点本就同法线，渲染用 flatShading 即可得到相同光照）。
 // 返回 { groups: Map<texKey, {positions,uvs,indices}>, emitted: 面数 }
@@ -427,6 +427,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
   const occludes = new Uint8Array(palette.length)
   const hideSame = new Uint8Array(palette.length)
   const quadsByPalette = new Array(palette.length)
+  const groupKeysByPalette = new Array(palette.length)
   for (let i = 0; i < palette.length; i++) {
     const name = palette[i].name
     const baked = palette[i].baked
@@ -441,6 +442,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
       renderable[i] = 1
       occludes[i] = baked.fullCube && !isTransparent(name) ? 1 : 0
       quadsByPalette[i] = baked.quads
+      groupKeysByPalette[i] = baked.quads.map(q => faceKey(palette, i, q))
     } else {
       quadsByPalette[i] = null
     }
@@ -487,9 +489,12 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
       // 含水方块：继续渲染方块自身的面（下面）
     }
     if (!renderable[gi]) continue
-    for (const q of quadsByPalette[gi]) {
+    const quads = quadsByPalette[gi]
+    const groupKeys = groupKeysByPalette[gi]
+    for (let qi = 0; qi < quads.length; qi++) {
+      const q = quads[qi]
       if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
-      const gKey = faceKey(palette, gi, q)
+      const gKey = groupKeys[qi]
       counts.set(gKey, (counts.get(gKey) || 0) + 1)
       emitted++
     }
@@ -504,11 +509,15 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
       : {
           positions: new Float32Array(count * 12),
           uvs: new Float32Array(count * 8),
-          indices: new Uint32Array(count * 6),
+          // 65535 是 WebGL2 的固定重启索引；满 65536 个顶点时仍使用 Uint32。
+          indices: count * 4 < 65536 ? new Uint16Array(count * 6) : new Uint32Array(count * 6),
           v: 0,
           f: 0,
         })
   }
+
+  // 调色板只保存本次构建的组引用，避免逐面查找字符串 Map，不修改共享的烘焙模型。
+  const groupsByPalette = groupKeysByPalette.map(keys => keys?.map(key => groups.get(key)))
 
   // —— 第二遍：填充几何数据 ——
   n = 0
@@ -540,10 +549,12 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
       if (!finfo.waterlogged) continue
     }
     if (!renderable[gi]) continue
-    for (const q of quadsByPalette[gi]) {
+    const quads = quadsByPalette[gi]
+    const faceGroups = groupsByPalette[gi]
+    for (let qi = 0; qi < quads.length; qi++) {
+      const q = quads[qi]
       if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
-      const gKey = faceKey(palette, gi, q)
-      writeFace(groups.get(gKey), q.verts, q.uvs, x, y, z)
+      writeFace(faceGroups[qi], q.verts, q.uvs, x, y, z)
     }
   }
 

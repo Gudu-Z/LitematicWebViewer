@@ -2,6 +2,9 @@
 // 用于解析 .litematica 文件（gzip 压缩的 NBT）。
 // LongArray 以 BigInt64Array 返回，其余类型转为普通 JS 值。
 
+export const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1
+const textDecoder = new TextDecoder()
+
 class NBTReader {
   constructor(data) {
     this.dv = new DataView(data.buffer, data.byteOffset, data.byteLength)
@@ -49,7 +52,7 @@ class NBTReader {
     this.pos += 2
     const bytes = new Uint8Array(this.dv.buffer, this.dv.byteOffset + this.pos, len)
     this.pos += len
-    return new TextDecoder().decode(bytes)
+    return textDecoder.decode(bytes)
   }
 
   byteArray() {
@@ -69,7 +72,14 @@ class NBTReader {
   longArray() {
     const len = this.i32()
     const arr = new BigInt64Array(len)
-    for (let i = 0; i < len; i++) arr[i] = this.i64()
+    // 保留 BigInt64Array 的返回格式，但直接写入两个 32 位半区，避免逐 long 创建 BigInt。
+    const words = new Uint32Array(arr.buffer)
+    const low = LITTLE_ENDIAN ? 0 : 1
+    for (let i = 0; i < len; i++) {
+      words[i * 2 + (low ^ 1)] = this.dv.getUint32(this.pos, false)
+      words[i * 2 + low] = this.dv.getUint32(this.pos + 4, false)
+      this.pos += 8
+    }
     return arr
   }
 

@@ -7,7 +7,7 @@
 //   - 位序：小端序（第 0 个方块在第 0 个 long 的低位）
 //   - 世界最小角 world = min(origin, origin + size + 1)
 
-import { parseNBT, decompressNBT } from './nbt.js'
+import { parseNBT, decompressNBT, LITTLE_ENDIAN } from './nbt.js'
 
 // 空气类方块：解析时直接跳过、不存入 blocks Map，避免超大型投影占用过多内存。
 const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
@@ -15,44 +15,24 @@ const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'ba
 // 解码位压缩的 BlockStates（小端序），返回每个位置的调色板索引。
 // startIdx 支持分块解码：只解码 [startIdx, startIdx+total) 这段，用于超大投影分块处理。
 //
-// 性能说明：超大投影（上亿方块）解码是最耗时的环节。若每个方块做 BigInt 运算
-// （BigInt 比 Number 慢约一个数量级），全量解码要数十秒。这里把每个 64 位 long
-// 拆成两个 32 位半区，用纯 Number 位运算逐位提取，速度快 5 倍以上。
-export function decodeBlockStates(longs, bits, total, startIdx = 0) {
-  const out = new Uint32Array(total)
-  const mask = (1 << bits) - 1 // bits 恒 ≤ 32，mask 落在 32 位整数范围内
-  let bit = startIdx * bits // 起始位偏移（可能位于某个 long 的中间）
-  let word = -1
-  let lo = 0
-  let hi = 0
+// 直接借用 LongArray 的底层 32 位视图，解码过程中不分配 BigInt 或复制输入。
+// out 可复用，解析大型投影时只需一个固定大小的解码缓冲区。
+export function decodeBlockStates(longs, bits, total, startIdx = 0, out = new Uint32Array(total)) {
+  const packed = Array.isArray(longs) ? BigInt64Array.from(longs, v => BigInt.asIntN(64, v)) : longs
+  if ((startIdx + total) * bits > packed.length * 64 || out.length < total) {
+    throw new RangeError('BlockStates 数据或解码缓冲区长度不足')
+  }
+  const words = new Uint32Array(packed.buffer, packed.byteOffset, packed.length * 2)
+  const swap = LITTLE_ENDIAN ? 0 : 1
+  const mask = bits === 32 ? 0xffffffff : (1 << bits) - 1
+  let bit = startIdx * bits
   for (let j = 0; j < total; j++) {
-    // 不能用 bit >> 6 / bit & 63（32 位溢出）；bit/64 在 <2^53 内是精确的整数，
-    // 且 word 值 <2^31，| 0 截断安全。off = bit & 63 取低 6 位，溢出也正确。
-    const w = (bit / 64) | 0
-    const off = bit & 63
-    if (w !== word) {
-      word = w
-      const b = BigInt.asUintN(64, longs[w])
-      lo = Number(b & 0xffffffffn)
-      hi = Number(b >> 32n)
-    }
-    let v
-    if (off + bits <= 32) {
-      v = (lo >>> off) & mask
-    } else if (off >= 32 && off + bits <= 64) {
-      v = (hi >>> (off - 32)) & mask
-    } else if (off >= 32) {
-      // 跨 64 位 word 边界：高位部分在当前 word 高半区，剩余低位在下一 word 低半区
-      const take = 64 - off
-      const next = BigInt.asUintN(64, longs[w + 1])
-      const nextLo = Number(next & 0xffffffffn)
-      v = ((hi >>> (off - 32)) | (nextLo << take)) & mask
-    } else {
-      // 跨 32 位半区边界，但仍在同一 word 内
-      const lowBits = 32 - off
-      v = ((lo >>> off) | ((hi & ((1 << (bits - lowBits)) - 1)) << lowBits)) & mask
-    }
-    out[j] = v
+    // 位偏移可能超过 32 位，除法不能替换成 bit >>> 5。
+    const word = Math.floor(bit / 32)
+    const offset = bit & 31
+    let value = words[word ^ swap] >>> offset
+    if (offset + bits > 32) value |= words[(word + 1) ^ swap] << (32 - offset)
+    out[j] = value & mask
     bit += bits
   }
   return out
@@ -156,6 +136,8 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
   const tileEntities = [] // 方块实体（如告示牌）
   const entities = [] // 实体（如矿车、物品展示框）
   let doneBlocks = 0
+  const decoded = new Uint32Array(65536)
+  let lastYield = performance.now()
 
   // 第二遍：解码并建立整数 key 的方块映射
   for (const [name, region] of Object.entries(regions)) {
@@ -209,23 +191,32 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     const lz0 = wz0 - minZ
     const ly0 = wy0 - minY
 
-    // 按「层」分块解码并即时存入 Map：避免一次性分配超大数组，
-    // 且每解码一层让出一次主线程，防止超大投影（上亿方块）卡死界面。
-    for (let y = 0; y < dy; y++) {
-      const decoded = decodeBlockStates(region.BlockStates, bits, rowSize, y * rowSize)
-      const yKey = (ly0 + y) * strideY
-      let rowIdx = 0
-      for (let z = 0; z < dz; z++) {
-        const rowBase = yKey + (lz0 + z) * W + lx0
-        for (let x = 0; x < dx; x++) {
-          const li = decoded[rowIdx++]
+    // 固定大小分块，既不为宽阔的一层分配大数组，也不为每个小层等待定时器。
+    const volume = rowSize * dy
+    for (let start = 0; start < volume; start += decoded.length) {
+      const count = Math.min(decoded.length, volume - start)
+      decodeBlockStates(region.BlockStates, bits, count, start, decoded)
+      let j = 0
+      while (j < count) {
+        const index = start + j
+        const y = Math.floor(index / rowSize)
+        const z = Math.floor(index / dx) % dz
+        const x = index % dx
+        const rowBase = (ly0 + y) * strideY + (lz0 + z) * W + lx0
+        const end = Math.min(count, j + dx - x)
+        let key = rowBase + x
+        for (; j < end; j++, key++) {
+          const li = decoded[j]
           if (isSkip[li]) continue // 空气类方块不入 Map
-          blocks.set(rowBase + x, localToGlobal[li] ?? 0)
+          blocks.set(key, localToGlobal[li] ?? 0)
         }
       }
-      doneBlocks += rowSize
-      onProgress?.(totalBlocks ? doneBlocks / totalBlocks : 0)
-      await new Promise((r) => setTimeout(r, 0)) // 让出主线程，保持界面响应
+      doneBlocks += count
+      if (performance.now() - lastYield >= 12) {
+        onProgress?.(totalBlocks ? doneBlocks / totalBlocks : 0)
+        await new Promise((r) => setTimeout(r, 0))
+        lastYield = performance.now()
+      }
     }
     region.BlockStates = null // 该区域已解码完，释放大数组（超大投影可达数百 MB），降低峰值内存
   }
@@ -237,6 +228,7 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     depth: D,
   }
 
+  onProgress?.(1)
   return { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList }
 }
 

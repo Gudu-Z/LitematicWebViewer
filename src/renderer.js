@@ -1135,23 +1135,21 @@ export class Renderer {
     const H = bounds.height
     const strideY = W * D
     const surface = new Map()
+    const fluids = palette.map(fluidOfEntry)
     for (const [key, gi] of blocks) {
-      const p = palette[gi]
-      const fo = p && fluidOfEntry(p)
+      const fo = fluids[gi]
       if (!fo || fo.kind !== 'water') continue
-      const lx = key % W
-      const lz = Math.floor(key / W) % D
       const ly = Math.floor(key / strideY)
       const y = ly + bounds.minY
       let h = fluidHeight(fo.level)
       if (ly + 1 < H) {
         const aboveGi = blocks.get(key + strideY)
-        const aboveFo = aboveGi !== undefined ? fluidOfEntry(palette[aboveGi]) : null
+        const aboveFo = fluids[aboveGi]
         if (aboveFo && aboveFo.kind === 'water') {
           h = 1 // 上方还是水 → 水续满，表面到方块顶
         } else if (fo.level <= 0 && aboveGi !== undefined) {
           const ap = palette[aboveGi]
-          if (ap && ap.baked && ap.baked.fullCube && !fluidOfEntry(ap)) {
+          if (ap && ap.baked && ap.baked.fullCube && !aboveFo) {
             h = 1 // 水源被上方完整实体方块顶满（原版 isFaceSturdy）
           }
         }
