@@ -71,7 +71,7 @@ const DYE_COLORS = {
 // 返回 [{ path: "block/xxx"|"item/xxx", transform: {translation,scale,...}|null }]。
 // 各类解析为默认分支：composite 拆成多个（如床的 head+foot）；condition 取 on_false；
 // range_dispatch 取 fallback；select 取 fixed/gui/ground 的 case，否则 fallback；
-// special（箱子/头颅/旗帜等）默认交由 SPECIAL_MODELS 处理；GUI 保留 base 以读取显示变换。
+// special 的几何交由特殊渲染器处理，但所有显示场景都必须保留 base 的显示变换。
 // 注意 composite 的 transformation.translation 单位是「方块」（床 foot 偏移 [0,0,1] 即 1 格），
 // 与 display 变换的 translation（单位像素 1/16）不同。
 function resolveItemModelDef(def, out = [], context = 'fixed', item = {}) {
@@ -81,9 +81,8 @@ function resolveItemModelDef(def, out = [], context = 'fixed', item = {}) {
     if (typeof def.model === 'string') out.push({ path: def.model.replace(/^minecraft:/, ''), transform: def.transformation || null, tints: def.tints || [] })
     return out
   }
-  // Special items still inherit GUI transforms from their base (heads use template_skull).
-  if (t === 'minecraft:special' && context === 'gui' && typeof def.base === 'string') {
-    out.push({ path: def.base.replace(/^minecraft:/, ''), transform: null, tints: [] })
+  if (t === 'minecraft:special' && typeof def.base === 'string') {
+    out.push({ path: def.base.replace(/^minecraft:/, ''), transform: def.transformation || null, special: def.model, tints: [] })
     return out
   }
   if (t === 'minecraft:composite') {
@@ -269,9 +268,9 @@ async function buildItemFrame(entity, id, assets) {
 
   // 内部物品：框口 0.4375 处，绕框法线按 ItemRotation × 45° 旋转。
   // 框模型（template_item_frame）正面是 −z（+z 贴墙）。物品模型的 display.fixed 显示旋转
-  // （2D 物品/头颅 [0,180,0]，方块多为 [0,0,0]，铁砧 [0,90,0]，床 [270,180,0]）在框旋转之后、
-  // 绕法线旋转之前应用，故 quaternion = q · fixedRot · qz；display.fixed 平移（单位方块，如床
-  // [0,4,-2]px）加在框口偏移上再随框旋转。buildFrameItem 把这两者存进 userData.fixedRot/fixedTrans。
+  // （2D 物品/头颅 [0,180,0]，方块多为 [0,0,0]，铁砧 [0,90,0]，床 [270,180,0]）先于
+  // 物品绕法线旋转，故 quaternion = q · qz · fixedRot。平移也随 ItemRotation 旋转；
+  // buildFrameItem 把这两者存进 userData.fixedRot/fixedTrans。
   const item = entity.nbt?.Item
   if (item && item.id) {
     const itemMesh = await buildFrameItem(item, resolver, assets)
@@ -423,28 +422,26 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
     }
   }
 
-  // 方块物品：3D 方块模型（原版展示框 scale 0.5 = 8px，方块是 3D 立方体显得偏大，这里用 0.4 略缩）。
+  // 方块物品：展示框自身缩放 0.5，再应用物品模型继承的 display.fixed。
   // 26.3 的物品模型定义在 items/NAME.json，指向具体的方块模型（如 block/piston_inventory、
   // block/anvil），其几何朝向与 display.fixed 变换是烘焙好的——和 blockstate 的 registerDefaultState
   // 无关。这里直接解析该模型并应用 display.fixed（旋转+平移）；composite（床=头+脚）拆成多个
   // 子模型分别烘焙后按子模型 translation 偏移合并、整体居中。
   let baked = null
-  let fixedRot = null
-  let fixedTrans = null
-  let fixedScale = null
+  let fixed = null
   let usesItemModel = false
   if (modelDefs.length) {
     const parts = []
-    let fixed = null
     for (const md of modelDefs) {
       const model = await resolver.loadModel(md.path)
-      if (model && model.elements) {
+      if (!fixed && model?.display?.fixed) fixed = model.display.fixed
+      // special.base 只提供贴图/显示参数；即使含 elements，也不应替代特殊渲染器。
+      if (!md.special && model?.elements) {
         const b = bakeModel(model, { x: 0, y: 0 })
         if (context === 'gui') for (const q of b.quads) q.color = guiItemTint(md.tints[q.tintIndex])
         if (b && b.quads && b.quads.length) {
           const tr = md.transform?.translation || [0, 0, 0]
           parts.push({ quads: b.quads, ox: Number(tr[0]) || 0, oy: Number(tr[1]) || 0, oz: Number(tr[2]) || 0 })
-          if (!fixed && model.display?.fixed) fixed = model.display.fixed
         }
       }
     }
@@ -458,14 +455,9 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
       for (const p of parts) for (const q of p.quads) quads.push({ ...q, verts: q.verts.map((v) => [v[0] + p.ox - 0.5, v[1] + p.oy - 0.5, v[2] + p.oz - 0.5]) })
       baked = { quads, center: [0, 0, 0] }
       usesItemModel = true
-      if (fixed) {
-        fixedRot = fixedRotQuaternion(fixed.rotation)
-        const t = fixed.translation || [0, 0, 0]
-        fixedTrans = [Number(t[0]) / 16, Number(t[1]) / 16, Number(t[2]) / 16]
-        fixedScale = fixed.scale || null
-      }
     }
   }
+  if (!fixed) fixed = (await resolver.loadModel('item/' + name))?.display?.fixed
   if (!baked || !baked.quads || !baked.quads.length) {
     if (name.endsWith('_banner')) {
       // BannerModelRenderer.renderAsItem 使用立地旗模型，rotation=0；旗面不能遗漏，
@@ -479,53 +471,43 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
       canvas.quads.forEach((q, i) => { q.uvs = flag.quads[i].uvs })
       baked = { quads: [...body.quads, ...canvas.quads] }
       const base = await resolver.loadModel('item/template_banner')
-      fixedRot = fixedRotQuaternion(base?.display?.fixed?.rotation || [0, 180, 0])
-      fixedScale = base?.display?.fixed?.scale || [.5, .5, .5]
-      fixedTrans = (base?.display?.fixed?.translation || [0, 0, 0]).map(v => v / 16)
+      fixed ||= base?.display?.fixed
     }
   }
   if (!baked || !baked.quads || !baked.quads.length) {
     // 原版铜傀儡雕像由特殊渲染器绘制；资源包若提供普通物品模型，应优先使用上面解析的模型。
-    // 无 JSON 几何时才回退到实体模型：fixed 上移 3/16、居中 -0.5，总位移 -0.3125。
+    // 实体网格是 Y 向上、脚底为零；先还原特殊模型在 display.fixed 之前的坐标。
     if (name.endsWith('copper_golem_statue')) {
       const tex = await assets.getTexture('entity/copper_golem/copper_golem' + (name.includes('exposed') ? '_exposed' : name.includes('weathered') ? '_weathered' : name.includes('oxidized') ? '_oxidized' : ''))
       if (tex) {
-        const golem = buildCopperGolemStatueMesh(tex)
+        const special = modelDefs.find(md => md.special)?.special
+        const golem = buildCopperGolemStatueMesh(tex, special?.pose)
         if (golem) {
-          // The GUI base expects the entity model's Y-down/Z-forward axes.
-          if (context === 'gui') golem.rotation.x = Math.PI
-          golem.position.y = -0.3125
+          // StatueModel 的根节点 Rz(PI)，叠加 items 中的 T(.5,1.5,.5)·S(1,-1,-1)
+          // 和 ItemTransform 的 T(-.5)，得到 (-x,1-y,z)。平移不能提前与 fixed 缩放合并。
+          golem.rotation.z = Math.PI
+          golem.position.y = 1
           holder.add(golem)
-          holder.scale.setScalar(0.5)
-          holder.userData.fixedRot = Q_FLIP
-          return holder
+          fixed ||= (await resolver.loadModel('item/template_copper_golem_statue'))?.display?.fixed
+          return applyFrameItemDisplay(holder, fixed)
         }
       }
     }
     // 特殊方块（箱子/头颅/旗帜/潜影盒/装饰罐等 BER，无 JSON 几何）走 SPECIAL_MODELS
     const props = await defaultItemProps(name, assets)
+    // 物品渲染器使用未旋转的单箱/向上的潜影盒，不继承已放置方块的 facing。
+    // 箱子若先按 north 旋转，再应用 fixed 的 180°，锁扣会转到背面。
+    if (name === 'chest' || name.endsWith('_chest')) Object.assign(props, { facing: 'south', type: 'single' })
+    if (name === 'shulker_box' || name.endsWith('_shulker_box')) props.facing = 'up'
     baked = await resolver.resolve('minecraft:' + name, props)
-    fixedRot = name.endsWith('_head') || name.endsWith('_skull') || name === 'shield' || name === 'conduit' || name.endsWith('_banner') ? Q_FLIP : null
-    // 潮涌核心 items/conduit.json 的 display.fixed 缩放是 [1,1,1]（不缩），总缩放 = 框体 0.5 × 1。
-    // 这里显式给 fixedScale，否则走 fixedScale=null 的 0.4 兜底会偏小约 20%。
-    if (name === 'conduit') fixedScale = [1, 1, 1]
-    // 盾牌 models/item/shield.json 的 display.fixed：rotation [0,180,0]、translation [-4.5,4.5,-5]px、
-    // scale [0.55,0.55,0.55]。fixedTrans 存原值（块单位），buildItemFrame 会乘 0.5 框体缩放。
-    if (name === 'shield') {
-      fixedScale = [0.55, 0.55, 0.55]
-      fixedTrans = [-4.5 / 16, 4.5 / 16, -5 / 16]
+    if (baked?.quads?.length && (name.endsWith('_head') || name.endsWith('_skull'))) {
+      // 方块用的头颅几何已上移 4px（龙首 8px）；还原后再由模板的 fixed translation 定位。
+      const y = name === 'dragon_head' || name === 'dragon_wall_head' ? -1 : -.75
+      baked = { ...baked, center: [-.5, y, -.5] }
     }
-    // 旗帜 items/*_banner.json 的 special transformation：scale (2/3,−2/3,−2/3)、translation [0.5,0,0.5]。
-    // 这两者（缩放 + 平移）都已烘进 bannerModel 的几何里，故这里只需 display.fixed 的 scale 0.5。
-    if (name.endsWith('_banner')) {
-      fixedScale = [0.5, 0.5, 0.5]
-    }
-    // 龙首 display.fixed 缩放 1（不缩，0.75 已烘进几何）。display.fixed translation [0,4,0]px
-    // 与居中 translate(-0.5) 合并后净平移 (0,−0.25,0)；但龙首几何的颅骨中心在方块像素 y=16
-    // （比普通头颅的 y=8 高 8px=0.5 格），居中后仍高出 0.5 格，需再下移 0.25 格，故净 −0.5。
-    if (name === 'dragon_head' || name === 'dragon_wall_head') {
-      fixedScale = [1, 1, 1]
-      fixedTrans = [0, -0.5, 0]
+    if (baked?.quads?.length && (name === 'shulker_box' || name.endsWith('_shulker_box'))) {
+      // 原版特殊物品对潜影盒做 0.9995 的居中收缩，避免表面重叠。
+      baked = { ...baked, quads: baked.quads.map(q => ({ ...q, verts: q.verts.map(v => v.map(n => (n - .5) * .9995 + .5)) })) }
     }
   }
   if (baked && baked.quads && baked.quads.length) {
@@ -554,14 +536,7 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
     )
     const center = baked.center || [-0.5, -0.5, -0.5]
     holder.add(quadsToMesh(baked.quads, center, (tk, shade) => mats.get(quadMaterialKey(tk, shade)), context === 'gui'))
-    // 展示框物品总缩放 = 框体 0.5 × 模型 display.fixed 缩放（方块/床/铁砧等 0.5 → 0.25；头颅/盾牌等 1 → 0.5）。
-    // 特殊 BER 方块（SPECIAL_MODELS）几何已按原版外观手工定死，fixedScale 为 null 时保持 0.4 略缩。
-    const fs = fixedScale || [1, 1, 1]
-    const base = fixedScale ? 0.5 : 0.4
-    holder.scale.set((Number(fs[0]) || 1) * base, (Number(fs[1]) || 1) * base, (Number(fs[2]) || 1) * base)
-    holder.userData.fixedRot = fixedRot
-    holder.userData.fixedTrans = fixedTrans || null
-    return holder
+    return applyFrameItemDisplay(holder, fixed)
   }
 
   // 兜底：贴图平面
@@ -579,13 +554,22 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
   return null
 }
 
+// ItemFrameRenderer 的 0.5 在 display 变换外层；缺省 display 缩放为 1。
+// 旋转和平移由框体（或物品预览）施加，保证 ItemRotation 也会旋转平移向量。
+function applyFrameItemDisplay(holder, fixed = {}) {
+  holder.scale.fromArray(fixed.scale || [1, 1, 1]).multiplyScalar(.5)
+  holder.userData.fixedRot = fixedRotQuaternion(fixed.rotation)
+  holder.userData.fixedTrans = (fixed.translation || [0, 0, 0]).map(v => v / 16)
+  return holder
+}
+
 // 装备读取 thirdperson/head 变换；几何和资源包解析复用物品路径。
 export async function buildEquippedItem(item, assets, context = 'thirdperson_righthand') {
   const resolver = new BlockModelResolver(assets), name = shortName(item.id)
   const definition = await assets.getJSON('items/' + name + '.json')
   const defs = resolveItemModelDef(definition?.model, [], context, item)
   // 原版三叉戟在手中使用专用立体模型，背包/展示框仍使用平面图标。
-  const trident = name === 'trident' && !defs.length
+  const trident = name === 'trident' && (!defs.length || defs[0].special?.type === 'minecraft:trident')
   let object
   if (trident) {
     const map = await assets.getTexture('entity/trident/trident')
