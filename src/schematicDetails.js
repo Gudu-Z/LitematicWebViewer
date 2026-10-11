@@ -122,9 +122,9 @@ export function extractDecoratedPots(tileEntities, data) {
   return pots
 }
 
-// 解析装饰罐的 sherds NBT：兼容 1.20 的列表格式与 1.21 的映射格式。
+// 方块实体 sherds 和物品 pot_decorations 共用解析，兼容旧版列表与新版映射。
 // 列表顺序为 [back, left, right, front]（与原版 PotDecorations 记录字段顺序一致）。
-function parsePotSherds(sherds) {
+export function parsePotSherds(sherds) {
   const out = { front: null, back: null, left: null, right: null }
   if (!sherds) return out
   if (Array.isArray(sherds)) {

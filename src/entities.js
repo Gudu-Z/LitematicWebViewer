@@ -16,6 +16,7 @@ import { registerEntityHitbox } from './entityHitboxes.js'
 import { minecartRenderPose } from './entityMinecart.js'
 import { BlockModelResolver } from './blocks.js'
 import { bakeModel } from './modelBaker.js'
+import { parsePotSherds } from './schematicDetails.js'
 import { ENTITY_MODELS } from './entityModelData.js'
 import { EXTRA_MODELS } from './extraEntityModels.js'
 import { getMobAppearance, MOB_TABLE } from './entityAppearance.js'
@@ -347,6 +348,24 @@ async function defaultItemProps(name, assets) {
   return props
 }
 
+// 方块渲染会逐实例补充陶罐侧面；物品路径也必须补齐，不能只复用罐颈与顶底。
+async function addPotItemSides(base, item, assets) {
+  const components = item.components || {}
+  const blockEntity = components['minecraft:block_entity_data'] || components.block_entity_data || item.tag?.BlockEntityTag
+  const sherds = parsePotSherds(components['minecraft:pot_decorations'] ?? components.pot_decorations ?? blockEntity?.sherds)
+  const blank = 'entity/decorated_pot/decorated_pot_side'
+  // DecoratedPotRenderer 的原始物品坐标：front=+z，四面高16px、宽14px。
+  const sides = [['front', 'south'], ['back', 'north'], ['left', 'west'], ['right', 'east']]
+  const faces = Object.fromEntries(await Promise.all(sides.map(async ([side, face]) => {
+    const id = typeof sherds[side] === 'string' ? shortName(sherds[side]) : ''
+    const pattern = id.endsWith('_pottery_sherd') ? 'entity/decorated_pot/' + id.replace(/_pottery_sherd$/, '_pottery_pattern') : null
+    const texture = pattern && await assets.getTexture(pattern) ? pattern : blank
+    return [face, { texture, uv: [1, 0, 15, 16] }]
+  })))
+  const body = bakeModel({ elements: [{ from: [1, 0, 1], to: [15, 16, 15], faces }] })
+  return { ...base, quads: [...(base?.quads || []), ...body.quads] }
+}
+
 // 框内物品网格：先按物品模型判定——含 layer0 的 2D 物品（小麦/铁轨/箭/剑等）渲染成平面贴图；
 // 否则按方块模型渲染（游戏内方块图标即方块模型）。
 async function buildFrameItem(item, resolver, assets, context = 'fixed') {
@@ -499,7 +518,9 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
     // 箱子若先按 north 旋转，再应用 fixed 的 180°，锁扣会转到背面。
     if (name === 'chest' || name.endsWith('_chest')) Object.assign(props, { facing: 'south', type: 'single' })
     if (name === 'shulker_box' || name.endsWith('_shulker_box')) props.facing = 'up'
+    if (name === 'decorated_pot') props.facing = 'south'
     baked = await resolver.resolve('minecraft:' + name, props)
+    if (name === 'decorated_pot') baked = await addPotItemSides(baked, item, assets)
     if (baked?.quads?.length && (name.endsWith('_head') || name.endsWith('_skull'))) {
       // 方块用的头颅几何已上移 4px（龙首 8px）；还原后再由模板的 fixed translation 定位。
       const y = name === 'dragon_head' || name === 'dragon_wall_head' ? -1 : -.75

@@ -4,7 +4,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import JSZip from 'jszip'
 import * as THREE from 'three'
 import { AssetProvider } from '../src/assets.js'
-import { buildEntityMesh, buildGuiItem } from '../src/entities.js'
+import { buildEntityMesh, buildGuiItem, buildEquippedItem } from '../src/entities.js'
 import { EXTRA_MODELS } from '../src/extraEntityModels.js'
 
 const root = 'public/assets/minecraft/'
@@ -147,7 +147,7 @@ function actualPoints(object) {
   })
   return result
 }
-let checked = 0
+let checked = 0, potSurfaceChecks = 0
 async function check(name, pose = 'standing', facing = 2, rotation = 0) {
   const pos = [7, 11, -3], item = { id: 'minecraft:' + name, count: 1, components: { 'minecraft:block_state': { copper_golem_pose: pose } } }
   const frame = await buildEntityMesh({ id: 'minecraft:item_frame', pos, rotation: [0, 0], nbt: { Facing: facing, ItemRotation: rotation, Item: item } }, assets)
@@ -160,6 +160,85 @@ async function check(name, pose = 'standing', facing = 2, rotation = 0) {
   // 标准头颅应以框内原点居中，不能重复叠加已烘焙的 +4px 偏移。
   if (name === 'skeleton_skull' && !assets.packs.some(p => p.name === 'override')) near(actual.getCenter(new THREE.Vector3()).toArray(), vector([0, 0, 0]).applyMatrix4(transform).toArray(), label + ' center')
   dispose(frame); checked++
+}
+
+// 包围盒无法发现陶罐只剩罐口/罐底：射线必须真正命中四面罐身。
+// 官方 DecoratedPotRenderer.createSidesLayer：14×16 面，像素 UV [1,0]..[15,16]。
+// 从各侧外面看，上 v=0；front 的 u 随 +x，back 随 -x，left 随 +z，right 随 -z。
+const POT_BLANK = 'entity/decorated_pot/decorated_pot_side'
+const POT_SIDES = {
+  front: { normal: [0, 0, 1], point: (u, v) => [16 * u, 16 * (1 - v), 15] },
+  back: { normal: [0, 0, -1], point: (u, v) => [16 * (1 - u), 16 * (1 - v), 1] },
+  left: { normal: [-1, 0, 0], point: (u, v) => [1, 16 * (1 - v), 16 * u] },
+  right: { normal: [1, 0, 0], point: (u, v) => [15, 16 * (1 - v), 16 * (1 - u)] },
+}
+const potTextures = (back, left, right, front) => Object.fromEntries(Object.entries({ back, left, right, front })
+  .map(([side, name]) => [side, name ? 'entity/decorated_pot/' + name + '_pottery_pattern' : POT_BLANK]))
+const potSherds = ['angler', 'archer', 'arms_up', 'skull'].map(name => 'minecraft:' + name + '_pottery_sherd')
+const potDecorations = Object.fromEntries(['back', 'left', 'right', 'front'].map((side, index) => [side, potSherds[index]]))
+const patternedPot = potTextures('angler', 'archer', 'arms_up', 'skull')
+const blankPot = potTextures()
+const potItem = data => ({ id: 'minecraft:decorated_pot', count: 1, ...data })
+
+function assertPotSides(object, transform, textures, label) {
+  object.updateMatrixWorld(true)
+  for (const [side, { normal, point }] of Object.entries(POT_SIDES)) {
+    for (const uv of [[.5, .5], [.25, .25], [.75, .75]]) {
+      const target = vector(point(...uv)).multiplyScalar(1 / 16).applyMatrix4(transform)
+      const outward = vector(normal).transformDirection(transform)
+      const ray = new THREE.Raycaster(target.clone().addScaledVector(outward, 2), outward.clone().negate())
+      const hit = ray.intersectObject(object, true)[0], detail = `${label} ${side} UV=${uv}`
+      assert.ok(hit, detail + ' 必须命中罐身，不能穿过缺失的侧面')
+      near(hit.point.toArray(), target.toArray(), detail + ' 表面位置')
+      assert.equal(hit.object.material.map?.name, textures[side], detail + ' 图案/侧面顺序')
+      near(hit.uv.toArray(), uv, detail + ' UV不能倒置或镜像')
+      const geometricNormal = hit.face.normal.clone().applyMatrix3(new THREE.Matrix3().getNormalMatrix(hit.object.matrixWorld)).normalize()
+      assert.ok(geometricNormal.dot(outward) > 1 - EPS, detail + ' 三角形必须朝外，不能靠双面材质掩盖反向绕序')
+      potSurfaceChecks++
+    }
+  }
+}
+async function makePotFrame(data, facing = 2, rotation = 0) {
+  const pos = [3, 5, 7], frame = await buildEntityMesh({
+    id: 'minecraft:item_frame', pos, rotation: [0, 0], nbt: { Facing: facing, ItemRotation: rotation, Item: potItem(data) },
+  }, assets)
+  assert.equal(frame.children.length, 2, '陶罐框体与物品都必须存在')
+  frame.updateMatrixWorld(true)
+  const display = (await model('item/decorated_pot')).display.fixed
+  return { frame, object: frame.children[1], transform: frameMatrix(pos, facing, rotation).multiply(fixedMatrix(display)) }
+}
+async function checkPots(packName) {
+  const modern = { components: { 'minecraft:pot_decorations': potDecorations } }
+  const cases = [
+    ['空白', {}, blankPot],
+    ['26.3字符串对象', modern, patternedPot],
+    ['26.3物品对象', { components: { 'minecraft:pot_decorations': Object.fromEntries(Object.entries(potDecorations).map(([k, id]) => [k, { id }])) } }, patternedPot],
+    ['旧四元素列表', { components: { 'minecraft:pot_decorations': potSherds } }, patternedPot],
+    ['旧BlockEntityTag', { tag: { BlockEntityTag: { sherds: potSherds } } }, patternedPot],
+    ['block_entity_data', { components: { 'minecraft:block_entity_data': { sherds: potSherds } } }, patternedPot],
+    ['缺省/砖块/非陶片/缺失贴图', { components: { 'minecraft:pot_decorations': {
+      back: 'minecraft:brick', left: { id: 'minecraft:stone' }, right: 'minecraft:missing_pottery_sherd', front: { id: potSherds[1] },
+    } } }, potTextures(null, null, null, 'archer')],
+    ['部分面缺省', { components: { 'minecraft:pot_decorations': { front: potSherds[3] } } }, potTextures(null, null, null, 'skull')],
+    ['现代空对象优先于旧标签', { components: { 'minecraft:pot_decorations': {} }, tag: { BlockEntityTag: { sherds: potSherds } } }, blankPot],
+  ]
+  // 同一资源提供器并发创建不同装饰；所有对象建完后再检查，捕获共享缓存/材质串图。
+  const built = await Promise.all(cases.map(async ([label, data, textures]) => ({ ...(await makePotFrame(data)), label, textures })))
+  for (const entry of built) assertPotSides(entry.object, entry.transform, entry.textures, `${packName} ${entry.label}`)
+  for (const entry of built) dispose(entry.frame)
+
+  for (let facing = 0; facing < 6; facing++) for (let rotation = 0; rotation < 8; rotation++) {
+    const entry = await makePotFrame(modern, facing, rotation)
+    assertPotSides(entry.object, entry.transform, patternedPot, `${packName} pot facing=${facing} rotation=${rotation}`)
+    dispose(entry.frame)
+  }
+  for (const context of ['gui', 'thirdperson_righthand', 'firstperson_righthand']) {
+    const object = context === 'gui' ? await buildGuiItem(potItem(modern), assets) : await buildEquippedItem(potItem(modern), assets, context)
+    assert.ok(object, context + ' 陶罐不可丢失')
+    const transform = fixedMatrix((await model('item/decorated_pot')).display[context])
+    assertPotSides(object, transform, patternedPot, `${packName} pot ${context}`)
+    dispose(object)
+  }
 }
 
 try {
@@ -180,6 +259,7 @@ try {
       const points = actualPoints(gui); assert.ok(points.length && points.every(p => p.toArray().every(Number.isFinite)), name + ' GUI 顶点必须有限')
       dispose(gui)
     }
+    await checkPots(packName)
   }
   assets.clearPacks()
   const override = new JSZip(), fixed = { rotation: [15, 40, -20], translation: [2, -3, 1], scale: [.3, .7, 1.2] }
@@ -191,7 +271,19 @@ try {
   for (const name of ['copper_chest', 'copper_golem_statue', 'skeleton_skull', 'shulker_box']) for (const facing of [0, 2, 5]) for (const rotation of [0, 1, 3]) await check(name, 'standing', facing, rotation)
   assets.removePack('override')
   for (const name of ['copper_chest', 'copper_golem_statue', 'skeleton_skull', 'shulker_box']) await check(name)
-  console.log(`通过：${checked} 个展示框尺寸/位置/姿态组合，原版与 XK、铜制品全部氧化/涂蜡状态、雕像四姿势、特殊 base 覆盖和卸载恢复、GUI 有限性。`)
+  // 资源包用普通模型替代陶罐时，应完整尊重模型，不能再叠加特殊渲染器侧面。
+  const replacement = new JSZip()
+  replacement.file('assets/minecraft/items/decorated_pot.json', JSON.stringify({ model: { type: 'minecraft:model', model: 'minecraft:block/diamond_block' } }))
+  assets.addPack(replacement, 'pot-replacement')
+  const customPot = await makePotFrame({ components: { 'minecraft:pot_decorations': potDecorations } })
+  const textureNames = new Set()
+  customPot.object.traverse(o => { if (o.isMesh) textureNames.add(o.material.map?.name) })
+  assert.deepEqual([...textureNames], ['block/diamond_block'], '普通资源包模型应优先于陶罐特殊侧面')
+  dispose(customPot.frame); assets.removePack('pot-replacement')
+  const restoredPot = await makePotFrame({})
+  assertPotSides(restoredPot.object, restoredPot.transform, blankPot, '卸载普通模型恢复完整陶罐')
+  dispose(restoredPot.frame)
+  console.log(`通过：${checked} 个展示框尺寸/位置/姿态组合、${potSurfaceChecks} 次陶罐表面射线，原版与 XK、铜制品变种、雕像四姿势、陶片格式/UV/朝向与 GUI/手持、资源包覆盖和卸载恢复。`)
 } finally {
   globalThis.fetch = oldFetch
 }
