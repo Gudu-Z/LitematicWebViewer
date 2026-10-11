@@ -5,6 +5,25 @@
 import * as THREE from 'three'
 import { animateTexture } from './textureAnimation.js'
 
+// 默认资源可能因网络抖动或服务器暂时不可用而加载失败。只补试一次，
+// 并将最终失败交给调用方清理缓存；404/SPA 回退仍视为真正缺失，不补试。
+async function fetchAsset(url, read) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const response = await fetch(url)
+      if (response.status === 408 || response.status === 429 || response.status >= 500) {
+        await response.body?.cancel().catch(() => {})
+        throw new Error(`资源请求失败：HTTP ${response.status}`)
+      }
+      if (!response.ok || (response.headers.get('content-type') || '').includes('text/html')) return null
+      return await read(response)
+    } catch (error) {
+      if (attempt) throw error
+      await new Promise(resolve => setTimeout(resolve, 100))
+    }
+  }
+}
+
 // JsonUnbakedModel -> JsonHelper.deserialize 使用 Gson adapter 读取一个对象，
 // 不要求对象后立即 EOF。XK 的四个 waxed_*cut_copper 模型尾部多一个 }，
 // 原版仍能读取。仅为模型文件保留这一行为，正文错误仍由 JSON.parse 拒绝。
@@ -82,7 +101,13 @@ export class AssetProvider {
   // 加载 JSON 资源，path 形如 "blockstates/stone.json" 或 "models/block/stone.json"
   getJSON(path) {
     if (this.jsonCache.has(path)) return this.jsonCache.get(path)
-    const p = this._getJSON(path)
+    const p = this._getJSON(path).catch(() => {
+      // 瞬时失败不能像 404 一样永久缓存，否则共享框体模板失败后，
+      // 后续所有展示框（甚至重新打开投影）都会只显示物品。
+      // 切换资源包时可能已经建立新请求，旧请求只能清理自己的缓存。
+      if (this.jsonCache.get(path) === p) this.jsonCache.delete(path)
+      return null
+    })
     this.jsonCache.set(path, p)
     return p
   }
@@ -98,16 +123,7 @@ export class AssetProvider {
         }
       }
     }
-    // fetch 可能因网络/并发等原因 reject；返回 null 让调用方优雅降级，而不是让整个实体渲染失败。
-    try {
-      const resp = await fetch(this.baseUrl + path)
-      if (!resp.ok) return null
-      // dev 服务器下，缺失文件可能返回 SPA 回退的 index.html（text/html）。
-      if ((resp.headers.get('content-type') || '').includes('text/html')) return null
-      return parseResourceJSON(await resp.text(), path)
-    } catch {
-      return null
-    }
+    return fetchAsset(this.baseUrl + path, async resp => parseResourceJSON(await resp.text(), path))
   }
 
   // 加载贴图。texKey 形如 "block/stone"（已归一化，不含 minecraft: 前缀和 textures/ 前缀）。
@@ -116,7 +132,7 @@ export class AssetProvider {
     // 加载失败（null，如并发导致的瞬时解码失败）不缓存，下次调用重试；
     // 成功则缓存。避免一次瞬时失败把该贴图永久判为缺失。
     const p = this._getTexture(texKey).then((tex) => {
-      if (!tex) this.textureCache.delete(texKey)
+      if (!tex && this.textureCache.get(texKey) === p) this.textureCache.delete(texKey)
       return tex
     })
     this.textureCache.set(texKey, p)
@@ -158,11 +174,8 @@ export class AssetProvider {
     }
     if (!blob) {
       try {
-        const resp = await fetch(this.baseUrl + rel)
-        if (!resp.ok) return null
-        // dev 服务器下，缺失文件会返回 SPA 回退的 index.html（text/html），避免把它当图片加载
-        if ((resp.headers.get('content-type') || '').includes('text/html')) return null
-        blob = await resp.blob()
+        blob = await fetchAsset(this.baseUrl + rel, resp => resp.blob())
+        if (!blob) return null
       } catch {
         return null
       }
@@ -189,9 +202,7 @@ export class AssetProvider {
       }
     }
     try {
-      const resp = await fetch(this.baseUrl + rel)
-      if (!resp.ok) return null
-      return JSON.parse(await resp.text()).animation || false
+      return await fetchAsset(this.baseUrl + rel, async resp => (await resp.json()).animation || false)
     } catch {
       return null
     }
