@@ -8,7 +8,7 @@
     "build": "node scripts/build-embed-sdk.mjs && vite build",
     "preview": "vite preview",
     "test:loading": "node scripts/verify-decode.mjs && node scripts/verify-loading.mjs",
-    "test:rendering": "node scripts/verify-asset-recovery.mjs && node scripts/verify-frame-items.mjs && node scripts/verify-release-coverage.mjs && node scripts/verify-entities.mjs && node scripts/verify-entity-precision.mjs && node scripts/verify-boats.mjs && node scripts/verify-minecarts.mjs && node scripts/verify-entity-hitboxes.mjs && node scripts/verify-special-rendering.mjs && node scripts/verify-fluid-heights.mjs && node scripts/verify-render-layers.mjs",
+    "test:rendering": "node scripts/verify-asset-recovery.mjs && node scripts/verify-material-icons.mjs && node scripts/verify-frame-items.mjs && node scripts/verify-release-coverage.mjs && node scripts/verify-entities.mjs && node scripts/verify-entity-precision.mjs && node scripts/verify-boats.mjs && node scripts/verify-minecarts.mjs && node scripts/verify-entity-hitboxes.mjs && node scripts/verify-special-rendering.mjs && node scripts/verify-fluid-heights.mjs && node scripts/verify-render-layers.mjs",
     "setup": "node scripts/fetch-assets.mjs && node scripts/gen-fluid-flow-blocks.mjs",
     "packs": "node scripts/copy-packs.mjs"
   },

@@ -37,9 +37,56 @@ export async function buildMaterialIcon(id, assets) {
   return object
 }
 
-// One lazy WebGL context, cached PNGs and a serial queue for the visible rows.
-// Independent asset snapshots keep pack changes and texture disposal away from
-// the main scene, including while an older thumbnail is still loading.
+// Reuse decoded scene resources, but own the texture objects uploaded by the
+// thumbnail renderer. Retired snapshots must never read a replacement pack.
+class IconAssets extends AssetProvider {
+  constructor(source) {
+    super()
+    this.source = source
+    this.baseUrl = source.baseUrl
+    this.packs = [...source.packs]
+    this.textures = new Map()
+  }
+
+  matchesSource() {
+    return this.baseUrl === this.source.baseUrl && this.packs.length === this.source.packs.length &&
+      this.packs.every((pack, i) => pack.zip === this.source.packs[i].zip)
+  }
+
+  async _getJSON(path) {
+    const shared = this.matchesSource() && this.source.jsonCache.get(path)
+    if (shared) {
+      const json = await shared
+      // A failed request is removed from the source cache so it can be retried.
+      if (json || this.source.jsonCache.get(path) === shared) return json
+    }
+    return super._getJSON(path)
+  }
+
+  async _getTexture(key) {
+    const shared = this.matchesSource() && this.source.textureCache.get(key)
+    const texture = (shared && (await shared)?.clone()) || await super._getTexture(key)
+    if (texture) this.textures.set(key, texture)
+    return texture
+  }
+
+  // Only trim between batches, when no model still references these textures.
+  // Bound both the number and the size of retained high-resolution pack images.
+  trim(maxCount = 96, maxPixels = 4 * 1024 * 1024) {
+    const pixels = texture => (texture.image?.width || 0) * (texture.image?.height || 0)
+    let size = [...this.textures.values()].reduce((sum, texture) => sum + pixels(texture), 0)
+    for (const [key, texture] of this.textures) {
+      if (this.textures.size <= maxCount && size <= maxPixels) break
+      size -= pixels(texture)
+      texture.dispose()
+      this.textures.delete(key); this.textureCache.delete(key); this.animatedTextures.delete(texture)
+    }
+  }
+}
+
+// Load a few models concurrently; GPU rendering stays synchronous on one lazy
+// context. Cache the PNGs, prioritize visible rows and prepare only the first page
+// while idle instead of generating an entire large schematic's material list.
 export class MaterialIcons {
   constructor(list, source) {
     this.list = list
@@ -48,13 +95,11 @@ export class MaterialIcons {
     this.queue = []
     this.visible = new WeakSet()
     this.queued = new Set()
-    this.generation = 0
     this.observer = new IntersectionObserver(entries => {
       for (const { target, isIntersecting } of entries) {
         if (!isIntersecting) { this.visible.delete(target); continue }
         this.visible.add(target)
-        if (this.queued.has(target)) continue
-        this.queued.add(target); this.queue.push(target)
+        this.enqueue(target)
       }
       this.drain()
     }, { root: list, rootMargin: '80px 0px' })
@@ -62,18 +107,20 @@ export class MaterialIcons {
   }
 
   reset() {
-    this.generation++
+    if (this.state && !this.state.active) this.state.assets.trim(0, 0)
+    this.state = { assets: new IconAssets(this.source), active: 0, pending: new Map() }
     this.cache.clear()
-    this.assets = new AssetProvider()
-    this.assets.baseUrl = this.source.baseUrl
-    this.assets.packs = [...this.source.packs]
     this.observe()
   }
 
   observe() {
+    if (globalThis.cancelIdleCallback) cancelIdleCallback(this.warmup)
+    clearTimeout(this.warmupTimer)
     this.observer.disconnect()
     this.queue = []; this.queued.clear(); this.visible = new WeakSet()
-    for (const slot of this.list.querySelectorAll('.material-icon')) {
+    this.prefetch = new WeakSet()
+    const slots = [...this.list.querySelectorAll('.material-icon')]
+    for (const slot of slots) {
       const id = materialIconId(slot.dataset.material)
       const image = slot.querySelector('img')
       image.hidden = true; image.removeAttribute('src')
@@ -81,6 +128,22 @@ export class MaterialIcons {
       if (this.cache.has(id)) this.paint(slot, this.cache.get(id))
       else this.observer.observe(slot)
     }
+    const prepare = () => {
+      for (const slot of slots.slice(0, 12)) {
+        if (this.cache.has(materialIconId(slot.dataset.material))) continue
+        this.prefetch.add(slot); this.enqueue(slot)
+      }
+      this.drain()
+    }
+    if (slots.length) {
+      if (globalThis.requestIdleCallback) this.warmup = requestIdleCallback(prepare, { timeout: 1000 })
+      else this.warmupTimer = setTimeout(prepare, 100)
+    }
+  }
+
+  enqueue(slot) {
+    if (this.queued.has(slot)) return
+    this.queued.add(slot); this.queue.push(slot)
   }
 
   paint(slot, url) {
@@ -90,27 +153,45 @@ export class MaterialIcons {
     this.observer.unobserve(slot)
   }
 
-  async drain() {
-    if (this.running) return
-    this.running = true
+  drain() {
+    const state = this.state
+    while (state.active < 4 && this.queue.length) {
+      const index = this.queue.findIndex(slot => this.visible.has(slot))
+      const [slot] = this.queue.splice(Math.max(0, index), 1)
+      this.queued.delete(slot)
+      if (!slot.isConnected || (!this.visible.has(slot) && !this.prefetch.has(slot))) continue
+      state.active++
+      this.fill(slot, state)
+    }
+  }
+
+  async fill(slot, state) {
     try {
-      while (this.queue.length) {
-        const slot = this.queue.shift()
-        this.queued.delete(slot)
-        if (!slot.isConnected || !this.visible.has(slot)) continue
-        const id = materialIconId(slot.dataset.material), generation = this.generation
-        let url = this.cache.get(id)
-        if (!this.cache.has(id)) {
-          try { url = await this.render(id, this.assets) } catch { url = null }
-          if (generation !== this.generation) continue
-          this.cache.set(id, url)
-          if (this.cache.size > 512) this.cache.delete(this.cache.keys().next().value)
+      const id = materialIconId(slot.dataset.material)
+      let url = this.cache.get(id)
+      if (!this.cache.has(id)) {
+        // Aliases and list replacements share a single in-flight thumbnail.
+        let pending = state.pending.get(id)
+        if (!pending) {
+          pending = this.render(id, state.assets).catch(() => null).then(url => {
+            if (state === this.state) {
+              this.cache.set(id, url)
+              if (this.cache.size > 512) this.cache.delete(this.cache.keys().next().value)
+            }
+            return url
+          }).finally(() => state.pending.delete(id))
+          state.pending.set(id, pending)
         }
-        this.paint(slot, url)
-        // Let input, scrolling and list replacement run between GPU jobs.
-        await new Promise(resolve => setTimeout(resolve, 0))
+        url = await pending
       }
-    } finally { this.running = false }
+      if (state === this.state) this.paint(slot, url)
+      // Let input, scrolling and list replacement run between GPU jobs.
+      await new Promise(resolve => setTimeout(resolve, 0))
+    } finally {
+      state.active--
+      if (state === this.state) this.drain()
+      if (!state.active) state.assets.trim(...(state === this.state ? [] : [0, 0]))
+    }
   }
 
   initRenderer() {
@@ -147,9 +228,6 @@ export class MaterialIcons {
       object?.removeFromParent()
       object?.traverse(o => { o.geometry?.dispose(); for (const m of [o.material].flat()) m?.dispose() })
       this.renderer?.renderLists.dispose()
-      // Only this icon provider owns these textures; never dispose scene textures.
-      for (const pending of assets.textureCache.values()) (await pending)?.dispose()
-      assets.textureCache.clear(); assets.animatedTextures.clear()
     }
   }
 }
