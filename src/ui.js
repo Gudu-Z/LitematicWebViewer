@@ -1,6 +1,7 @@
 // UI 更新：状态栏、进度条、元数据面板、拖拽遮罩。
 
 import { t } from './i18n.js'
+import { materialStorage } from './materialStorage.js'
 
 export class UI {
   constructor(root) {
@@ -157,7 +158,7 @@ export class UI {
     })
   }
 
-  // 渲染材料清单（每种方块类型 + 数量）。materials 已按当前排序方向排好；sortAsc 决定排序按钮文案
+  // 渲染材料清单（数量 + 分别装箱所需潜影盒数）。materials 已按当前排序方向排好。
   renderMaterialList(materials, sortAsc) {
     if (!this.materialListBody) return
     if (this.materialSortBtn) this.materialSortBtn.textContent = sortAsc ? t('sortAsc') : t('sortDesc')
@@ -170,14 +171,20 @@ export class UI {
       return
     }
     this.materialListBody.innerHTML = materials
-      .map(
-        (m) => `
+      .map((m) => {
+        const storage = materialStorage(m.key || m.name, m.count)
+        const label = storage.reason ? t('materialStorage' + storage.reason) : t(storage.boxes === 1 ? 'materialShulkerOne' : 'materialShulkers', { n: storage.boxes.toLocaleString() })
+        const hint = storage.reason ? t('materialStorage' + storage.reason + 'Hint') : t('materialStorageCapacity', { stack: storage.stackSize, capacity: storage.capacity.toLocaleString() })
+        return `
         <li>
           <span class="material-icon" data-material="${escapeHtml(m.key || m.name)}" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m12 3 8 4.5v9L12 21l-8-4.5v-9zm-8 4.5 8 4.5 8-4.5M12 12v9"/></svg><img width="32" height="32" alt="" hidden /></span>
           <span class="material-name" title="${escapeHtml(m.key || m.name)}">${escapeHtml(m.name)}</span>
-          <span class="material-count">${m.count.toLocaleString()}</span>
+          <span class="material-quantity">
+            <span class="material-count">${m.count.toLocaleString()}</span>
+            <span class="material-storage" title="${escapeHtml(hint)}">${escapeHtml(label)}</span>
+          </span>
         </li>`
-      )
+      })
       .join('')
   }
 

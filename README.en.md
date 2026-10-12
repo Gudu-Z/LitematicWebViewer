@@ -31,7 +31,7 @@ Preview Minecraft `.litematic` / `.litematica` schematics—building blueprints 
 - Perspective and orthographic projection, with perspective as the default. Orthographic views help compare dimensions and inspect structures.
 - Image export studio with isometric views, transparent PNGs, custom resolution and aspect ratios, using the current schematic, resource packs and layer selection.
 - Region visibility and layer slicing: all, below, above or a single layer. Whole entities follow the Y layer of their saved position; sign text and other block details follow their source block.
-- Material counts by block, translated names and ascending/descending sorting.
+- Material counts by block, required shulker boxes for each material, translated names and ascending/descending sorting. Box counts use 27 slots and the item's stack limit, rounded up; shulker boxes cannot be nested.
 - Chinese and English interfaces.
 - Model catalog with categories, bilingual search, state combinations, and world, item, spawn egg and item-frame views.
 - Settings for background color, entity/region outline/dimension visibility, underwater fog and camera sensitivity.
