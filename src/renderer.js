@@ -10,6 +10,11 @@ import { bakeModel } from './modelBaker.js'
 import { addBlockEffects, portalMaterial, animateObject } from './blockEffects.js'
 import { addMovingPistons } from './movingPistons.js'
 import { setEntityHitboxesVisible } from './entityHitboxes.js'
+import { isAssetTexture } from './assets.js'
+
+function disposePrivateTexture(texture) {
+  if (texture && !isAssetTexture(texture)) texture.dispose()
+}
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
 const LAYER_GROUPS = ['entitiesGroup', 'signsGroup', 'headsGroup', 'bannersGroup', 'statuesGroup', 'potsGroup']
@@ -619,8 +624,8 @@ export class Renderer {
     }
   }
 
-  // disposeTextures=true 时连同方块贴图一起释放（资源包切换时贴图缓存已失效）。
-  // 层级/区域切换等只重建方块网格的场景传 false，复用缓存里的贴图，避免反复上传。
+  // 共享资源贴图由 AssetProvider 在资源包失效时统一释放。
+  // disposeTextures 只影响网格自己创建的贴图；重建场景保留共享贴图，避免反复上传。
   clear(disposeTextures = false) {
     this.clearBlocks(disposeTextures)
     this.clearSigns()
@@ -648,7 +653,7 @@ export class Renderer {
         const mats = Array.isArray(object.material) ? object.material : [object.material]
         mats.forEach((m) => {
           if (m) {
-            if (disposeTextures) m.map?.dispose()
+            if (disposeTextures) disposePrivateTexture(m.map)
             m.dispose()
           }
         })
@@ -662,7 +667,7 @@ export class Renderer {
       child.geometry?.dispose()
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       mats.forEach((m) => {
-        m.map?.dispose()
+        disposePrivateTexture(m.map)
         m.dispose()
       })
     }
@@ -674,7 +679,7 @@ export class Renderer {
       child.geometry?.dispose()
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       mats.forEach((m) => {
-        m.map?.dispose()
+        disposePrivateTexture(m.map)
         m.dispose()
       })
     }
@@ -687,7 +692,7 @@ export class Renderer {
         const mats = Array.isArray(o.material) ? o.material : [o.material]
         mats.forEach((m) => {
           if (m) {
-            m.map?.dispose()
+            disposePrivateTexture(m.map)
             m.dispose()
           }
         })
@@ -702,7 +707,7 @@ export class Renderer {
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       mats.forEach((m) => {
         if (m) {
-          m.map?.dispose()
+          disposePrivateTexture(m.map)
           m.dispose()
         }
       })
@@ -717,7 +722,7 @@ export class Renderer {
         const mats = Array.isArray(o.material) ? o.material : [o.material]
         mats.forEach((m) => {
           if (m) {
-            m.map?.dispose()
+            disposePrivateTexture(m.map)
             m.dispose()
           }
         })
@@ -726,15 +731,22 @@ export class Renderer {
   }
 
   clearEntities() {
+    const disposed = new Set()
+    const disposeOnce = resource => {
+      if (!resource || disposed.has(resource)) return
+      disposed.add(resource)
+      resource.dispose()
+    }
     while (this.entitiesGroup.children.length) {
-      const child = this.entitiesGroup.children.pop()
+      const child = this.entitiesGroup.children[this.entitiesGroup.children.length - 1]
+      this.entitiesGroup.remove(child)
       child.traverse((o) => {
-        if (o.geometry) o.geometry.dispose()
+        disposeOnce(o.geometry)
         const mats = Array.isArray(o.material) ? o.material : [o.material]
         mats.forEach((m) => {
           if (m) {
-            m.map?.dispose()
-            m.dispose()
+            if (!isAssetTexture(m.map)) disposeOnce(m.map)
+            disposeOnce(m)
           }
         })
       })
@@ -747,7 +759,7 @@ export class Renderer {
       c.geometry?.dispose()
       const mats = Array.isArray(c.material) ? c.material : [c.material]
       mats.forEach((m) => {
-        m?.map?.dispose()
+        disposePrivateTexture(m?.map)
         m?.dispose()
       })
     }

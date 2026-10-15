@@ -5,6 +5,11 @@
 import * as THREE from 'three'
 import { animateTexture } from './textureAnimation.js'
 
+// 贴图由资源提供者统一释放；模型只借用，清理某个场景不能使其他模型的贴图失效。
+// WeakSet 不会被 Texture.clone() 复制，也不阻止已释放贴图被垃圾回收。
+const assetTextures = new WeakSet()
+export const isAssetTexture = texture => !!texture && assetTextures.has(texture)
+
 // 默认资源可能因网络抖动或服务器暂时不可用而加载失败。只补试一次，
 // 并将最终失败交给调用方清理缓存；404/SPA 回退仍视为真正缺失，不补试。
 async function fetchAsset(url, read) {
@@ -56,10 +61,22 @@ export class AssetProvider {
     this.textureCache = new Map() // 纹理 key -> Promise<THREE.Texture|null>
     this.jsonCache = new Map() // 路径 -> Promise<object|null>
     this.animatedTextures = new Set()
+    this.cacheRevision = 0
+    this._ownedTextures = new Set()
+    this._cacheClearListeners = new Set()
+  }
+
+  // 派生模型缓存也需及时解除对旧资源包图片的引用，不等待下次模型构建。
+  onCacheClear(listener) {
+    this._cacheClearListeners.add(listener)
+    return () => this._cacheClearListeners.delete(listener)
   }
 
   // 清空两个缓存（资源包集合变化时，需丢弃旧的模型/贴图缓存以便重新解析）
   clearCaches() {
+    this.cacheRevision++
+    for (const listener of this._cacheClearListeners) listener()
+    for (const texture of this._ownedTextures) texture.dispose()
     this.animatedTextures.clear()
     this.textureCache.clear()
     this.jsonCache.clear()
@@ -128,22 +145,46 @@ export class AssetProvider {
 
   // 加载贴图。texKey 形如 "block/stone"（已归一化，不含 minecraft: 前缀和 textures/ 前缀）。
   getTexture(texKey) {
-    if (this.textureCache.has(texKey)) return this.textureCache.get(texKey)
+    return this._cachedTexture(texKey, () => this._getTexture(texKey))
+  }
+
+  _cachedTexture(key, load) {
+    if (this.textureCache.has(key)) return this.textureCache.get(key)
+    const revision = this.cacheRevision
     // 加载失败（null，如并发导致的瞬时解码失败）不缓存，下次调用重试；
     // 成功则缓存。避免一次瞬时失败把该贴图永久判为缺失。
-    const p = this._getTexture(texKey).then((tex) => {
-      if (!tex && this.textureCache.get(texKey) === p) this.textureCache.delete(texKey)
-      return tex
+    const p = load().catch(() => null).then(texture => {
+      if (revision !== this.cacheRevision || this.textureCache.get(key) !== p) {
+        // 切换资源包后才解码完成的旧贴图不能进入新缓存或动画更新列表。
+        if (texture) { assetTextures.add(texture); texture.dispose() }
+        return null
+      }
+      if (!texture) {
+        this.textureCache.delete(key)
+        return null
+      }
+      assetTextures.add(texture)
+      if (!this._ownedTextures.has(texture)) {
+        this._ownedTextures.add(texture)
+        // 缩略图资源会按预算提前淘汰；同步移除所有持有引用，避免清空时再次释放。
+        const onDispose = () => {
+          this._ownedTextures.delete(texture)
+          this.animatedTextures.delete(texture)
+          texture.removeEventListener('dispose', onDispose)
+        }
+        texture.addEventListener('dispose', onDispose)
+      }
+      if (texture.userData.updateAnimation) this.animatedTextures.add(texture)
+      return texture
     })
-    this.textureCache.set(texKey, p)
+    this.textureCache.set(key, p)
     return p
   }
 
   // 从外部 URL 加载贴图（如玩家皮肤），并缓存。返回 THREE.Texture 或 null。
   async getExternalTexture(url) {
     if (!url) return null
-    if (this.textureCache.has(url)) return this.textureCache.get(url)
-    const p = (async () => {
+    return this._cachedTexture(url, async () => {
       try {
         // 皮肤 URL 可能是 http://，但本站是 https，需统一成 https 避免混合内容被浏览器拦截
         const resp = await fetch(String(url).replace(/^http:/, 'https:'))
@@ -153,9 +194,7 @@ export class AssetProvider {
       } catch {
         return null
       }
-    })()
-    this.textureCache.set(url, p)
-    return p
+    })
   }
 
   async _getTexture(texKey) {
@@ -184,9 +223,7 @@ export class AssetProvider {
     // 图片解码失败（如大量并发展示框同时加载贴图时浏览器的瞬时失败）不应让整个实体渲染抛错，
     // 返回 null 让该贴图缺失、其余照常渲染。
     try {
-      const texture = await textureFromBlob(blob, animated)
-      if (texture.userData.updateAnimation) this.animatedTextures.add(texture)
-      return texture
+      return await textureFromBlob(blob, animated)
     } catch {
       return null
     }

@@ -15,6 +15,7 @@ import * as THREE from 'three'
 import { registerEntityHitbox } from './entityHitboxes.js'
 import { minecartRenderPose } from './entityMinecart.js'
 import { BlockModelResolver } from './blocks.js'
+import { frameItemKey, getFrameModel } from './frameModelCache.js'
 import { bakeModel } from './modelBaker.js'
 import { parsePotSherds } from './schematicDetails.js'
 import { ENTITY_MODELS } from './entityModelData.js'
@@ -224,6 +225,7 @@ function quadsToMesh(quads, offset, materialFor, vertexColors = false) {
 
 // 物品展示框
 async function buildItemFrame(entity, id, assets) {
+  const revision = assets.cacheRevision
   const group = new THREE.Group()
   const [px, py, pz] = entity.pos
   const facingByte = Number(entity.nbt?.Facing)
@@ -249,19 +251,21 @@ async function buildItemFrame(entity, id, assets) {
   const q = qx.clone().multiply(qy) // 等价原版 Rx·Ry（先绕 Y 再绕 X）
 
   // 框板 + 边框：直接用原版 block/item_frame（或 glow_item_frame）模型烘焙
-  const resolver = new BlockModelResolver(assets)
   const modelId = id === 'glow_item_frame' ? 'minecraft:glow_item_frame' : 'minecraft:item_frame'
-  const baked = await resolver.resolve(modelId, { map: 'false' })
-  if (baked && baked.quads && baked.quads.length) {
+  const frame = await getFrameModel(assets, modelId, async source => {
+    const baked = await new BlockModelResolver(source).resolve(modelId, { map: 'false' })
+    if (!baked?.quads?.length) return null
     const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
     const mats = new Map()
     await Promise.all(
       texKeys.map(async (tk) => {
-        const tex = await assets.getTexture(tk)
+        const tex = await source.getTexture(tk)
         if (tex) mats.set(tk, new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, flatShading: true }))
       }),
     )
-    const frame = quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
+    return quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
+  })
+  if (frame) {
     frame.position.copy(anchor)
     frame.quaternion.copy(q)
     group.add(frame)
@@ -274,7 +278,8 @@ async function buildItemFrame(entity, id, assets) {
   // buildFrameItem 把这两者存进 userData.fixedRot/fixedTrans。
   const item = entity.nbt?.Item
   if (item && item.id) {
-    const itemMesh = await buildFrameItem(item, resolver, assets)
+    const itemMesh = await getFrameModel(assets, frameItemKey(item), source =>
+      buildFrameItem(item, new BlockModelResolver(source), source))
     if (itemMesh) {
       const rot = Number(entity.nbt?.ItemRotation) || 0
       const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rot * 45 * DEG)
@@ -297,7 +302,7 @@ async function buildItemFrame(entity, id, assets) {
     }
   }
 
-  return group
+  return assets.cacheRevision === revision ? group : null
 }
 
 // 方块物品解析用的默认属性。
