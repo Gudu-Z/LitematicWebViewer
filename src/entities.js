@@ -278,8 +278,11 @@ async function buildItemFrame(entity, id, assets) {
   // buildFrameItem 把这两者存进 userData.fixedRot/fixedTrans。
   const item = entity.nbt?.Item
   if (item && item.id) {
+    // A failed inherited model can still produce geometry with default transforms
+    // (XK chests then face backwards at twice the size). Recover the initial batch
+    // before returning it, just as for the shared frame body above.
     const itemMesh = await getFrameModel(assets, frameItemKey(item), source =>
-      buildFrameItem(item, new BlockModelResolver(source), source))
+      buildFrameItem(item, new BlockModelResolver(source), source), { retryIncomplete: true })
     if (itemMesh) {
       const rot = Number(entity.nbt?.ItemRotation) || 0
       const qz = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), rot * 45 * DEG)

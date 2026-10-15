@@ -51,7 +51,8 @@ function chestModel(texKey, type) {
     elements: [
       texBox([x0, 0, 1], [x1, 10, 15], 0, 19), // 底座
       texBox([x0, 9, 1], [x1, 14, 15], 0, 0), // 箱盖
-      texBox([lockX, 8, 15], [lockX + lockW, 12, 16], 0, 0), // 锁扣
+      // ChestModel: PartPose.offset(0,9,1) + addBox(lockX,-2,14,lockW,4,1).
+      texBox([lockX, 7, 15], [lockX + lockW, 11, 16], 0, 0), // 锁扣
     ],
   }
 }

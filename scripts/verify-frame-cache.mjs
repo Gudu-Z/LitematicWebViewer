@@ -1,4 +1,4 @@
-// 展示框模型复用回归：输出基线在引入缓存之前采集，包含几何、UV、材质及世界矩阵。
+// 展示框模型复用回归：校验几何、UV、材质及世界矩阵，并覆盖初次加载失败的恢复。
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
@@ -97,10 +97,12 @@ const fixtures = [
   ['decorated_pot', { tag: { BlockEntityTag: { sherds: sherds.toReversed() } } }],
   ['potion', { tag: { CustomPotionColor: 0xff0000 } }], ['potion', { tag: { CustomPotionColor: 0x00ff00 } }],
 ]
-// Captured from the pre-cache renderer. Existing verify-frame-items independently checks vanilla sizes and pot ray intersections.
+// Baseline from the pre-cache renderer, with source-verified geometry corrections.
+// verify-frame-items independently checks chest corners, display transforms and pot surfaces.
 const expected = {
-  vanilla: '05443a17f99a3c2968e6c8abdbdd264952715405e06857b3f667576a293f83b9',
-  XK: '9f8825edb37634c340fb1d6c70ce78ccaf4f2ab2dee9aaf6cd5444fe837123ba',
+  // Updated for ChestModel's y=7..11 lock, independently checked by verify-frame-items.
+  vanilla: '4b5f60a59826b9b62f836448afe87da224157177a300311edbe37cf21690af28',
+  XK: '3180013e086913f4934ac9fd67da6903fa2dd0a7c009928a4b6e96327500a9ee',
 }
 
 try {
@@ -113,7 +115,7 @@ try {
     const objects = await Promise.all(built)
     for (const object of objects) snapshots.push(snapshot(object))
     const label = withPack ? 'XK' : 'vanilla'
-    assert.equal(createHash('sha256').update(JSON.stringify(snapshots)).digest('hex'), expected[label], label + ' frame output must match the pre-cache renderer')
+    assert.equal(createHash('sha256').update(JSON.stringify(snapshots)).digest('hex'), expected[label], label + ' frame output must match the reviewed baseline')
     clear(objects)
 
     const repeated = await Promise.all(Array.from({ length: 1000 }, (_, i) => frame(assets, makeItem('stone'), {
@@ -157,6 +159,30 @@ try {
     sameResources(largeA.children[0], largeB.children[0], 'Large item NBT must not disable frame-body reuse')
     assert.notEqual(meshes(largeA.children[1])[0].geometry, meshes(largeB.children[1])[0].geometry, 'Oversized NBT must bypass item-template caching')
     clear([largeA, largeB])
+  }
+
+  // XK copper chests inherit template_chest's fixed Ry(180) and scale(.5).
+  // Exhaust the sprite probe, model load and legacy-model fallback: returning
+  // this first batch without rebuilding would face backwards at twice the size.
+  const chestTemplate = 'models/item/template_chest.json'
+  for (const stage of ['', 'exposed_', 'weathered_', 'oxidized_']) {
+    const item = makeItem('waxed_' + stage + 'copper_chest'), assets = provider(true)
+    requests.delete(chestTemplate)
+    failure = path => path === chestTemplate && requests.get(path) <= 6 ? new Response(null, { status: 503 }) : null
+    const options = { facing: stage ? 1 : 3, rotation: stage ? 3 : 0 }
+    const objects = await Promise.all(Array.from({ length: 50 }, () => frame(assets, item, options)))
+    failure = null
+    const templateRequests = requests.get(chestTemplate)
+    const reference = await frame(provider(true), item, options)
+    for (const object of objects) {
+      assert.deepEqual(object.children[1].scale.toArray(), reference.children[1].scale.toArray(), item.id + ': a missing parent must not double the displayed size')
+      assert.deepEqual(object.children[1].quaternion.toArray(), reference.children[1].quaternion.toArray(), item.id + ': a missing parent must not reverse the chest')
+      assert.deepEqual(snapshot(object), snapshot(reference), item.id + ': the first displayed frame must retain the vanilla orientation, size and position')
+    }
+    assert.equal(templateRequests, 7, 'The initial item batch must recover its inherited display transform with one shared rebuild')
+    const next = await frame(assets, item, options)
+    for (const object of [...objects.slice(1), next]) sameResources(objects[0], object, 'Recovered copper items must share a complete cached template')
+    clear([...objects, reference, next])
   }
 
   // A shared first body failure must recover before returning this same batch,
@@ -288,7 +314,7 @@ try {
   hasCompleteFrame(refreshedFrame)
   assert.deepEqual(snapshot(refreshedFrame), snapshot(cachedFrame))
   clear([cachedFrame, refreshedFrame])
-  console.log('PASS frame cache: 108 pre-cache output snapshots, vanilla/XK 1000-frame reuse, transforms, cleanup/reopen, typed NBT, initial 50-frame transient recovery, bounded persistent failures/cached 404 and pack-switch races')
+  console.log('PASS frame cache: 108 output snapshots, vanilla/XK 1000-frame reuse, transforms, cleanup/reopen, typed NBT, initial 50-frame transient recovery, all four XK copper chest transforms after parent failures, bounded persistent failures/cached 404 and pack-switch races')
 } finally {
   globalThis.fetch = originalFetch
 }

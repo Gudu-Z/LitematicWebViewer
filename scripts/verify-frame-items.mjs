@@ -153,10 +153,17 @@ async function check(name, pose = 'standing', facing = 2, rotation = 0) {
   const frame = await buildEntityMesh({ id: 'minecraft:item_frame', pos, rotation: [0, 0], nbt: { Facing: facing, ItemRotation: rotation, Item: item } }, assets)
   assert.equal(frame.children.length, 2, name + ' 框体与物品都必须存在')
   frame.updateMatrixWorld(true)
-  const actual = new THREE.Box3().setFromPoints(actualPoints(frame.children[1]))
-  const transform = frameMatrix(pos, facing, rotation), expected = new THREE.Box3().setFromPoints((await expectedPoints(name, pose)).map(p => p.applyMatrix4(transform)))
+  const actualVertices = actualPoints(frame.children[1]), actual = new THREE.Box3().setFromPoints(actualVertices)
+  const transform = frameMatrix(pos, facing, rotation), expectedVertices = (await expectedPoints(name, pose)).map(p => p.applyMatrix4(transform))
+  const expected = new THREE.Box3().setFromPoints(expectedVertices)
   const label = `${assets.packs[0]?.name || '原版'} ${name}/${pose} facing=${facing} rotation=${rotation}`
   near(actual.min.toArray(), expected.min.toArray(), label + ' min'); near(actual.max.toArray(), expected.max.toArray(), label + ' max')
+  if (name === 'chest' || name.endsWith('_chest')) {
+    // ChestModel lock is offset(0,9,1) + addBox(7,-2,14,2,4,1): y=7..11.
+    // The body hides a displaced lock from an AABB-only check; compare corners too.
+    for (const point of actualVertices) assert.ok(expectedVertices.some(p => p.distanceTo(point) < EPS), label + ' unexpected chest corner ' + point.toArray())
+    for (const point of expectedVertices) assert.ok(actualVertices.some(p => p.distanceTo(point) < EPS), label + ' missing chest corner ' + point.toArray())
+  }
   // 标准头颅应以框内原点居中，不能重复叠加已烘焙的 +4px 偏移。
   if (name === 'skeleton_skull' && !assets.packs.some(p => p.name === 'override')) near(actual.getCenter(new THREE.Vector3()).toArray(), vector([0, 0, 0]).applyMatrix4(transform).toArray(), label + ' center')
   dispose(frame); checked++
@@ -249,7 +256,8 @@ try {
       for (const pose of ['standing', 'running', 'sitting', 'star']) await check(wax + oxidation + 'copper_golem_statue', pose)
     }
     // 六个附着面、八档旋转：包围盒同时约束尺寸、位置和旋转次序。
-    for (const name of ['stone', 'chest', 'copper_chest', 'waxed_copper_chest', 'copper_golem_statue', 'waxed_copper_golem_statue', 'skeleton_skull', 'shulker_box', 'decorated_pot', 'red_bed']) {
+    const copperChests = ['', 'waxed_'].flatMap(wax => ['', 'exposed_', 'weathered_', 'oxidized_'].map(stage => wax + stage + 'copper_chest'))
+    for (const name of ['stone', 'chest', ...copperChests, 'copper_golem_statue', 'waxed_copper_golem_statue', 'skeleton_skull', 'shulker_box', 'decorated_pot', 'red_bed']) {
       for (let facing = 0; facing < 6; facing++) for (let rotation = 0; rotation < 8; rotation++) await check(name, 'standing', facing, rotation)
     }
     for (const name of ['trapped_chest', 'ender_chest', 'red_shulker_box', 'creeper_head', 'zombie_head', 'wither_skeleton_skull']) await check(name)
