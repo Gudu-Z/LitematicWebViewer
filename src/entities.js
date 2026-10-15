@@ -264,7 +264,7 @@ async function buildItemFrame(entity, id, assets) {
       }),
     )
     return quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
-  })
+  }, { retryIncomplete: true })
   if (frame) {
     frame.position.copy(anchor)
     frame.quaternion.copy(q)
@@ -378,8 +378,11 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
   const holder = new THREE.Group()
 
   // 2D 物品：models/item/NAME.json 含 layer0（fixed 缩放 1，叠加框体 0.5 后总 0.5 = 8px）
-  let itemModel = await assets.getJSON('models/item/' + name + '.json')
-  const itemDef = await assets.getJSON('items/' + name + '.json')
+  const [modelJSON, itemDef] = await Promise.all([
+    assets.getJSON('models/item/' + name + '.json'),
+    assets.getJSON('items/' + name + '.json'),
+  ])
+  let itemModel = modelJSON
   const modelDefs = resolveItemModelDef(itemDef?.model, [], context, item)
   if (context === 'gui') itemModel = await resolver.loadModel(modelDefs[0]?.path || 'item/' + name) || itemModel
   // Modern definitions may select a differently named sprite (light_00..15, for example).

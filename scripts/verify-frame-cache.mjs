@@ -80,10 +80,10 @@ function sameResources(first, second, label) {
     assert.equal(mesh.material, b[i].material, label + ' material')
   })
 }
-function hasCompleteFrame(object) {
+function hasCompleteFrame(object, id = 'item_frame') {
   const count = key => meshes(object).filter(o => o.material.map?.name === key)
     .reduce((total, o) => total + o.geometry.attributes.position.count, 0)
-  assert.equal(count('block/item_frame'), 8, 'Frame backing must be complete')
+  assert.equal(count('block/' + id), 8, 'Frame backing must be complete')
   assert.equal(count('block/birch_planks'), 80, 'All four borders must be present')
 }
 
@@ -159,7 +159,69 @@ try {
     clear([largeA, largeB])
   }
 
-  // A failed first build may still contain its item or a partial body. Such results must never poison later openings.
+  // A shared first body failure must recover before returning this same batch,
+  // not only when a later batch reopens the evicted template.
+  const frameTemplate = 'models/block/template_item_frame.json'
+  for (const withPack of [false, true]) for (const id of ['item_frame', 'glow_item_frame']) {
+    requests.delete(frameTemplate)
+    failure = path => path === frameTemplate && requests.get(path) <= 2 ? new Response(null, { status: 503 }) : null
+    const assets = provider(withPack)
+    const objects = await Promise.all(Array.from({ length: 50 }, () => frame(assets, makeItem('stone'), { id })))
+    failure = null
+    objects.forEach(object => hasCompleteFrame(object, id))
+    assert.equal(requests.get(frameTemplate), 3, '50 callers must share one bounded body rebuild after the original fetch retry is exhausted')
+    for (const object of objects.slice(1)) sameResources(objects[0], object, 'The recovered first batch must still share its complete template')
+    const next = await frame(assets, makeItem('stone'), { id })
+    assert.equal(requests.get(frameTemplate), 3, 'The recovered body remains cached for subsequent frames')
+    clear([...objects, next])
+  }
+  for (const key of ['block/item_frame', 'block/birch_planks']) {
+    const assets = provider(), decode = assets._getTexture.bind(assets)
+    let attempts = 0
+    assets._getTexture = async path => path === key && ++attempts === 1 ? null : decode(path)
+    const objects = await Promise.all(Array.from({ length: 50 }, () => frame(assets)))
+    objects.forEach(object => hasCompleteFrame(object))
+    assert.equal(attempts, 2, 'A transient frame texture decode failure must recover for the initial callers')
+    clear(objects)
+  }
+  for (const status of [503, 404]) {
+    requests.delete(frameTemplate)
+    failure = path => path === frameTemplate ? new Response(null, { status }) : null
+    const assets = provider(), objects = await Promise.all(Array.from({ length: 50 }, () => frame(assets)))
+    failure = null
+    assert.equal(requests.get(frameTemplate), status === 503 ? 4 : 1, 'Persistent failures stay bounded; real 404s must not trigger a body retry')
+    assert.ok(objects.every(object => meshes(object).some(mesh => mesh.material.map?.name === 'block/stone')), 'Unavailable frame assets must not prevent the item from rendering')
+    if (status === 503) {
+      const recovered = await frame(assets)
+      hasCompleteFrame(recovered)
+      clear([recovered])
+    }
+    clear(objects)
+  }
+
+  // If the failed body finishes after a pack switch, do not retry it against the
+  // replacement pack or evict that pack's independently completed body template.
+  {
+    const assets = provider(), readJSON = assets._getJSON.bind(assets)
+    let started, rejectOld, templateReads = 0
+    const began = new Promise(resolve => { started = resolve })
+    assets._getJSON = path => {
+      if (path === frameTemplate && ++templateReads === 1) return new Promise((resolve, reject) => { rejectOld = reject; started() })
+      return readJSON(path)
+    }
+    const oldLoads = Promise.all(Array.from({ length: 50 }, () => frame(assets)))
+    await began
+    assets.addPack(new JSZip(), 'replacement')
+    const replacementFrame = await frame(assets)
+    rejectOld(new TypeError('Old frame dependency failed after pack replacement'))
+    assert.ok((await oldLoads).every(object => object === null), 'Every stale initial caller must discard the replaced pack')
+    assert.equal(templateReads, 2, 'A stale failure must not start an extra body retry')
+    const next = await frame(assets)
+    sameResources(replacementFrame, next, 'Stale failures preserve replacement body cache entries')
+    clear([replacementFrame, next])
+  }
+
+  // A persistently failed build may still contain its item or a partial body. Such results must never poison later openings.
   for (const failedPath of ['models/block/template_item_frame.json', 'models/block/cube_all.json', 'models/item/template_chest.json']) {
     const assets = provider(true), item = makeItem(failedPath.includes('chest') ? 'copper_chest' : 'stone')
     failure = path => path === failedPath ? new Response(null, { status: 503 }) : null
@@ -226,7 +288,7 @@ try {
   hasCompleteFrame(refreshedFrame)
   assert.deepEqual(snapshot(refreshedFrame), snapshot(cachedFrame))
   clear([cachedFrame, refreshedFrame])
-  console.log('PASS frame cache: 108 pre-cache output snapshots, vanilla/XK 1000-frame geometry/material reuse, independent transforms, shared resource cleanup/reopen, typed NBT keys, dependency recovery and pack-switch races')
+  console.log('PASS frame cache: 108 pre-cache output snapshots, vanilla/XK 1000-frame reuse, transforms, cleanup/reopen, typed NBT, initial 50-frame transient recovery, bounded persistent failures/cached 404 and pack-switch races')
 } finally {
   globalThis.fetch = originalFetch
 }

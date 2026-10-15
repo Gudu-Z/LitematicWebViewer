@@ -45,7 +45,7 @@ export function frameItemKey(item) {
   }
 }
 
-export async function getFrameModel(assets, key, build) {
+export async function getFrameModel(assets, key, build, { retryIncomplete = false } = {}) {
   if (assets.onCacheClear && !watchedAssets.has(assets)) {
     watchedAssets.add(assets)
     assets.onCacheClear(() => {
@@ -79,12 +79,22 @@ export async function getFrameModel(assets, key, build) {
         return result
       }
     }
-    pending = Promise.resolve().then(() => build(tracked)).then(model => {
+    pending = Promise.resolve().then(async () => {
+      let model
+      for (let attempt = 0; attempt < (retryIncomplete ? 2 : 1); attempt++) {
+        if (assets.cacheRevision !== revision) break
+        complete = true
+        model = await build(tracked)
+        if (complete || assets.cacheRevision !== revision || !retryIncomplete || attempt) break
+        // All concurrent frames wait for this one retry. Evicting only the cache
+        // would leave the first batch permanently missing its backing/borders.
+        await new Promise(resolve => setTimeout(resolve, 0))
+      }
       if (!complete || !model || assets.cacheRevision !== revision) {
         if (key && cache.models.get(key) === pending) cache.models.delete(key)
       }
       return assets.cacheRevision === revision ? model : null
-    }, error => {
+    }).catch(error => {
       if (key && cache.models.get(key) === pending) cache.models.delete(key)
       throw error
     })

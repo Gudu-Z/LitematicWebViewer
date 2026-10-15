@@ -782,22 +782,21 @@ export class Renderer {
   async renderEntities(entities, assets, data) {
     this.clearEntities()
     if (!entities || !entities.length) return
-    // 分批次渲染，避免「全方块」这类上千个展示框一次性并发加载贴图/模型，
-    // 超过浏览器并发上限导致部分贴图瞬时加载失败（进而整框报「实体渲染失败」）。
-    const BATCH = 50
-    const meshes = []
-    for (let i = 0; i < entities.length; i += BATCH) {
-      const chunk = entities.slice(i, i + BATCH)
-      const results = await Promise.all(
-        chunk.map((e) =>
-          buildEntityMesh(e, assets, data).catch((err) => {
-            console.error('实体渲染失败:', e.id, err)
-            return null
-          }),
-        ),
-      )
-      meshes.push(...results)
-    }
+    // Keep the same concurrency ceiling, but immediately reuse each free slot.
+    // A slow skin/model must not hold up the next 50 otherwise-ready entities.
+    const meshes = new Array(entities.length)
+    let next = 0
+    await Promise.all(Array.from({ length: Math.min(50, entities.length) }, async () => {
+      while (next < entities.length) {
+        const i = next++, entity = entities[i]
+        try {
+          meshes[i] = await buildEntityMesh(entity, assets, data)
+        } catch (err) {
+          console.error('实体渲染失败:', entity.id, err)
+          meshes[i] = null
+        }
+      }
+    }))
     const frames = []
     for (let i = 0; i < meshes.length; i++) {
       if (!meshes[i]) continue
