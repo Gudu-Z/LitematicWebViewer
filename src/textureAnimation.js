@@ -16,24 +16,33 @@ export function animateTexture(texture, source, metadata) {
   const canvas = document.createElement('canvas')
   canvas.width = layout.width; canvas.height = layout.height
   const context = canvas.getContext('2d', { willReadFrequently: !!metadata.interpolate })
+  const sourcePixels = new Map()
   const pixels = metadata.interpolate ? layout.frames.map(f => {
-    context.clearRect(0, 0, canvas.width, canvas.height)
-    draw(f.index); return context.getImageData(0, 0, canvas.width, canvas.height)
+    if (!sourcePixels.has(f.index)) {
+      context.clearRect(0, 0, canvas.width, canvas.height)
+      draw(f.index)
+      sourcePixels.set(f.index, context.getImageData(0, 0, canvas.width, canvas.height))
+    }
+    return sourcePixels.get(f.index)
   }) : null
   function draw(index) {
     context.drawImage(source, index % layout.columns * layout.width, Math.floor(index / layout.columns) * layout.height,
       layout.width, layout.height, 0, 0, layout.width, layout.height)
   }
-  let last = ''
+  let lastTick, lastIndex = -1, lastTime = -1, result = null
   texture.image = canvas
   texture.userData.updateAnimation = age => {
-    let time = ((Math.floor(age) % layout.duration) + layout.duration) % layout.duration, index = 0
+    const tick = Math.floor(age)
+    if (tick === lastTick) return
+    lastTick = tick
+    let time = ((tick % layout.duration) + layout.duration) % layout.duration, index = 0
     while (time >= layout.frames[index].time) time -= layout.frames[index++].time
-    const key = index + ':' + (metadata.interpolate ? time : 0)
-    if (key === last) return
-    last = key
+    const frameTime = metadata.interpolate ? time : 0
+    if (index === lastIndex && frameTime === lastTime) return
+    lastIndex = index; lastTime = frameTime
     if (pixels && time) {
-      const a = pixels[index], b = pixels[(index + 1) % pixels.length], result = context.createImageData(canvas.width, canvas.height)
+      const a = pixels[index], b = pixels[(index + 1) % pixels.length]
+      result ||= context.createImageData(canvas.width, canvas.height)
       const fraction = time / layout.frames[index].time
       for (let i = 0; i < result.data.length; i++) result.data[i] = i % 4 === 3 ? a.data[i] : a.data[i] * (1 - fraction) + b.data[i] * fraction
       context.putImageData(result, 0, 0)

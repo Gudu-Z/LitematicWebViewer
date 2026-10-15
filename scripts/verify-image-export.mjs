@@ -7,7 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises'
 
 // Run npm run build first. The isolated browser and output files stay in scripts/_ref/.
 const server = await preview({ preview: { host: '127.0.0.1', port: 5178, strictPort: true, open: false } })
-const profile = resolve('scripts/_ref/image-export-profile'), downloads = resolve('scripts/_ref/image-export-downloads')
+const profile = resolve('scripts/_ref/image-export-profile-' + Date.now()), downloads = resolve('scripts/_ref/image-export-downloads')
 await mkdir(profile, { recursive: true }); await mkdir(downloads, { recursive: true })
 await unlink(resolve(profile, 'DevToolsActivePort')).catch(() => {})
 const chrome = spawn(process.env.CHROME_PATH || (process.platform === 'win32' ? 'C:/Program Files/Google/Chrome/Application/chrome.exe' : '/usr/bin/chromium'), [
@@ -32,13 +32,13 @@ try {
     const message = JSON.parse(data)
     if (message.id) {
       const callback = pending.get(message.id); pending.delete(message.id)
-      if (message.error) callback.reject(Error(JSON.stringify(message.error)))
+      if (message.error) callback.reject(Error(callback.method + ': ' + JSON.stringify(message.error) + (callback.expression ? '\n' + callback.expression.slice(0, 250) : '')))
       else callback.resolve(message.result)
     } else if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails)
     else if (message.method === 'Browser.downloadProgress' && message.params.state === 'completed') completedDownloads.push(message.params.guid)
   }
   const send = (method, params = {}) => new Promise((resolve, reject) => {
-    const id = ++serial; pending.set(id, { resolve, reject }); socket.send(JSON.stringify({ id, method, params }))
+    const id = ++serial; pending.set(id, { resolve, reject, method, expression: params.expression }); socket.send(JSON.stringify({ id, method, params }))
   })
   const evaluate = async expression => {
     const result = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true })
@@ -66,7 +66,7 @@ try {
   const canvas = () => evaluate('document.querySelector("#exportFrame canvas").toDataURL()')
   await send('Runtime.enable'); await send('Page.enable')
   await send('Browser.setDownloadBehavior', { behavior: 'allowAndName', downloadPath: downloads, eventsEnabled: true })
-  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 1, mobile: false })
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1000, deviceScaleFactor: 2, mobile: false })
   await send('Page.navigate', { url: 'http://127.0.0.1:5178/?pack=vanilla' })
   await waitFor('document.querySelector("#imageExport") && !document.getElementById("imageExportBtn").disabled', 'export entry ready')
   assert.equal(await evaluate('document.getElementById("imageExportBtn").nextElementSibling.id'), 'uiToggleBtn')
@@ -119,8 +119,12 @@ try {
   await writeFile('scripts/_ref/image-export-result.png', Buffer.from(transparent.pixels.split(',')[1], 'base64'))
   await change('exportRatio', '1')
   await click('[data-export-size="4096"]')
+  // Track the real backing-buffer assignments. DPR restoration must not briefly
+  // multiply the full export dimensions before returning to the preview size.
+  await evaluate(`window.exportBuffers=[];for(const key of ['width','height']){const descriptor=Object.getOwnPropertyDescriptor(HTMLCanvasElement.prototype,key);Object.defineProperty(HTMLCanvasElement.prototype,key,{...descriptor,set(value){descriptor.set.call(this,value);if(this.closest('#exportFrame'))exportBuffers.push([this.width,this.height])}})};true`)
   const highResolution = await exportPNG(false)
   assert.equal(highResolution.width, 4096); assert.equal(highResolution.height, 4096, '4K export uses requested pixels, independent of viewport size')
+  assert.ok(await evaluate('exportBuffers.length>0 && exportBuffers.every(([w,h])=>w*h<=4096*4096)'), 'DPR=2 cleanup never allocates a temporary 8K output buffer')
   await change('exportWidth', 8192, 'input'); await change('exportHeight', 8192, 'input')
   assert.equal(await evaluate('document.getElementById("exportSave").disabled'), true, 'oversized images are rejected')
   await change('exportWidth', 512.5, 'input'); await change('exportHeight', 320, 'input')
@@ -160,7 +164,7 @@ try {
   await click('#exportBack')
   assert.equal(await evaluate('document.getElementById("renderMode").value'), 'single', 'export does not reset selected layers')
   assert.deepEqual(errors, [], 'no runtime exceptions')
-  console.log('Passed empty-state loading, existing scene/layer reuse, orbit/pan/zoom, exact PNG size/alpha/color through 4K, real downloads, UI exclusion, limits, state restoration, repeated disposal, mobile layout and English UI.')
+  console.log('Passed empty-state loading, existing scene/layer reuse, orbit/pan/zoom, exact PNG size/alpha/color through 4K at DPR=2 without oversized buffers, real downloads, UI exclusion, limits, state restoration, repeated disposal, mobile layout and English UI.')
 } finally {
   socket?.close(); chrome.kill()
   await new Promise(resolve => server.httpServer.close(resolve))

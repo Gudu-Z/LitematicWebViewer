@@ -61,6 +61,7 @@ export class AssetProvider {
     this.textureCache = new Map() // 纹理 key -> Promise<THREE.Texture|null>
     this.jsonCache = new Map() // 路径 -> Promise<object|null>
     this.animatedTextures = new Set()
+    this._animationTick = null
     this.cacheRevision = 0
     this._ownedTextures = new Set()
     this._cacheClearListeners = new Set()
@@ -78,6 +79,7 @@ export class AssetProvider {
     for (const listener of this._cacheClearListeners) listener()
     for (const texture of this._ownedTextures) texture.dispose()
     this.animatedTextures.clear()
+    this._animationTick = null
     this.textureCache.clear()
     this.jsonCache.clear()
   }
@@ -174,7 +176,11 @@ export class AssetProvider {
         }
         texture.addEventListener('dispose', onDispose)
       }
-      if (texture.userData.updateAnimation) this.animatedTextures.add(texture)
+      if (texture.userData.updateAnimation) {
+        this.animatedTextures.add(texture)
+        // A newly decoded animation still needs to catch up within the current tick.
+        this._animationTick = null
+      }
       return texture
     })
     this.textureCache.set(key, p)
@@ -246,6 +252,9 @@ export class AssetProvider {
   }
 
   updateAnimations(age) {
+    const tick = Math.floor(age)
+    if (tick === this._animationTick) return
+    this._animationTick = tick
     for (const texture of this.animatedTextures) texture.userData.updateAnimation(age)
   }
 }

@@ -147,7 +147,9 @@ export class ImageExport {
     this.controls?.dispose()
     // The scene belongs to the viewer. Release only this context, never shared geometry/textures.
     this.gl?.dispose(); this.gl?.forceContextLoss(); this.gl?.domElement.remove()
-    this.gl = null; this.controls = null
+    this.gl = null; this.controls = null; this.observer = null; this.camera = null
+    // A closed studio must not retain the previous schematic after the viewer replaces it.
+    this.modelData = null; this.animated = []
     if (this.wasActive !== undefined) { this.source.setActive(this.wasActive); this.wasActive = undefined }
     if (this.previousFocus?.isConnected) this.previousFocus.focus({ preventScroll: true })
     this.previousFocus = null
@@ -184,8 +186,9 @@ export class ImageExport {
       const visible = group.visible; group.visible = true
       group.traverseVisible(object => {
         if (!object.geometry || object.userData.isEntityHitbox) return
-        if (!object.geometry.boundingBox) object.geometry.computeBoundingBox()
-        box.union(object.geometry.boundingBox.clone().applyMatrix4(object.matrixWorld))
+        const bounded = object.isInstancedMesh ? object : object.geometry
+        if (!bounded.boundingBox) bounded.computeBoundingBox()
+        box.union(bounded.boundingBox.clone().applyMatrix4(object.matrixWorld))
       })
       group.visible = visible
     }
@@ -360,7 +363,9 @@ export class ImageExport {
       console.error('Image export failed', error)
       this.message('failed', {}, true)
     } finally {
-      this.gl.setPixelRatio(ratio); this.gl.setSize(size.x, size.y, false)
+      // setPixelRatio immediately resizes the current buffer. Shrink back to the
+      // preview first, so a 4K export on a DPR=2 display never allocates an 8K buffer.
+      this.gl.setSize(size.x, size.y, false); this.gl.setPixelRatio(ratio)
       this.exporting = false
       for (const [el, wasDisabled] of disabled) el.disabled = wasDisabled
       this.dialog.setAttribute('aria-busy', 'false')

@@ -11,6 +11,7 @@ import { addBlockEffects, portalMaterial, animateObject } from './blockEffects.j
 import { addMovingPistons } from './movingPistons.js'
 import { setEntityHitboxesVisible } from './entityHitboxes.js'
 import { isAssetTexture } from './assets.js'
+import { batchItemFrames, updateFrameBatches, freezeStaticObject } from './frameBatches.js'
 
 function disposePrivateTexture(texture) {
   if (texture && !isAssetTexture(texture)) texture.dispose()
@@ -221,6 +222,8 @@ export class Renderer {
   // 这里只初始化网格构建方法需要的容器；相机、控件、画布和事件仍由检查页统一管理。
   static async buildBlockPreview(data, assets) {
     const builder = Object.create(Renderer.prototype)
+    // The caller may attach/move this preview later (for example a moving piston).
+    builder._freezeStatic = false
     const root = new THREE.Group()
     for (const key of ['group', 'headsGroup', 'bannersGroup', 'statuesGroup', 'potsGroup']) {
       builder[key] = new THREE.Group()
@@ -741,6 +744,7 @@ export class Renderer {
       const child = this.entitiesGroup.children[this.entitiesGroup.children.length - 1]
       this.entitiesGroup.remove(child)
       child.traverse((o) => {
+        if (o.isInstancedMesh) disposeOnce(o)
         disposeOnce(o.geometry)
         const mats = Array.isArray(o.material) ? o.material : [o.material]
         mats.forEach((m) => {
@@ -794,9 +798,14 @@ export class Renderer {
       )
       meshes.push(...results)
     }
+    const frames = []
     for (let i = 0; i < meshes.length; i++) {
-      if (meshes[i]) this._addLayerObject(this.entitiesGroup, meshes[i], entities[i].pos[1])
+      if (!meshes[i]) continue
+      this._addLayerObject(this.entitiesGroup, meshes[i], entities[i].pos[1])
+      const id = entities[i].id?.replace(/^minecraft:/, '')
+      if ((id === 'item_frame' || id === 'glow_item_frame') && !entities[i].nbt?.Passengers?.length) frames.push(meshes[i])
     }
+    batchItemFrames(this.entitiesGroup, frames)
     setEntityHitboxesVisible(this.entitiesGroup, this.showEntityHitboxes)
   }
 
@@ -821,7 +830,7 @@ export class Renderer {
       const mat = new THREE.MeshLambertMaterial({ map: skinTex, alphaTest: 0.5, flatShading: true })
       const mesh = new THREE.Mesh(quadsToHeadGeometry(quads), mat)
       mesh.position.set(head.x, head.y, head.z)
-      this._addLayerObject(this.headsGroup, mesh, head.y)
+      this._addLayerObject(this.headsGroup, mesh, head.y, true)
     }
   }
 
@@ -874,7 +883,7 @@ export class Renderer {
       if (!mesh) continue
       mesh.position.set(s.x + 0.5, s.y, s.z + 0.5)
       mesh.rotation.y = ((BANNER_FACING_Y[s.facing] ?? 0) * Math.PI) / 180
-      this._addLayerObject(this.statuesGroup, mesh, s.y)
+      this._addLayerObject(this.statuesGroup, mesh, s.y, true)
     }
   }
 
@@ -897,7 +906,7 @@ export class Renderer {
       }
       group.position.set(pot.x + 0.5, pot.y + 0.5, pot.z + 0.5)
       group.rotation.y = ((BANNER_FACING_Y[pot.facing] ?? 0) * Math.PI) / 180
-      this._addLayerObject(this.potsGroup, group, pot.y)
+      this._addLayerObject(this.potsGroup, group, pot.y, true)
     }
   }
 
@@ -1031,14 +1040,16 @@ export class Renderer {
   // Use the saved anchor, not the model's centre or animated bounds. Frames can
   // contain world-space vertices, and banners deliberately extend below/above
   // their block. A vehicle and its passengers follow the vehicle's saved layer.
-  _addLayerObject(group, object, y) {
+  _addLayerObject(group, object, y, isStatic = false) {
     object.userData.schematicLayer = Math.floor(y)
     object.userData.layerBaseVisible = object.visible
     this._applyLayerVisibility(object)
     group.add(object)
+    if (isStatic && this._freezeStatic !== false) freezeStaticObject(object)
   }
 
   _applyLayerVisibility(object) {
+    if (object.userData.isFrameBatch) return
     const y = object.userData.schematicLayer
     const mode = this._layerMode || 'all', layer = this._layerY
     const visible = mode === 'single' ? y === layer : mode === 'below' ? y <= layer : mode === 'above' ? y >= layer : true
@@ -1051,6 +1062,7 @@ export class Renderer {
     for (const key of LAYER_GROUPS) {
       for (const object of this[key].children) this._applyLayerVisibility(object)
     }
+    updateFrameBatches(this.entitiesGroup)
   }
 
   setEntitiesVisible(v) { this.entitiesGroup.visible = !!v }
@@ -1094,7 +1106,7 @@ export class Renderer {
       const textPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.4), textMat)
       textPlane.position.copy(boardCenter).addScaledVector(front, 0.05)
       textPlane.setRotationFromQuaternion(quat)
-      this._addLayerObject(this.signsGroup, textPlane, sign.y)
+      this._addLayerObject(this.signsGroup, textPlane, sign.y, true)
     }
   }
 
@@ -1265,6 +1277,7 @@ export class Renderer {
         const points = new THREE.Points(geo, mat)
         points.renderOrder = -1
         this.group.add(points)
+        if (this._freezeStatic !== false) freezeStaticObject(points)
         continue
       }
       const geo = new THREE.BufferGeometry()
@@ -1277,6 +1290,7 @@ export class Renderer {
       const mesh = new THREE.Mesh(geo, mat)
       if (mat.uniforms?.gameTime) animateObject(mesh, age => { mat.uniforms.gameTime.value = (age % 24000) / 24000 })
       this.group.add(mesh)
+      if (!mat.uniforms?.gameTime && this._freezeStatic !== false) freezeStaticObject(mesh)
       // 超大几何体上传 GPU 时也定期让出主线程，避免最后一段卡顿
       if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
     }
