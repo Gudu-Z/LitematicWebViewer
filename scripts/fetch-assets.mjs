@@ -38,6 +38,7 @@ const EXTRA_FILES = [
   'assets/minecraft/textures/particle/bubble.png',
   'assets/minecraft/textures/environment/end_sky.png',
   'assets/minecraft/textures/misc/enchanted_glint_armor.png',
+  'assets/minecraft/textures/misc/enchanted_glint_armor.png.mcmeta',
 ]
 
 async function main() {

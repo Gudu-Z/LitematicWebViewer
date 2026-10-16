@@ -5,11 +5,13 @@ import { RELEASE_MODELS } from './releaseModelData.js'
 import { HUMANOID_ARMOR, ARMED_MOBS, HEAD_ITEMS, BODY_EQUIPMENT, SADDLED_MOBS, readEquipment, equippable, equipmentDye, itemComponent, itemName, hasGlint, EQUIPMENT_ITEMS } from './equipmentState.js'
 import { isBaby } from './entityBabies.js'
 import { BABY_MODELS } from './babyEntityModels.js'
+import { applyArmorGlint, trimmedArmorGlint } from './equipmentGlint.js'
 
 const short = value => String(value || '').replace(/^minecraft:/, '')
 const DEG = Math.PI / 180
 const clone = value => structuredClone(value)
 const visit = (parts, fn) => { for (const [name, part] of Object.entries(parts)) { fn(part, name); visit(part.children || {}, fn) } }
+const equipmentClocks = new WeakMap()
 // 按原版 BabyModelTransform 缩放几何但保留 UV；在绑定骨骼上应用，因此盔甲和手持物一起缩放。
 export function applyArmorStandPose(mesh, nbt, yaw = 0) {
   mesh.userData.resetPose()
@@ -56,10 +58,24 @@ function syncedLayer(group, body, model, material, name, { stand, offset, scale 
     mesh.scale.copy(body.scale).multiplyScalar(scale)
     if (offset) mesh.position.add(new THREE.Vector3(...offset))
     extraPose?.(mesh, age)
+    material.userData.updateGlint?.(age)
   }
   mesh.userData.updateAnimation = sync; sync(0)
-  const start = performance.now()
-  mesh.onBeforeRender = () => { sync(mesh.userData.animationAge ?? (performance.now() - start) / 50); mesh.updateMatrixWorld(true); mesh.skeleton.update() }
+  let clocks = equipmentClocks.get(group)
+  if (!clocks) equipmentClocks.set(group, clocks = new WeakMap())
+  mesh.onBeforeRender = renderer => {
+    let age = mesh.userData.animationAge
+    if (age == null) {
+      // All layers must use identical poses for the depth-equal trim/glint pass.
+      // One clock per renderer frame also keeps every equipped slot in phase.
+      let clock = clocks.get(renderer)
+      if (!clock || clock.frame !== renderer.info.render.frame) {
+        clocks.set(renderer, clock = { frame: renderer.info.render.frame, age: performance.now() / 50 })
+      }
+      age = clock.age
+    }
+    sync(age); mesh.updateMatrixWorld(true); mesh.skeleton.update()
+  }
   group.add(mesh)
   return mesh
 }
@@ -107,26 +123,29 @@ async function equipmentLayers(group, body, stack, slot, type, model, assets, op
     if (color == null) continue
     const map = await assets.getTexture('entity/equipment/' + type + '/' + short(layer.texture))
     if (!map) continue
-    const material = new THREE.MeshLambertMaterial({ map, color: color & 0xffffff, alphaTest: .1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1 - index, polygonOffsetUnits: -1 })
-    meshes.push(syncedLayer(group, body, model, material, 'equipment_' + slot + '_' + index, options))
+    const material = new THREE.MeshLambertMaterial({ map, color: color & 0xffffff, alphaTest: .1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 })
+    const mesh = syncedLayer(group, body, model, material, 'equipment_' + slot + '_' + index, options)
+    mesh.renderOrder = meshes.length + 1
+    meshes.push(mesh)
   }
   if (!meshes.length) return meshes
   const trim = await trimTexture(stack, type, info, assets)
-  if (trim) meshes.push(syncedLayer(group, body, model, new THREE.MeshLambertMaterial({ map: trim, alphaTest: .1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), 'equipment_' + slot + '_trim', options))
+  if (trim) {
+    const mesh = syncedLayer(group, body, model, new THREE.MeshLambertMaterial({ map: trim, alphaTest: .1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 }), 'equipment_' + slot + '_trim', options)
+    mesh.renderOrder = meshes.length + 1
+    meshes.push(mesh)
+  }
   if (hasGlint(stack)) {
     const texture = await assets.getTexture('misc/enchanted_glint_armor')
     if (texture) {
-      const map = texture.clone(); map.wrapS = map.wrapT = THREE.RepeatWrapping; map.repeat.set(8, 8); map.rotation = -Math.PI / 6
-      const material = new THREE.MeshBasicMaterial({ map, color: 0x8040cc, transparent: true, opacity: .45, blending: THREE.AdditiveBlending, depthWrite: false, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -5, polygonOffsetUnits: -5 })
-      // 光效沿用装备原始 UV 的透明遮罩，不能把头盔眼孔、鞘翅空白等区域填实。
-      const mask = meshes[0].material.map
-      material.onBeforeCompile = shader => {
-        shader.uniforms.equipmentMask = { value: mask }
-        shader.vertexShader = 'varying vec2 equipmentUv;\n' + shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\nequipmentUv = uv;')
-        shader.fragmentShader = 'uniform sampler2D equipmentMask;\nvarying vec2 equipmentUv;\n' + shader.fragmentShader.replace('#include <alphatest_fragment>', '#include <alphatest_fragment>\nif (texture2D(equipmentMask, equipmentUv).a < 0.1) discard;')
+      const meta = await assets.getJSON('textures/misc/enchanted_glint_armor.png.mcmeta')
+      const glintOptions = { blur: meta?.texture?.blur !== false }
+      if (!trim) applyArmorGlint(meshes[0].material, texture, glintOptions)
+      else {
+        const mesh = syncedLayer(group, body, model, trimmedArmorGlint(texture, glintOptions), 'equipment_' + slot + '_glint', options)
+        mesh.renderOrder = meshes.length + 1
+        meshes.push(mesh)
       }
-      const extraPose = options.extraPose
-      meshes.push(syncedLayer(group, body, model, material, 'equipment_' + slot + '_glint', { ...options, extraPose(mesh, age) { extraPose?.(mesh, age); map.offset.set(age * .002 % 1, age * .001 % 1) } }))
     }
   }
   return meshes
