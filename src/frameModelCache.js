@@ -54,7 +54,7 @@ export async function getFrameModel(assets, key, build, options = {}) {
   }
 }
 
-async function getFrameModelInTransaction(assets, key, build, { retryIncomplete = false } = {}) {
+async function getFrameModelInTransaction(assets, key, build, { retryIncomplete = false, requiredJSON = false, onIncomplete } = {}) {
   if (assets.onCacheClear && !watchedAssets.has(assets)) {
     watchedAssets.add(assets)
     const clear = () => {
@@ -84,9 +84,15 @@ async function getFrameModelInTransaction(assets, key, build, { retryIncomplete 
       tracked[method] = async path => {
         const request = assets[method](path)
         const result = await request
-        // Cached missing JSON is an optional resource (404/builtin parent), not a
-        // transient failure. Failed loads are evicted by AssetProvider for retry.
-        if (!result && (method !== 'getJSON' || assets.jsonCache?.get(path) !== request)) complete = false
+        if (!result) {
+          // Item lookups can probe optional JSON/builtin parents, but every JSON
+          // used by the frame body is required. A temporary 404/HTML fallback for
+          // its parent must not poison all frames and subsequent openings.
+          if (method !== 'getJSON' || requiredJSON || assets.jsonCache?.get(path) !== request) complete = false
+          if (method === 'getJSON' && requiredJSON && assets.jsonCache?.get(path) === request) {
+            assets.jsonCache.delete(path)
+          }
+        }
         return result
       }
     }
@@ -104,7 +110,9 @@ async function getFrameModelInTransaction(assets, key, build, { retryIncomplete 
       if (!complete || !model || assets.cacheRevision !== revision) {
         if (key && cache.models.get(key) === pending) cache.models.delete(key)
       }
-      return assets.cacheRevision === revision ? model : null
+      // A resource pack may deliberately supply an empty body. Only failed
+      // dependencies need repair; a valid empty model must stay invisible.
+      return { model, complete }
     }).catch(error => {
       if (key && cache.models.get(key) === pending) cache.models.delete(key)
       throw error
@@ -116,8 +124,10 @@ async function getFrameModelInTransaction(assets, key, build, { retryIncomplete 
       while (cache.models.size > MAX_MODELS) cache.models.delete(cache.models.keys().next().value)
     }
   }
-  const template = await pending
-  if (!template || assets.cacheRevision !== revision) return null
+  const { model: template, complete } = await pending
+  if (assets.cacheRevision !== revision) return null
+  if (!complete) onIncomplete?.()
+  if (!template) return null
   const instance = template.clone(true)
   // Object3D.clone JSON-serializes userData, which otherwise erases Quaternion's type.
   if (template.userData.fixedRot) instance.userData.fixedRot = template.userData.fixedRot.clone()

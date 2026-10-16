@@ -215,13 +215,11 @@ try {
     failure = path => path === frameTemplate ? new Response(null, { status }) : null
     const assets = provider(), objects = await Promise.all(Array.from({ length: 50 }, () => frame(assets)))
     failure = null
-    assert.equal(requests.get(frameTemplate), status === 503 ? 4 : 1, 'Persistent failures stay bounded; real 404s must not trigger a body retry')
+    assert.equal(requests.get(frameTemplate), status === 503 ? 4 : 2, 'Persistent required-body failures must retry once and stay bounded')
     assert.ok(objects.every(object => meshes(object).some(mesh => mesh.material.map?.name === 'block/stone')), 'Unavailable frame assets must not prevent the item from rendering')
-    if (status === 503) {
-      const recovered = await frame(assets)
-      hasCompleteFrame(recovered)
-      clear([recovered])
-    }
+    const recovered = await frame(assets)
+    hasCompleteFrame(recovered)
+    clear([recovered])
     clear(objects)
   }
 
@@ -314,7 +312,7 @@ try {
   hasCompleteFrame(refreshedFrame)
   assert.deepEqual(snapshot(refreshedFrame), snapshot(cachedFrame))
   clear([cachedFrame, refreshedFrame])
-  console.log('PASS frame cache: 108 output snapshots, vanilla/XK 1000-frame reuse, transforms, cleanup/reopen, typed NBT, initial 50-frame transient recovery, all four XK copper chest transforms after parent failures, bounded persistent failures/cached 404 and pack-switch races')
+  console.log('PASS frame cache: 108 output snapshots, vanilla/XK 1000-frame reuse, transforms, cleanup/reopen, typed NBT, initial 50-frame transient recovery, all four XK copper chest transforms after parent failures, bounded persistent failures/required 404 recovery and pack-switch races')
 } finally {
   globalThis.fetch = originalFetch
 }

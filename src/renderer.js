@@ -5,7 +5,7 @@
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
 import { fluidOfEntry, fluidHeight } from './geometry.js'
-import { buildEntityMesh, buildCopperGolemStatueMesh } from './entities.js'
+import { buildEntityMesh, buildCopperGolemStatueMesh, repairItemFrameBodies } from './entities.js'
 import { bakeModel } from './modelBaker.js'
 import { addBlockEffects, portalMaterial, animateObject } from './blockEffects.js'
 import { addMovingPistons } from './movingPistons.js'
@@ -897,6 +897,7 @@ export class Renderer {
   async renderEntities(entities, assets, data) {
     this.clearEntities()
     if (!entities || !entities.length) return
+    const revision = assets.cacheRevision
     // Keep the same concurrency ceiling, but immediately reuse each free slot.
     // A slow skin/model must not hold up the next 50 otherwise-ready entities.
     const meshes = new Array(entities.length)
@@ -912,6 +913,11 @@ export class Renderer {
         }
       }
     }))
+    if (assets.cacheRevision !== revision) return
+    // A temporary failure can outlast the first shared retry while later workers
+    // succeed. Complete those earlier bodies before batching; keep their items.
+    await repairItemFrameBodies(meshes)
+    if (assets.cacheRevision !== revision) return
     const frames = []
     for (let i = 0; i < meshes.length; i++) {
       if (!meshes[i]) continue

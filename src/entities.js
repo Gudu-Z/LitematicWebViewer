@@ -223,6 +223,22 @@ function quadsToMesh(quads, offset, materialFor, vertexColors = false) {
   return group
 }
 
+// Incomplete bodies can recover after later entities have loaded the same shared
+// template. Keep repair state out of cloned/serialized Object3D.userData.
+const incompleteFrameBodies = new WeakMap()
+
+export async function repairItemFrameBodies(roots) {
+  const repairs = new Set()
+  for (const root of roots) root?.traverse(object => {
+    const repair = incompleteFrameBodies.get(object)
+    if (repair) repairs.add(repair)
+  })
+  // All instances share the model request, including this final bounded retry.
+  await Promise.all([...repairs].map(async repair => {
+    try { await repair() } catch (error) { console.error('展示框框体补全失败:', error) }
+  }))
+}
+
 // 物品展示框
 async function buildItemFrame(entity, id, assets) {
   const revision = assets.cacheRevision
@@ -252,7 +268,7 @@ async function buildItemFrame(entity, id, assets) {
 
   // 框板 + 边框：直接用原版 block/item_frame（或 glow_item_frame）模型烘焙
   const modelId = id === 'glow_item_frame' ? 'minecraft:glow_item_frame' : 'minecraft:item_frame'
-  const frame = await getFrameModel(assets, modelId, async source => {
+  const buildBody = async source => {
     const baked = await new BlockModelResolver(source).resolve(modelId, { map: 'false' })
     if (!baked?.quads?.length) return null
     const texKeys = [...new Set(baked.quads.map((q) => q.texKey))]
@@ -264,12 +280,30 @@ async function buildItemFrame(entity, id, assets) {
       }),
     )
     return quadsToMesh(baked.quads, [-0.5, -0.5, -0.5], (tk) => mats.get(tk))
-  }, { retryIncomplete: true })
-  if (frame) {
-    frame.position.copy(anchor)
-    frame.quaternion.copy(q)
-    group.add(frame)
   }
+  let frame = null
+  const loadBody = async () => {
+    if (assets.cacheRevision !== revision) return
+    let incomplete = false
+    const replacement = await getFrameModel(assets, modelId, buildBody, {
+      retryIncomplete: true, requiredJSON: true,
+      onIncomplete: () => { incomplete = true },
+    })
+    if (assets.cacheRevision !== revision) return
+    if (replacement && (!frame || !incomplete)) {
+      if (frame) group.remove(frame)
+      frame = replacement
+      frame.position.copy(anchor)
+      frame.quaternion.copy(q)
+      group.add(frame)
+      // Preserve the original body/item order when a missing body is filled in.
+      group.children.splice(group.children.indexOf(frame), 1)
+      group.children.unshift(frame)
+    }
+    if (incomplete) incompleteFrameBodies.set(group, loadBody)
+    else incompleteFrameBodies.delete(group)
+  }
+  await loadBody()
 
   // 内部物品：框口 0.4375 处，绕框法线按 ItemRotation × 45° 旋转。
   // 框模型（template_item_frame）正面是 −z（+z 贴墙）。物品模型的 display.fixed 显示旋转
