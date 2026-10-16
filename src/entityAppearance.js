@@ -163,6 +163,12 @@ export function getMobAppearance(entity, id, data) {
     rolledUp: ['scared', 'rolling'].includes(short(n.state)),
   }
   let model = getModel(entry[0]), texture = entry[1], scale = entry[2] || model?.scale || 1, tint = 0xffffff
+  if (id === 'ender_dragon') {
+    // EnderDragonModel animates the model root as well as its children. Keep that
+    // root separate from the rig's coordinate conversion; the neutral offset also
+    // centers the cached culling sphere on the rendered dragon, not its bind pose.
+    model = { ...model, parts: { root: { pivot: [0, -32, -48], children: model.parts } } }
+  }
   const layers = []
   const add = (name, tex, layerModel = model, options = {}) => layers.push({ name, texture: tex, model: layerModel, mode: 'cutout', ...options })
   const variant = n['minecraft:variant'] ?? n.variant ?? n.Variant

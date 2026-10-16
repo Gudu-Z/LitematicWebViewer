@@ -366,13 +366,46 @@ export function applyIdlePose(parts, id, state, age) {
       }
       break
     case 'ender_dragon': {
-      // 无飞行轨迹历史的投影保持位置，取原版栖息相位驱动翅膀和下颚。
+      // EnderDragonModel.setupAnim (26.3). NBT has no flight-history samples:
+      // use the saved position/yaw for all samples and a steady idle wing phase.
+      // The model-root offset is essential even when the dragon does not move.
       const f = age * 0.1 * PI * 2
+      const wave = Math.sin(f - 1) + 1, bob = (wave * wave + wave * 2) * 0.05
+      origin('root', 'y', (bob - 2) * 16); origin('root', 'z', -48)
+      set('root', 'x', bob * 2 * DEG)
       set('jaw', 'x', (Math.sin(f) + 1) * 0.2)
+      // Sitting phases bend the neck down. Flying samples at a constant height
+      // have no extra neck pitch; the ordinary mob Rotation[1] is not used here.
+      const sitting = [5, 6, 7].includes(Number(nbt.DragonPhase))
+      let y = 20, z = -12
+      for (let i = 0; i < 5; i++) {
+        const angle = Math.cos(i * 0.45 + f) * 0.15 + (sitting ? i * DEG * 1.5 * 5 : 0)
+        origin('neck' + i, 'y', y); origin('neck' + i, 'z', z)
+        set('neck' + i, 'x', angle)
+        y += Math.sin(angle) * 10; z -= Math.cos(angle) * 10
+      }
+      origin('head', 'y', y); origin('head', 'z', z)
+      set('head', 'x', sitting ? 6 * DEG * 1.5 * 5 : 0)
       set('left_wing', 'x', 0.125 - Math.cos(f) * 0.2); set('right_wing', 'x', 0.125 - Math.cos(f) * 0.2)
       set('left_wing', 'y', -0.25); set('right_wing', 'y', 0.25)
       set('left_wing', 'z', -(Math.sin(f) + 0.125) * 0.8); set('right_wing', 'z', (Math.sin(f) + 0.125) * 0.8)
       set('left_wing_tip', 'z', (Math.sin(f + 2) + 0.5) * 0.75); set('right_wing_tip', 'z', -(Math.sin(f + 2) + 0.5) * 0.75)
+      for (const side of ['left', 'right']) {
+        set(side + '_front_leg', 'x', 1.3 + bob * 0.1)
+        set(side + '_front_leg_tip', 'x', -0.5 - bob * 0.1)
+        set(side + '_front_foot', 'x', 0.75 + bob * 0.1)
+        set(side + '_hind_leg', 'x', 1 + bob * 0.1)
+        set(side + '_hind_leg_tip', 'x', 0.5 + bob * 0.1)
+        set(side + '_hind_foot', 'x', 0.75 + bob * 0.1)
+      }
+      y = 10; z = 60
+      let tailPitch = 0
+      for (let i = 0; i < 12; i++) {
+        tailPitch += Math.sin(i * 0.45 + f) * 0.05
+        origin('tail' + i, 'y', y); origin('tail' + i, 'z', z)
+        set('tail' + i, 'x', tailPitch); set('tail' + i, 'y', PI)
+        y += Math.sin(tailPitch) * 10; z += Math.cos(tailPitch) * 10
+      }
       break
     }
   }

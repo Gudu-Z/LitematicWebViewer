@@ -908,6 +908,11 @@ async function buildMob(entity, id, assets, data) {
     // EnergySwirlOverlayFeatureRenderer 的 vertex RGB=(0.5,0.5,0.5)。
     if (mode === 'swirl') material.color.setRGB(0.5, 0.5, 0.5)
     const mesh = createEntityRig(definition.model, material)
+    if (id === 'ender_dragon') {
+      // EnderDragonRenderer: Ry(-yaw), T(0,0,1), S(-1,-1,1), T(0,-1.501,0).
+      // The rig already supplies T(0,1.5,0), S(1,-1,-1); the group supplies Ry(pi).
+      mesh.position.set(0, Math.fround(1.501) - 1.5, -1)
+    }
     mesh.name = definition.name
     mesh.renderOrder = definition.renderOrder || 0
     const sort = ['wind', 'translucent', 'swirl'].includes(mode) ? sortTransparentFaces(mesh) : null
@@ -949,7 +954,7 @@ async function buildMob(entity, id, assets, data) {
   await attachEquipment(group, body, entity, assets, buildEquippedItem)
   group.position.fromArray(entity.pos)
   const yaw = Number(entity.rotation?.[0]) || 0
-  group.rotation.y = id === 'ender_dragon' ? yaw * Math.PI / 180 - Math.PI : -yaw * Math.PI / 180
+  group.rotation.y = -yaw * Math.PI / 180 - (id === 'ender_dragon' ? Math.PI : 0)
   if (id === 'shulker') {
     // 吸附面绕方块中心旋转，DOWN 是默认立在地上的朝向。
     const direction = FACING_DIRS[Number(entity.nbt?.AttachFace) || 0]
