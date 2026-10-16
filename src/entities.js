@@ -408,6 +408,39 @@ async function addPotItemSides(base, item, assets) {
   return { ...base, quads: [...(base?.quads || []), ...body.quads] }
 }
 
+async function buildSpecialSkullItem(definition, assets) {
+  const special = definition?.special
+  if (special?.type !== 'minecraft:head' || !['dragon', 'piglin'].includes(special.kind)) return null
+  const dragon = special.kind === 'dragon'
+  const texture = special.texture ? 'entity/' + shortName(special.texture) : dragon ? 'entity/enderdragon/dragon' : 'entity/piglin/piglin'
+  const map = await assets.getTexture(texture)
+  if (!map) return null
+  const model = structuredClone(EQUIPMENT_MODELS[dragon ? 'DragonHead' : 'PiglinHead'])
+  const animation = Number(special.animation) || 0
+  // SkullSpecialRenderer uses a fixed animation value (default 0), even in a frame.
+  // setupAnim opens the dragon's jaw by .2 radians and splays piglin ears by ±.7.
+  if (dragon) model.parts.head.children.jaw.rot[0] = (Math.sin(animation * Math.PI * .2) + 1) * .2
+  else {
+    model.parts.head.children.left_ear.rot[2] = -(Math.cos(animation * Math.PI * .2 * 1.2) + 2.5) * .2
+    model.parts.head.children.right_ear.rot[2] = (Math.cos(animation * Math.PI * .2) + 2.5) * .2
+  }
+  const mesh = createEntityModelMesh(model, new THREE.MeshLambertMaterial({ map, alphaTest: .5, flatShading: true }))
+  // ItemTransform centering precedes the item's local T·L·S·R transformation.
+  // Undo compileModel's feet-at-zero conversion to recover vanilla ModelPart axes.
+  const local = definition.transform || {}
+  const matrix = new THREE.Matrix4().makeTranslation(-.5, -.5, -.5)
+    .multiply(new THREE.Matrix4().makeTranslation(...(local.translation || [0, 0, 0])))
+  if (local.left_rotation) matrix.multiply(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().fromArray(local.left_rotation)))
+  matrix.multiply(new THREE.Matrix4().makeScale(...(local.scale || [1, 1, 1])))
+  if (local.right_rotation) matrix.multiply(new THREE.Matrix4().makeRotationFromQuaternion(new THREE.Quaternion().fromArray(local.right_rotation)))
+  // DragonHeadModel's PartPose.offset(0,-7.986666,0).scaled(.75) scales BOTH
+  // the head pivot and all descendants; the generated recipe retains the unscaled pivot.
+  if (dragon) matrix.multiply(new THREE.Matrix4().makeScale(.75, .75, .75))
+  matrix.multiply(new THREE.Matrix4().makeTranslation(0, 1.5, 0)).multiply(new THREE.Matrix4().makeScale(1, -1, -1))
+  mesh.geometry.applyMatrix4(matrix)
+  return mesh
+}
+
 // 框内物品网格：先按物品模型判定——含 layer0 的 2D 物品（小麦/铁轨/箭/剑等）渲染成平面贴图；
 // 否则按方块模型渲染（游戏内方块图标即方块模型）。
 async function buildFrameItem(item, resolver, assets, context = 'fixed') {
@@ -522,6 +555,13 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
     }
   }
   if (!fixed) fixed = (await resolver.loadModel('item/' + name))?.display?.fixed
+  if (!baked && modelDefs.length === 1) {
+    const skull = await buildSpecialSkullItem(modelDefs[0], assets)
+    if (skull) {
+      holder.add(skull)
+      return applyFrameItemDisplay(holder, fixed)
+    }
+  }
   if (!baked || !baked.quads || !baked.quads.length) {
     if (name.endsWith('_banner')) {
       // BannerModelRenderer.renderAsItem 使用立地旗模型，rotation=0；旗面不能遗漏，

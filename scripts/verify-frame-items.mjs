@@ -118,13 +118,40 @@ function specialPoints(special) {
     default: throw new Error('无独立预期几何：' + special.type)
   }
 }
+
+// Official 26.3 client (SHA-1 e877b6a07acd633fb3bb475002175cec036e7b87):
+// DragonHeadModel.createHeadLayer/setupAnim, PiglinModel.addHead and
+// PiglinHeadModel.setupAnim, independently evaluated with matrices.
+// PartPose.scaled scales the dragon's pivot as well.
+function skullPoints({ kind, animation = 0 }) {
+  const cube = (from, to, matrix = new THREE.Matrix4()) => corners(from, to).map(p => p.applyMatrix4(matrix).multiplyScalar(1 / 16))
+  if (kind === 'dragon') {
+    const head = S(.75).multiply(T(0, -7.986666, 0))
+    const jaw = head.clone().multiply(T(0, 4, -8)).multiply(R([(Math.sin(animation * Math.PI * .2) + 1) * .2, 0, 0], 'ZYX', 1))
+    return [
+      ...cube([-6, -1, -24], [6, 4, -8], head), ...cube([-8, -8, -10], [8, 8, 6], head),
+      ...cube([-5, -12, -4], [-3, -8, 2], head), ...cube([3, -12, -4], [5, -8, 2], head),
+      ...cube([-5, -3, -22], [-3, -1, -18], head), ...cube([3, -3, -22], [5, -1, -18], head),
+      ...cube([-6, 0, -16], [6, 4, 0], jaw),
+    ]
+  }
+  const left = T(4.5, -6, 0).multiply(R([0, 0, -(Math.cos(animation * Math.PI * .2 * 1.2) + 2.5) * .2], 'ZYX', 1))
+  const right = T(-4.5, -6, 0).multiply(R([0, 0, (Math.cos(animation * Math.PI * .2) + 2.5) * .2], 'ZYX', 1))
+  return [
+    ...cube([-5, -8, -4], [5, 0, 4]), ...cube([-2, -4, -5], [2, 0, -4]),
+    ...cube([2, -2, -5], [3, 0, -4]), ...cube([-3, -2, -5], [-2, 0, -4]),
+    ...cube([0, 0, -2], [1, 5, 2], left), ...cube([-1, 0, -2], [0, 5, 2], right),
+  ]
+}
+const isAnimatedSkull = def => def.type === 'minecraft:special' && def.model?.type === 'minecraft:head' && ['dragon', 'piglin'].includes(def.model.kind)
 async function expectedPoints(name, pose) {
   const item = await assets.getJSON('items/' + name + '.json'), result = []
   for (const def of definition(item.model, pose)) {
     const isSpecial = def.type === 'minecraft:special', m = await model(isSpecial ? def.base : def.model)
-    const points = isSpecial ? specialPoints(def.model) : jsonPoints(m), matrix = fixedMatrix(m.display?.fixed)
+    const skull = isAnimatedSkull(def)
+    const points = skull ? skullPoints(def.model) : isSpecial ? specialPoints(def.model) : jsonPoints(m), matrix = fixedMatrix(m.display?.fixed)
     // specialPoints 已把官方特殊渲染器及其 item transformation 换算到方块坐标。
-    if (!isSpecial) for (const transform of def.transforms) matrix.multiply(localTransform(transform))
+    if (!isSpecial || skull) for (const transform of def.transforms) matrix.multiply(localTransform(transform))
     result.push(...points.map(p => p.applyMatrix4(matrix)))
   }
   assert.ok(result.length, name + ' 预期顶点不能为空')
@@ -158,15 +185,66 @@ async function check(name, pose = 'standing', facing = 2, rotation = 0) {
   const expected = new THREE.Box3().setFromPoints(expectedVertices)
   const label = `${assets.packs[0]?.name || '原版'} ${name}/${pose} facing=${facing} rotation=${rotation}`
   near(actual.min.toArray(), expected.min.toArray(), label + ' min'); near(actual.max.toArray(), expected.max.toArray(), label + ' max')
-  if (name === 'chest' || name.endsWith('_chest')) {
+  if (name === 'chest' || name.endsWith('_chest') || ['dragon_head', 'piglin_head'].includes(name)) {
     // ChestModel lock is offset(0,9,1) + addBox(7,-2,14,2,4,1): y=7..11.
     // The body hides a displaced lock from an AABB-only check; compare corners too.
-    for (const point of actualVertices) assert.ok(expectedVertices.some(p => p.distanceTo(point) < EPS), label + ' unexpected chest corner ' + point.toArray())
-    for (const point of expectedVertices) assert.ok(actualVertices.some(p => p.distanceTo(point) < EPS), label + ' missing chest corner ' + point.toArray())
+    for (const point of actualVertices) assert.ok(expectedVertices.some(p => p.distanceTo(point) < EPS), label + ' unexpected corner ' + point.toArray())
+    for (const point of expectedVertices) assert.ok(actualVertices.some(p => p.distanceTo(point) < EPS), label + ' missing corner ' + point.toArray())
   }
   // 标准头颅应以框内原点居中，不能重复叠加已烘焙的 +4px 偏移。
   if (name === 'skeleton_skull' && !assets.packs.some(p => p.name === 'override')) near(actual.getCenter(new THREE.Vector3()).toArray(), vector([0, 0, 0]).applyMatrix4(transform).toArray(), label + ' center')
   dispose(frame); checked++
+}
+
+async function checkSkullContexts(name) {
+  const item = { id: 'minecraft:' + name, count: 1 }, def = (await assets.getJSON('items/' + name + '.json')).model
+  const base = await model(def.base)
+  for (const context of ['gui', 'thirdperson_righthand', 'thirdperson_lefthand']) {
+    const object = context === 'gui' ? await buildGuiItem(item, assets) : await buildEquippedItem(item, assets, context)
+    const display = structuredClone(base.display?.[context] || base.display?.thirdperson_righthand || {})
+    if (context === 'thirdperson_lefthand') {
+      display.rotation = (display.rotation || [0, 0, 0]).map((v, i) => i ? -v : v)
+      display.translation = (display.translation || [0, 0, 0]).map((v, i) => i ? v : -v)
+    }
+    const matrix = fixedMatrix(display).multiply(localTransform(def.transformation || {}))
+    const expected = skullPoints(def.model).map(p => p.applyMatrix4(matrix)), actual = actualPoints(object)
+    for (const p of expected) assert.ok(actual.some(v => v.distanceTo(p) < EPS), `${name}/${context}: missing skull corner ${p.toArray()}`)
+    for (const p of actual) assert.ok(expected.some(v => v.distanceTo(p) < EPS), `${name}/${context}: unexpected skull corner ${p.toArray()}`)
+    dispose(object)
+  }
+}
+
+// Check actual textured surfaces, including mirrored dragon horns and tilted ears.
+// Coordinates/UVs are from vanilla ModelPart.Cube, before the item transformation.
+async function checkSkullSurfaces(name) {
+  const def = (await assets.getJSON('items/' + name + '.json')).model, base = await model(def.base)
+  const frame = await buildEntityMesh({ id: 'minecraft:item_frame', pos: [0, 0, 0], rotation: [0, 0], nbt: { Facing: 2, Item: { id: 'minecraft:' + name } } }, assets)
+  frame.updateMatrixWorld(true)
+  const matrix = frameMatrix([0, 0, 0], 2, 0).multiply(fixedMatrix(base.display.fixed)).multiply(localTransform(def.transformation)).multiply(S(1 / 16))
+  const dragon = name === 'dragon_head'
+  if (dragon) matrix.multiply(S(.75)).multiply(T(0, -7.986666, 0))
+  const samples = dragon ? [
+    { point: [-4.5, -11, -4], uv: [7.5 / 256, 7 / 256] },
+    { point: [3.5, -11, -4], uv: [6.5 / 256, 7 / 256] },
+    { point: [0, 0, -24], uv: [198 / 256, 61 / 256] },
+  ] : [
+    { point: [0, -3, -5], uv: [34 / 64, 3 / 64] },
+    { point: [2.5, -1, -5], uv: [3.5 / 64, 6 / 64] },
+    { point: [-2.5, -1, -5], uv: [3.5 / 64, 2 / 64] },
+    { point: [.5, 4, -2], uv: [55.5 / 64, 14 / 64], part: T(4.5, -6, 0).multiply(R([0, 0, -.7], 'ZYX', 1)) },
+    { point: [-.5, 4, -2], uv: [43.5 / 64, 14 / 64], part: T(-4.5, -6, 0).multiply(R([0, 0, .7], 'ZYX', 1)) },
+  ]
+  for (const sample of samples) {
+    const transform = matrix.clone().multiply(sample.part || new THREE.Matrix4()), point = vector(sample.point).applyMatrix4(transform)
+    const normal = vector([0, 0, -1]).transformDirection(transform)
+    const ray = new THREE.Raycaster(point.clone().addScaledVector(normal, .02), normal.clone().negate(), 0, .04)
+    const hit = ray.intersectObject(frame.children[1], true)[0]
+    assert.ok(hit, `${name}: missing surface ${sample.point}`)
+    near(hit.point.toArray(), point.toArray(), name + ' surface')
+    near(hit.uv.toArray(), sample.uv, name + ' UV')
+    assert.equal(hit.object.material.map.name, dragon ? 'entity/enderdragon/dragon' : 'entity/piglin/piglin')
+  }
+  dispose(frame)
 }
 
 // 包围盒无法发现陶罐只剩罐口/罐底：射线必须真正命中四面罐身。
@@ -257,17 +335,21 @@ try {
     }
     // 六个附着面、八档旋转：包围盒同时约束尺寸、位置和旋转次序。
     const copperChests = ['', 'waxed_'].flatMap(wax => ['', 'exposed_', 'weathered_', 'oxidized_'].map(stage => wax + stage + 'copper_chest'))
-    for (const name of ['stone', 'chest', ...copperChests, 'copper_golem_statue', 'waxed_copper_golem_statue', 'skeleton_skull', 'shulker_box', 'decorated_pot', 'red_bed']) {
+    for (const name of ['stone', 'chest', ...copperChests, 'copper_golem_statue', 'waxed_copper_golem_statue', 'skeleton_skull', 'dragon_head', 'piglin_head', 'shulker_box', 'decorated_pot', 'red_bed']) {
       for (let facing = 0; facing < 6; facing++) for (let rotation = 0; rotation < 8; rotation++) await check(name, 'standing', facing, rotation)
     }
     for (const name of ['trapped_chest', 'ender_chest', 'red_shulker_box', 'creeper_head', 'zombie_head', 'wither_skeleton_skull']) await check(name)
-    for (const name of ['copper_chest', 'copper_golem_statue', 'waxed_copper_golem_statue', 'skeleton_skull', 'shulker_box', 'decorated_pot', 'stone', 'red_bed']) {
+    for (const name of ['copper_chest', 'copper_golem_statue', 'waxed_copper_golem_statue', 'skeleton_skull', 'dragon_head', 'piglin_head', 'shulker_box', 'decorated_pot', 'stone', 'red_bed']) {
       const gui = await buildGuiItem({ id: 'minecraft:' + name, count: 1 }, assets)
       assert.ok(gui, name + ' GUI 不可丢失')
       const points = actualPoints(gui); assert.ok(points.length && points.every(p => p.toArray().every(Number.isFinite)), name + ' GUI 顶点必须有限')
       dispose(gui)
     }
     await checkPots(packName)
+    for (const name of ['dragon_head', 'piglin_head']) {
+      await checkSkullContexts(name)
+      await checkSkullSurfaces(name)
+    }
   }
   assets.clearPacks()
   const override = new JSZip(), fixed = { rotation: [15, 40, -20], translation: [2, -3, 1], scale: [.3, .7, 1.2] }
@@ -276,9 +358,36 @@ try {
     override.file('assets/minecraft/models/item/' + name + '.json', JSON.stringify({ ...original, display: { ...original.display, fixed } }))
   }
   assets.addPack(override, 'override')
-  for (const name of ['copper_chest', 'copper_golem_statue', 'skeleton_skull', 'shulker_box']) for (const facing of [0, 2, 5]) for (const rotation of [0, 1, 3]) await check(name, 'standing', facing, rotation)
+  for (const name of ['copper_chest', 'copper_golem_statue', 'skeleton_skull', 'dragon_head', 'piglin_head', 'shulker_box']) for (const facing of [0, 2, 5]) for (const rotation of [0, 1, 3]) await check(name, 'standing', facing, rotation)
   assets.removePack('override')
-  for (const name of ['copper_chest', 'copper_golem_statue', 'skeleton_skull', 'shulker_box']) await check(name)
+  for (const name of ['copper_chest', 'copper_golem_statue', 'skeleton_skull', 'dragon_head', 'piglin_head', 'shulker_box']) await check(name)
+  const skullOverride = new JSZip()
+  for (const name of ['dragon_head', 'piglin_head']) {
+    const original = JSON.parse(readFileSync(root + 'items/' + name + '.json', 'utf8'))
+    original.model.model.animation = 2.75
+    original.model.model.texture = 'minecraft:skull_audit/' + name
+    original.model.transformation = {
+      translation: [.7, -.15, .4], scale: [.8, 1.2, .6],
+      left_rotation: new THREE.Quaternion().setFromEuler(new THREE.Euler(.2, -.4, .1)).toArray(),
+      right_rotation: new THREE.Quaternion().setFromEuler(new THREE.Euler(-.3, .1, .4)).toArray(),
+    }
+    skullOverride.file('assets/minecraft/items/' + name + '.json', JSON.stringify(original))
+    skullOverride.file('assets/minecraft/textures/entity/skull_audit/' + name + '.png', readFileSync(root + 'textures/entity/piglin/piglin.png'))
+  }
+  assets.addPack(skullOverride, 'skull-override')
+  for (const name of ['dragon_head', 'piglin_head']) {
+    await check(name); await check(name, 'standing', 5, 3); await checkSkullContexts(name)
+    const gui = await buildGuiItem({ id: 'minecraft:' + name }, assets)
+    gui.traverse(o => { if (o.isMesh) assert.equal(o.material.map.name, 'entity/skull_audit/' + name) })
+    dispose(gui)
+  }
+  assets.removePack('skull-override')
+  const skullReplacement = new JSZip()
+  for (const name of ['dragon_head', 'piglin_head']) skullReplacement.file('assets/minecraft/items/' + name + '.json', JSON.stringify({ model: { type: 'minecraft:model', model: 'minecraft:block/diamond_block' } }))
+  assets.addPack(skullReplacement, 'skull-replacement')
+  for (const name of ['dragon_head', 'piglin_head']) await check(name)
+  assets.removePack('skull-replacement')
+  for (const name of ['dragon_head', 'piglin_head']) { await check(name); await checkSkullSurfaces(name) }
   // 资源包用普通模型替代陶罐时，应完整尊重模型，不能再叠加特殊渲染器侧面。
   const replacement = new JSZip()
   replacement.file('assets/minecraft/items/decorated_pot.json', JSON.stringify({ model: { type: 'minecraft:model', model: 'minecraft:block/diamond_block' } }))
@@ -291,7 +400,7 @@ try {
   const restoredPot = await makePotFrame({})
   assertPotSides(restoredPot.object, restoredPot.transform, blankPot, '卸载普通模型恢复完整陶罐')
   dispose(restoredPot.frame)
-  console.log(`通过：${checked} 个展示框尺寸/位置/姿态组合、${potSurfaceChecks} 次陶罐表面射线，原版与 XK、铜制品变种、雕像四姿势、陶片格式/UV/朝向与 GUI/手持、资源包覆盖和卸载恢复。`)
+  console.log(`通过：${checked} 个展示框尺寸/位置/姿态组合、${potSurfaceChecks} 次陶罐表面射线，原版与 XK、龙首/猪灵头颅顶点及表面 UV、铜制品变种、雕像四姿势、陶片格式/朝向与 GUI/手持、资源包覆盖和卸载恢复。`)
 } finally {
   globalThis.fetch = oldFetch
 }

@@ -193,7 +193,7 @@ const variants = [item('stone'), item('diamond'), item('copper_chest'), item('wa
   item('decorated_pot', { components: { 'minecraft:pot_decorations': Object.fromEntries(['back', 'left', 'right', 'front'].map((side, i) => [side, sherds[i]])) } }),
   item('decorated_pot', { tag: { BlockEntityTag: { sherds: sherds.toReversed() } } }),
   item('potion', { tag: { CustomPotionColor: 0xff0000 } }), item('potion', { tag: { CustomPotionColor: 0x00ff00 } }),
-  item('red_banner'), item('shulker_box'), item('red_bed'), item('skeleton_skull'),
+  item('red_banner'), item('shulker_box'), item('red_bed'), item('skeleton_skull'), item('dragon_head'), item('piglin_head'),
 ]
 
 try {
