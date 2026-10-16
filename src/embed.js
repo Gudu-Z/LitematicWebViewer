@@ -145,6 +145,7 @@ async function pump() {
     controller = new AbortController()
     state('loading', t('loading'))
     const endTextureLoad = assets.beginTextureLoad()
+    let endSceneUpdate
     try {
       let file, url
       if (typeof request.source === 'string') {
@@ -156,6 +157,7 @@ async function pump() {
       }
       if (requested) continue
       await initialize()
+      endSceneUpdate = renderer.beginSceneUpdate()
       const data = await parseLitematica(await file.arrayBuffer(), value => state('loading', t('loading'), value * .2))
       if (requested) continue
       const baked = await Promise.all(data.palette.map(entry => resolver.resolve(entry.name, entry.properties)))
@@ -178,8 +180,10 @@ async function pump() {
     } catch (error) {
       if (!requested) state('error', words[error.message] ? t(error.message) : `${t('failed')} ${error.message}`)
     } finally {
-      endTextureLoad()
-      assets.trimTextures()
+      try {
+        endTextureLoad()
+        assets.trimTextures()
+      } finally { endSceneUpdate?.() }
     }
   }
   pumping = false

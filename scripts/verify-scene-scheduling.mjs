@@ -109,6 +109,46 @@ try {
   document.hidden = true; viewer.requestRender()
   assert.equal(frames.size, 0)
   document.hidden = false; viewer.requestRender(); flush()
+
+  // Real async renderer entry points must cancel draws while awaiting assets,
+  // including nested builders and failures, without changing export visibility.
+  let releaseBuild
+  viewer._buildBlockMeshes = async data => {
+    if (data === 'outer') return viewer.renderBlocks('inner', assets)
+    await new Promise(resolve => { releaseBuild = resolve })
+    if (data === 'failure') throw new Error('Injected build failure')
+    return data
+  }
+  viewer.requestRender(true)
+  const building = viewer.renderBlocks('outer', assets)
+  assert.equal(viewer._sceneBuildDepth, 2)
+  assert.equal(frames.size + timers.size, 0, 'Build cancels existing animation work')
+  viewer.requestRender(true); tick()
+  assert.equal(frames.size + timers.size, 0, 'Async yields do not draw a partial scene')
+  const beforeBuildDraw = draws
+  releaseBuild(); assert.equal(await building, 'inner')
+  assert.equal(viewer._sceneBuildDepth, 0)
+  assert.equal(frames.size, 1, 'Nested builders coalesce into one completed-scene draw')
+  flush(); assert.equal(draws, beforeBuildDraw + 1)
+
+  const failed = viewer.renderBlocks('failure', assets)
+  releaseBuild(); await assert.rejects(failed, /Injected build failure/)
+  assert.equal(viewer._sceneBuildDepth, 0, 'Failure cannot leave rendering suspended')
+  assert.equal(frames.size, 1); flush()
+  viewer.setActive(false)
+  const inactiveBuild = viewer.renderBlocks('inner', assets)
+  releaseBuild(); await inactiveBuild
+  assert.equal(viewer._active, false, 'Completing a build must not wake a paused export source')
+  assert.equal(frames.size + timers.size, 0)
+  viewer.setActive(true); flush()
+  const endUpdate = viewer.beginSceneUpdate()
+  viewer.requestRender(true)
+  assert.equal(frames.size, 0, 'The file-level transaction also holds parsing and metadata updates')
+  endUpdate(); endUpdate()
+  assert.equal(viewer._sceneBuildDepth, 0, 'Releasing the same transaction twice is harmless')
+  assert.equal(frames.size, 1); flush()
+  console.log('PASS async scene builds defer partial draws, preserve nesting, recover after failures and respect inactive viewers')
+
   assets.releaseTextureUsage(viewer)
   assets.clearCaches()
   console.log('PASS scene scheduling: idle work stops, changes coalesce, visible shader atlases tick only when pixels change, hidden resources stay pinned, model animation/movement/auto-rotate and export resume wake correctly')

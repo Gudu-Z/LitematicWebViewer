@@ -563,9 +563,22 @@ export class Renderer {
     this._queueFrame()
   }
 
+  // Hold animation/draw work across parsing and nested asynchronous builders.
+  // This does not change the active state owned by visibility/export controls.
+  beginSceneUpdate() {
+    this._sceneBuildDepth = (this._sceneBuildDepth || 0) + 1
+    if (this.renderer) this._cancelFrame()
+    let ended = false
+    return () => {
+      if (ended) return
+      ended = true
+      if (--this._sceneBuildDepth === 0) this.requestRender(true)
+    }
+  }
+
   _queueFrame() {
     // Prototype-only mesh builders and tests have no drawing context or RAF loop.
-    if (!this.renderer || this._disposed || !this._active || document.hidden || this._animationFrame != null) return
+    if (!this.renderer || this._disposed || !this._active || this._sceneBuildDepth || document.hidden || this._animationFrame != null) return
     if (this._sleeping) { this._lastTime = performance.now(); this._sleeping = false }
     clearTimeout(this._animationTimer)
     this._animationTimer = null
@@ -597,7 +610,7 @@ export class Renderer {
     this._animationFrame = null
     clearTimeout(this._animationTimer)
     this._animationTimer = null
-    if (!this._active || this._disposed || document.hidden) return
+    if (!this._active || this._disposed || this._sceneBuildDepth || document.hidden) return
     const now = performance.now()
     const dt = Math.min((now - this._lastTime) / 1000, 0.1)
     this._lastTime = now
@@ -769,6 +782,10 @@ export class Renderer {
       if (!disposed.has(material)) material.dispose()
     }
     this._blockState = null
+    // Render lists retain the last drawn meshes until another draw. A rebuild
+    // now defers that draw, so release these references before allocating the
+    // replacement buffers (multi-gigabyte schematics otherwise coexist twice).
+    this.renderer?.renderLists?.dispose()
     this.requestRender(true)
   }
 
@@ -786,16 +803,8 @@ export class Renderer {
   }
 
   clearSigns() {
-    while (this.signsGroup.children.length) {
-      const child = this.signsGroup.children[this.signsGroup.children.length - 1]
-      this.signsGroup.remove(child)
-      child.geometry?.dispose()
-      const mats = Array.isArray(child.material) ? child.material : [child.material]
-      mats.forEach((m) => {
-        disposePrivateTexture(m.map)
-        m.dispose()
-      })
-    }
+    // Repeated text shares resources within this scene. Release each only once.
+    disposeBlockObjects(this.signsGroup, true)
   }
 
   clearBanners() {
@@ -1231,7 +1240,12 @@ export class Renderer {
   async renderSigns(signs, assets) {
     this.clearSigns()
     if (!signs.length) return
-
+    // Storage schematics can contain tens of thousands of identical labels.
+    // Keep their full-resolution canvas, but draw/upload it only once per text
+    // and colour. Scene-local ownership keeps previews and rebuilds independent.
+    const materials = new Map()
+    const geometry = new THREE.PlaneGeometry(0.85, 0.4)
+    let yieldAt = performance.now() + 8
     for (const sign of signs) {
       let front, boardCenter
       if (sign.facing) {
@@ -1251,11 +1265,21 @@ export class Renderer {
       }
 
       const quat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 0, 1), front)
-      const textMat = new THREE.MeshBasicMaterial({ map: this._makeSignTexture(sign.lines, sign.color), transparent: true, side: THREE.DoubleSide })
-      const textPlane = new THREE.Mesh(new THREE.PlaneGeometry(0.85, 0.4), textMat)
+      const lines = Array.from({ length: 4 }, (_, i) => String(sign.lines[i] || ''))
+      const key = JSON.stringify([DYE_COLORS[sign.color] || '#1a1a1a', lines])
+      let textMat = materials.get(key)
+      if (!textMat) {
+        textMat = new THREE.MeshBasicMaterial({ map: this._makeSignTexture(lines, sign.color), transparent: true, side: THREE.DoubleSide })
+        materials.set(key, textMat)
+      }
+      const textPlane = new THREE.Mesh(geometry, textMat)
       textPlane.position.copy(boardCenter).addScaledVector(front, 0.05)
       textPlane.setRotationFromQuaternion(quat)
       this._addLayerObject(this.signsGroup, textPlane, sign.y, true)
+      if (performance.now() >= yieldAt) {
+        await new Promise(resolve => setTimeout(resolve, 0))
+        yieldAt = performance.now() + 8
+      }
     }
   }
 
@@ -1361,8 +1385,13 @@ export class Renderer {
       else state.effects.removeFromParent()
     }
     const usedKeys = new Set()
+    let completedBlocks = 0
     for (let partIndex = 0; partIndex < plan.dirty.length; partIndex++) {
       const id = plan.dirty[partIndex]
+      const blockCount = id === null ? state.index.globalKeys.length : state.index.chunks.get(id).keys.length
+      // The global group can contain most of a large schematic's work. Equal
+      // weight per chunk made tens of seconds look stuck at the first percent.
+      const progress = fraction => onProgress?.((completedBlocks + blockCount * fraction) / Math.max(1, plan.scannedBlocks))
       let part = state.parts.get(id)
       if (!part) {
         part = { root: new THREE.Group(), faces: 0, keys: [], complete: false }
@@ -1372,15 +1401,17 @@ export class Renderer {
       part.complete = false
       disposeBlockObjects(part.root, false, false)
       const { groups, emitted } = await buildBlockChunk(state.index, id, filter,
-        f => onProgress?.((partIndex + f * .45) / plan.dirty.length))
+        f => progress(f * .45))
       await this._loadBlockMaterials(groups, assets, state.materials,
-        f => onProgress?.((partIndex + .45 + f * .5) / plan.dirty.length))
+        f => progress(.45 + f * .5))
       await this._appendBlockMeshes(groups, state.materials, part.root)
       if (part.root.children.length) this.group.add(part.root)
       else part.root.removeFromParent()
       part.faces = emitted
       part.keys = [...groups.keys()].filter(key => state.materials.has(key))
       part.complete = part.keys.length === groups.size
+      completedBlocks += blockCount
+      onProgress?.(completedBlocks / Math.max(1, plan.scannedBlocks))
     }
     let faces = 0
     for (const part of state.parts.values()) {
@@ -1645,16 +1676,24 @@ for (const name of ['render', 'renderBlocks', 'renderEntities', 'renderPlayerHea
   Renderer.prototype[name] = async function (...args) {
     const assets = args[1]
     const end = assets?.beginTextureLoad?.()
+    const endSceneUpdate = this.beginSceneUpdate()
     try {
+      // Drawing millions of partly-built faces at every async yield can starve
+      // image decoding and progress updates. Paint once the build has settled;
+      // keep the caller's active/export state and all final geometry unchanged.
       return await build.apply(this, args)
     } finally {
       try {
         this.requestRender(true)
         this._syncSceneResources(assets)
       } finally {
-        end?.()
-        // Prototype-only model builders are owned by their enclosing scene build.
-        if (this.scene) assets?.trimTextures?.()
+        try {
+          end?.()
+          // Prototype-only model builders are owned by their enclosing scene build.
+          if (this.scene) assets?.trimTextures?.()
+        } finally {
+          endSceneUpdate()
+        }
       }
     }
   }

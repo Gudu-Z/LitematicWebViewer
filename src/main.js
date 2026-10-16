@@ -53,6 +53,7 @@ try {
 
 let currentData = null
 let busy = false
+let endSceneUpdate = null
 let currentFileName = ''
 let currentFile = null, integrationBridge, appearance, themeBackground
 
@@ -785,6 +786,8 @@ const packManager = new ViewerPacks({
 })
 
 function setBusy(on) {
+  if (on && !busy) endSceneUpdate = renderer?.beginSceneUpdate()
+  else if (!on && busy) { endSceneUpdate?.(); endSceneUpdate = null }
   busy = on
   document.getElementById('app').setAttribute('aria-busy', String(on))
   document.getElementById('packSettings').setAttribute('aria-busy', String(on))

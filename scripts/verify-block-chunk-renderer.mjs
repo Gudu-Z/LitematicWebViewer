@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import * as THREE from 'three'
+import { WebGLRenderLists } from 'three/src/renderers/webgl/WebGLRenderLists.js'
 import { AssetProvider } from '../src/assets.js'
 import { Renderer } from '../src/renderer.js'
 import { bakeModel } from '../src/modelBaker.js'
@@ -286,7 +287,17 @@ for (const [key, expected] of grassReference.groups) {
   assert.deepEqual(mesh.geometry.attributes.uv.array, expected.uvs)
   assert.deepEqual(mesh.geometry.index.array, expected.indices)
 }
+// A paused rebuild cannot wait for the next frame to drop the last render's
+// references to the old multi-gigabyte buffers. Exercise Three's real cache.
+const renderLists = new WebGLRenderLists()
+const oldList = renderLists.get(view.scene, 0)
+for (const mesh of recoveredMeshes) oldList.push(mesh, mesh.geometry, mesh.material, 0, 0, null, { reversedDepth: false })
+assert.equal(oldList.opaque.length, recoveredMeshes.length)
+view.renderer = { renderLists }
 view.clearBlocks(true)
+view.renderer = null
+assert.notEqual(renderLists.get(view.scene, 0), oldList, 'Clearing blocks releases the previous draw list without another render')
+assert.equal(renderLists.get(view.scene, 0).opaque.length, 0)
 view._syncSceneResources(assets)
 assets.clearCaches()
 for (const [resource, count] of disposal) assert.equal(count, 1, `Every recovery resource is disposed once: ${resource.type || 'texture'}`)
