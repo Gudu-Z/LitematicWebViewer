@@ -162,7 +162,10 @@ export function getMobAppearance(entity, id, data) {
     sitting: !!(n.Sitting || n.sitting || (['camel', 'camel_husk'].includes(id) && Number(n.LastPoseTick) < 0)),
     rolledUp: ['scared', 'rolling'].includes(short(n.state)),
   }
+  state.upsideDown = ['Dinnerbone', 'Grumm'].includes(customName(n).replace(/§[0-9a-fk-or]/gi, ''))
+  if (state.upsideDown && id !== 'ender_dragon') state.rotation = [entity.rotation?.[0] || 0, -(entity.rotation?.[1] || 0)]
   let model = getModel(entry[0]), texture = entry[1], scale = entry[2] || model?.scale || 1, tint = 0xffffff
+  let rendererScale = 1
   if (id === 'ender_dragon') {
     // EnderDragonModel animates the model root as well as its children. Keep that
     // root separate from the rig's coordinate conversion; the neutral offset also
@@ -180,7 +183,8 @@ export function getMobAppearance(entity, id, data) {
   if (id === 'sulfur_cube') {
     const small = isBaby(n), family = small ? 'SmallSulfurCubeModel' : 'SulfurCubeModel', suffix = small ? '_small' : ''
     model = getModel(family + 'Outer'); texture += suffix
-    scale = .999 * clamp(n.Size == null ? (small ? 1 : 2) : Number(n.Size) + 1, 1, 127) * (small ? 1 : .5)
+    scale = Math.fround(.999) * clamp(n.Size == null ? (small ? 1 : 2) : Number(n.Size) + 1, 1, 127) * (small ? 1 : .5)
+    rendererScale = scale
     state.babyModel = small
     state.containedBlock = readEquipment(n).body
     if (!state.containedBlock) add('sulfur_inner', 'entity/sulfur_cube/sulfur_cube_inner' + suffix, getModel(family + 'Inner'), { mode: 'translucent', renderOrder: -1 })
@@ -248,10 +252,12 @@ export function getMobAppearance(entity, id, data) {
     add('pattern', `entity/fish/tropical_${kind}_pattern_${clamp((packed >>> 8) & 255, 0, 5) + 1}`, model, { tint: dye((packed >>> 24) & 255) })
   }
   if (id === 'slime' || id === 'magma_cube') {
-    scale *= clamp((Number(n.Size) || 0) + 1, 1, 128)
+    scale *= clamp((Number(n.Size) || 0) + 1, 1, 127)
+    if (id === 'slime') scale *= Math.fround(.999)
+    rendererScale = scale
     if (id === 'slime') add('slime_shell', texture, EXTRA_MODELS.SlimeOuterEntityModel, { mode: 'translucent' })
   }
-  if (id === 'phantom') scale *= 1 + 0.15 * clamp(n.Size, 0, 64)
+  if (id === 'phantom') { scale *= 1 + 0.15 * clamp(n.Size, 0, 64); rendererScale = scale }
   if (id === 'shulker') {
     if (n.Color != null && Number(n.Color) >= 0 && Number(n.Color) < 16) texture += '_' + DYE_NAMES[Number(n.Color)]
     // 原解析器只提取了共用箱体 getModelData，实体还需要 getTexturedModelData 添加的头部。
@@ -262,6 +268,7 @@ export function getMobAppearance(entity, id, data) {
   if (id === 'wither') {
     const invul = clamp(n.Invul, 0, 220)
     if (invul > 0) { texture = 'entity/wither/wither_invulnerable'; scale = 2 - invul / 220 * 0.5 }
+    rendererScale = scale
     const maxHealthAttribute = (n.attributes || n.Attributes || []).find(a => ['max_health', 'generic.max_health'].includes(short(a.id ?? a.Name)))
     const maxHealth = Number(maxHealthAttribute?.base ?? maxHealthAttribute?.Base) || 300
     if (Number(n.Health) <= maxHealth / 2) add('wither_armor', 'entity/wither/wither_armor', dilateEntityModel(model, 0.5), { mode: 'swirl', offset: age => [Math.cos(age * 0.02) * 3 % 1, age * 0.01 % 1] })
@@ -347,5 +354,5 @@ export function getMobAppearance(entity, id, data) {
     if (id === 'armadillo') model = transformEntityModel(model, (node, name) => { if (name === (state.rolledUp ? 'body' : 'cube')) node.cuboids = [] })
     if (id === 'goat') model = transformEntityModel(model, (node, name) => { if ((name.includes('left_horn') && n.HasLeftHorn === 0) || (name.includes('right_horn') && n.HasRightHorn === 0)) node.cuboids = [] })
   }
-  return { model, texture, scale, tint, layers, state, ...(id === 'sulfur_cube' ? { mode: 'translucent' } : {}) }
+  return { model, texture, scale, modelScale: scale / rendererScale, tint, layers, state, ...(id === 'sulfur_cube' ? { mode: 'translucent' } : {}) }
 }

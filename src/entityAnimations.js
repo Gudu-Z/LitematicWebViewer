@@ -116,6 +116,9 @@ export function applyIdlePose(parts, id, state, age) {
       const open = Math.max(0, Math.min(1, (Number(nbt.Peek) || 0) / 100)), f = (0.5 + open) * PI
       origin('lid', 'y', 16 + Math.sin(f) * 8 + (f > PI ? Math.sin(age * 0.1) * 0.7 : 0))
       set('lid', 'y', open > 0.3 ? (Math.sin(f) - 1) ** 4 * PI * 0.125 : 0)
+      // ShulkerModel: yHeadRot - 180 - yBodyRot; the unsaved body/head yaw
+      // interpolation uses the same saved yaw for both in a schematic.
+      set('head', 'y', -PI)
       break
     }
     case 'cat': case 'ocelot':
@@ -195,7 +198,10 @@ export function applyIdlePose(parts, id, state, age) {
     case 'llama': case 'trader_llama':
       if (!nbt.ChestedHorse) { hide('left_chest'); hide('right_chest') }
       break
-    case 'turtle': if (!nbt.HasEgg) hide('egg_belly'); break
+    case 'turtle':
+      if (!nbt.HasEgg || state.babyModel) hide('egg_belly')
+      else for (const part of parts.head.parent.children) part.position.y -= 1 // AdultTurtleModel's root shift.
+      break
     case 'dolphin': set('head', 'x', 0); set('body', 'x', pitch); break
     case 'chicken':
       if (nbt.OnGround === false || nbt.OnGround === 0) {
@@ -218,6 +224,9 @@ export function applyIdlePose(parts, id, state, age) {
       for (let i = 0; i < 9; i++) set('tentacle' + i, 'x', 0.2 * Math.sin(age * 0.3 + i) + 0.4)
       break
     case 'phantom': {
+      // PhantomRenderer tilts the entire model; PhantomModel does not separately
+      // rotate its head using the ordinary living-mob head pitch.
+      if (parts.head) parts.head.rotation.x = parts.head.userData.restRotation.x
       const f = age * 7.448451 * DEG, wing = Math.cos(f) * 16 * DEG
       for (const segment of ['base', 'tip']) {
         set('left_wing_' + segment, 'z', wing); set('right_wing_' + segment, 'z', -wing)

@@ -1,4 +1,5 @@
 import { isBaby } from './entityBabies.js'
+import { entityScale } from './entityScale.js'
 
 const short = id => String(id || '').replace(/^minecraft:/, '')
 const DEG = Math.PI / 180
@@ -28,8 +29,9 @@ export function passengerCapacity(id) {
 }
 export function ridingOffset(entity) {
   const id = short(entity.id), offset = RIDING_OFFSETS[id] || 0
-  if (!isBaby(entity.nbt || {})) return offset
-  return BABY_OFFSETS[id] ?? offset * (id === 'happy_ghast' ? .2375 : .5)
+  const scale = id === 'ender_dragon' ? 1 : entityScale(entity.nbt)
+  if (!isBaby(entity.nbt || {})) return offset * scale
+  return (BABY_OFFSETS[id] ?? offset * (id === 'happy_ghast' ? .2375 : .5)) * scale
 }
 const position = value => Array.isArray(value) && value.length >= 3 && value.slice(0, 3).every(Number.isFinite)
 

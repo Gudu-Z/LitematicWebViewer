@@ -88,6 +88,8 @@ const rider = { id: 'minecraft:zombie', Health: 20, equipment }
 const cases = [
   ['creeper', { powered: 1 }], ['breeze', {}], ['slime', { Size: 3 }], ['wither_skeleton', {}],
   ['ender_dragon', {}], ['guardian', {}], ['shulker', { AttachFace: 5, Peek: 100 }],
+  ['phantom', { Size: 3 }, 29], ['glow_squid', { Age: -24000 }], ['salmon', { type: 'small', OnGround: 1 }],
+  ['zombie', { equipment, attributes: [{ id: 'minecraft:scale', base: 2.5 }] }],
   ['zombie', { equipment, IsBaby: 1 }], ['armor_stand', { equipment, ShowArms: 1, Pose: { RightArm: [-75, 20, 10] } }],
   ['armor_stand', { equipment, Small: 1 }], ['snow_golem', { Pumpkin: 1 }], ['mooshroom', {}],
   ['oak_boat', { Passengers: [rider] }], ['minecart', { Passengers: [rider] }], ['cushion', { Passengers: [rider] }],
@@ -95,8 +97,8 @@ const cases = [
 ]
 const offsets = [[0, 0, 0], [1024, -64, -1024], [1000000, 2048, -1000000], [29999980, 320, -29999980], [-29999980, -64, 29999980]]
 let vertices = 0, maxError = 0
-for (const [id, nbt] of cases) {
-  const entity = { id: 'minecraft:' + id, pos: [.123456789, .987654321, -.234567891], rotation: [37.125, 0], nbt: { Health: 20, ...nbt } }
+for (const [id, nbt, pitch = 0] of cases) {
+  const entity = { id: 'minecraft:' + id, pos: [.123456789, .987654321, -.234567891], rotation: [37.125, pitch], nbt: { Health: 20, ...nbt } }
   const source = JSON.stringify(entity), group = await buildEntityMesh(entity, assets), parent = new THREE.Group()
   parent.rotation.set(.07, -.31, .03)
   parent.scale.set(1.2, .8, .9)

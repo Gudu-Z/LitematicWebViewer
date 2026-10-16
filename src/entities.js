@@ -14,6 +14,7 @@
 import * as THREE from 'three'
 import { registerEntityHitbox } from './entityHitboxes.js'
 import { minecartRenderPose } from './entityMinecart.js'
+import { createMobPlacement } from './entityPlacement.js'
 import { BlockModelResolver } from './blocks.js'
 import { frameItemKey, getFrameModel } from './frameModelCache.js'
 import { bakeModel } from './modelBaker.js'
@@ -785,15 +786,17 @@ function cuboidElement(from, to, texU, texV) {
 // 盔甲架使用原版骨骼、默认姿态和 NBT Pose；装备与木架共用姿态。
 async function buildArmorStand(entity, assets) {
   const nbt = entity.nbt || {}, model = structuredClone(EQUIPMENT_MODELS.ArmorStand)
+  const group = new THREE.Group()
+  const place = createMobPlacement(group, 'armor_stand', entity, { scale: 1, modelScale: 1 })
   if (!nbt.ShowArms) { model.parts.left_arm.cuboids = []; model.parts.right_arm.cuboids = [] }
   if (nbt.NoBasePlate) model.parts.base_plate.cuboids = []
   const tex = await assets.getTexture('entity/armorstand/armorstand')
   const body = createEntityRig(model, new THREE.MeshLambertMaterial({ map: tex, alphaTest: .1, side: THREE.DoubleSide }))
   body.geometry.computeVertexNormals(); body.name = 'body'; body.userData.model = model
-  body.userData.updateAnimation = () => applyArmorStandPose(body, nbt, entity.rotation?.[0])
+  body.userData.updateAnimation = () => { applyArmorStandPose(body, nbt, entity.rotation?.[0]); place(body) }
   body.userData.updateAnimation(0)
-  const group = new THREE.Group(); group.add(body)
-  group.position.fromArray(entity.pos); group.rotation.y = -(Number(entity.rotation?.[0]) || 0) * DEG
+  group.add(body)
+  group.position.fromArray(entity.pos)
   if (nbt.Invisible) body.material.visible = false
   await attachEquipment(group, body, entity, assets, buildEquippedItem)
   return group
@@ -884,8 +887,9 @@ async function buildMob(entity, id, assets, data) {
   ]) : []
   const tex = textures[0]
   if (!appearance?.model || !tex) return buildMobFallback(entity, id)
-  const { model, scale, tint, layers, state } = appearance
+  const { model, tint, layers, state } = appearance
   const group = new THREE.Group()
+  const place = createMobPlacement(group, id, state, appearance, data)
   const startTime = performance.now()
   const animated = IDLE_ANIMATED_MOBS.has(id)
   const attach = (definition, sourceTexture) => {
@@ -908,11 +912,6 @@ async function buildMob(entity, id, assets, data) {
     // EnergySwirlOverlayFeatureRenderer 的 vertex RGB=(0.5,0.5,0.5)。
     if (mode === 'swirl') material.color.setRGB(0.5, 0.5, 0.5)
     const mesh = createEntityRig(definition.model, material)
-    if (id === 'ender_dragon') {
-      // EnderDragonRenderer: Ry(-yaw), T(0,0,1), S(-1,-1,1), T(0,-1.501,0).
-      // The rig already supplies T(0,1.5,0), S(1,-1,-1); the group supplies Ry(pi).
-      mesh.position.set(0, Math.fround(1.501) - 1.5, -1)
-    }
     mesh.name = definition.name
     mesh.renderOrder = definition.renderOrder || 0
     const sort = ['wind', 'translucent', 'swirl'].includes(mode) ? sortTransparentFaces(mesh) : null
@@ -920,14 +919,10 @@ async function buildMob(entity, id, assets, data) {
       mesh.userData.resetPose()
       applyIdlePose(mesh.userData.parts, id, state, age)
       applyBabyPose(mesh, id, state.nbt || {})
+      place(mesh, age)
       if (definition.offset) map.offset.fromArray(definition.offset(age))
       if (definition.opacity) material.opacity = definition.opacity(age)
       if (definition.animatedTint) material.color.setHex(definition.animatedTint(age))
-      if (id === 'pufferfish') mesh.position.y = Math.cos(age * 0.05) * 0.08
-      if (['cod', 'salmon', 'tropical_fish'].includes(id)) {
-        mesh.rotation.y = 4.3 * Math.sin(age * 0.6) * Math.PI / 180
-        if (!state.touchingWater) { mesh.position.set(0.2, 0.1, 0); mesh.rotation.z = Math.PI / 2 }
-      }
     }
     mesh.userData.updateAnimation = update
     update(0)
@@ -950,22 +945,8 @@ async function buildMob(entity, id, assets, data) {
     if (layerTex) attach(layer, layerTex)
   }
   await attachMobBlocks(body, id, state, assets)
-  group.scale.setScalar(scale)
   await attachEquipment(group, body, entity, assets, buildEquippedItem)
   group.position.fromArray(entity.pos)
-  const yaw = Number(entity.rotation?.[0]) || 0
-  group.rotation.y = -yaw * Math.PI / 180 - (id === 'ender_dragon' ? Math.PI : 0)
-  if (id === 'shulker') {
-    // 吸附面绕方块中心旋转，DOWN 是默认立在地上的朝向。
-    const direction = FACING_DIRS[Number(entity.nbt?.AttachFace) || 0]
-    if (direction) {
-      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(...direction).negate())
-      for (const child of group.children) {
-        child.position.sub(new THREE.Vector3(0, 0.5, 0)).applyQuaternion(q).add(new THREE.Vector3(0, 0.5, 0))
-        child.quaternion.premultiply(q)
-      }
-    }
-  }
   group.userData.mobId = id
   group.userData.appearance = appearance
   return group
