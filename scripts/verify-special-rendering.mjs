@@ -46,7 +46,9 @@ for (const id of ['end_portal', 'end_gateway']) {
   assert.equal(Math.max(...ys), id === 'end_portal' ? .75 : 1)
   assert.equal(Math.min(...ys), id === 'end_portal' ? .375 : 0)
   const group = await buildInspectionModel(entry(id), assets)
-  assert.ok(group.children[0].children[0].material.isShaderMaterial); dispose(group)
+  let portals = 0
+  group.traverse(object => { if (object.material?.isShaderMaterial) portals++ })
+  assert.equal(portals, 1); dispose(group)
 }
 for (const [id, values] of [['bell', { preview_ringing: 'true' }], ['enchanting_table', { preview_book: 'open' }], ['conduit', { preview_active: 'true' }]]) {
   const group = await buildInspectionModel(entry(id), assets, values)

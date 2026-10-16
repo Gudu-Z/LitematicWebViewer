@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { register } from 'node:module'
 import * as THREE from 'three'
+import { AssetProvider } from '../src/assets.js'
 
 // Node 20 (used by CI) supports async loader registration, but not registerHooks.
 register(new URL('./image-export-test-loader.mjs', import.meta.url))
@@ -96,6 +97,104 @@ try {
   }
 
   {
+    const assets = new AssetProvider(), counts = new Map(), textures = new Map()
+    assets._getTexture = async key => {
+      const texture = new THREE.Texture({ width: 16, height: 16 })
+      counts.set(key, { updates: 0, disposals: 0 })
+      texture.userData.updateAnimation = () => { counts.get(key).updates++; texture.needsUpdate = true }
+      texture.addEventListener('dispose', () => counts.get(key).disposals++)
+      textures.set(key, texture)
+      return texture
+    }
+    for (const key of ['block', 'entity', 'hidden', 'overlay', 'idle']) await assets.getTexture(key)
+    const exporter = studio(), scene = new THREE.Scene(), mainOwner = {}, source = { scene, _assets: assets, _sceneResourceVersion: 1, setActive() {} }
+    for (const key of ['group', 'entitiesGroup', 'overlay', 'regionGroup']) {
+      source[key] = new THREE.Group(); scene.add(source[key])
+    }
+    const geometry = new THREE.BoxGeometry(), materials = []
+    const add = (group, key) => {
+      const material = new THREE.MeshBasicMaterial({ map: textures.get(key) }); materials.push(material)
+      const object = new THREE.Mesh(geometry, material); group.add(object); return object
+    }
+    add(source.group, 'block')
+    const entity = add(source.entitiesGroup, 'entity'), hidden = add(source.entitiesGroup, 'hidden')
+    hidden.visible = false
+    entity.userData.updateAnimation = () => {}; entity.userData.animationAge = 99
+    add(source.overlay, 'overlay')
+    source.entitiesGroup.visible = false; source.overlay.visible = false; source.regionGroup.visible = false
+    scene.background = new THREE.Color('#123456'); scene.fog = new THREE.Fog('#123456', 1, 20)
+    const background = scene.background, fog = scene.fog
+    assets.setTextureUsage(mainOwner, [...textures.values()].slice(0, 4), [textures.get('block')])
+    const mainUsage = assets._textureOwners.get(mainOwner)
+    let scans = 0, draws = 0, failDraw = false
+    const setUsage = assets.setTextureUsage.bind(assets)
+    assets.setTextureUsage = (...args) => { scans++; return setUsage(...args) }
+    exporter.source = source; exporter.getData = () => ({ blocks: new Map() }); exporter.getFileName = () => 'ownership.litematic'
+    exporter.preset = () => {}; exporter.age = 10
+    Object.assign(exporter.el, {
+      Empty: {}, Frame: {}, SourceName: {}, Entities: { checked: true }, Dimensions: { checked: false }, Regions: { checked: false },
+      Background: { value: 'transparent' }, Color: { value: '#ffffff' },
+    })
+    exporter.gl = {
+      render() {
+        draws++
+        assert.equal(source.entitiesGroup.visible, exporter.el.Entities.checked)
+        assert.equal(entity.userData.animationAge, exporter.age)
+        assert.equal(scene.background, null); assert.equal(scene.fog, null)
+        if (failDraw) throw new Error('WebGL draw failed')
+      },
+      dispose() {}, forceContextLoss() {}, domElement: { remove() {} },
+    }
+    exporter.syncModel(true)
+    assert.equal(scans, 1, 'Opening the export immediately pins its borrowed scene resources')
+    assert.deepEqual([...assets._textureOwners.get(exporter).animated.keys()], [textures.get('block'), textures.get('entity')])
+    exporter.draw(); exporter.age = 12; exporter.draw()
+    assert.equal(scans, 1, 'Animation-only export frames reuse the visibility/resource scan')
+    assert.equal(counts.get('entity').updates, 2)
+    assert.equal(counts.get('hidden').updates, 0); assert.equal(counts.get('overlay').updates, 0); assert.equal(counts.get('idle').updates, 0)
+    assert.equal(assets._textureOwners.get(mainOwner), mainUsage, 'Export visibility must never replace the main viewer owner')
+    assert.equal(source.entitiesGroup.visible, false); assert.equal(source.overlay.visible, false)
+    assert.equal(scene.background, background); assert.equal(scene.fog, fog)
+    assert.equal(entity.userData.animationAge, 99)
+    assert.equal(assets.trimTextures({ maxIdleCount: 0, maxIdleBytes: 0 }).evicted, 1, 'Hidden scene resources remain pinned while unused cache textures may retire')
+    assert.equal(counts.get('idle').disposals, 1)
+    assert.equal(counts.get('hidden').disposals, 0)
+
+    exporter.el.Entities.checked = false; exporter.age = 14; exporter.draw()
+    assert.equal(scans, 2, 'Changing export visibility refreshes only the export owner')
+    assert.equal(counts.get('entity').updates, 2)
+    assert.equal(assets._textureOwners.get(mainOwner), mainUsage)
+    const added = new THREE.Group(); added.userData.updateAnimation = () => {}; scene.add(added)
+    source._sceneResourceVersion++; exporter.age = 16; exporter.draw()
+    assert.equal(scans, 3, 'A changed source scene invalidates the scan even when the schematic object is unchanged')
+    assert.ok(exporter.animated.includes(added))
+    failDraw = true
+    assert.throws(() => exporter.draw(), /WebGL draw failed/)
+    assert.equal(scans, 3)
+    assert.equal(scene.background, background); assert.equal(scene.fog, fog)
+    assert.equal(source.entitiesGroup.visible, false); assert.equal(entity.userData.animationAge, 99)
+
+    const replacement = new AssetProvider(), replacementTexture = new THREE.Texture({ width: 16, height: 16 })
+    replacement._getTexture = async () => replacementTexture
+    await replacement.getTexture('new')
+    for (const material of materials) material.map = replacementTexture
+    source._assets = replacement; source._sceneResourceVersion++; failDraw = false
+    exporter.draw()
+    assert.equal(assets._textureOwners.has(exporter), false, 'Switching providers releases the previous export owner')
+    assert.equal(replacement._textureOwners.has(exporter), true)
+    assert.equal(assets._textureOwners.get(mainOwner), mainUsage)
+    assets.clearCaches()
+    assert.equal(counts.get('block').disposals, 0, 'The main scene can still borrow old-pack resources after the export switches')
+    exporter.release(); exporter.release()
+    assert.equal(replacement._textureOwners.has(exporter), false)
+    assert.equal(exporter._resourceScene, null); assert.equal(exporter._textureAssets, null)
+    assets.releaseTextureUsage(mainOwner)
+    assert.equal(counts.get('block').disposals, 1)
+    replacement.clearCaches(); geometry.dispose(); materials.forEach(material => material.dispose())
+    assert.equal(draws, 6)
+  }
+
+  {
     const exporter = studio(), scene = new THREE.Scene(), source = { scene }
     for (const key of ['group', 'signsGroup', 'headsGroup', 'bannersGroup', 'statuesGroup', 'potsGroup', 'entitiesGroup']) {
       source[key] = new THREE.Group(); scene.add(source[key])
@@ -134,7 +233,7 @@ try {
     assert.deepEqual(bounds.min.toArray(), [0, 0, 0]); assert.deepEqual(bounds.max.toArray(), [1, 1, 1])
     geometry.dispose(); material.dispose()
   }
-  console.log('PASS image export lifecycle: exact dimensions and bounded temporary buffers at DPR 1/1.5/2, encoder failure recovery, released snapshots, reopen, shared-scene ownership and instanced/hidden/empty framing')
+  console.log('PASS image export lifecycle: exact dimensions and bounded temporary buffers at DPR 1/1.5/2, encoder failure recovery, released snapshots, reopen, shared-scene/texture owners, cached visible animation selection, provider replacement and instanced/hidden/empty framing')
 } finally {
   for (const [key, value] of Object.entries(original)) globalThis[key] = value
 }

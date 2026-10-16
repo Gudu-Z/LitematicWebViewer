@@ -45,15 +45,26 @@ export function frameItemKey(item) {
   }
 }
 
-export async function getFrameModel(assets, key, build, { retryIncomplete = false } = {}) {
+export async function getFrameModel(assets, key, build, options = {}) {
+  const endLoad = assets.beginTextureLoad?.()
+  try {
+    return await getFrameModelInTransaction(assets, key, build, options)
+  } finally {
+    endLoad?.()
+  }
+}
+
+async function getFrameModelInTransaction(assets, key, build, { retryIncomplete = false } = {}) {
   if (assets.onCacheClear && !watchedAssets.has(assets)) {
     watchedAssets.add(assets)
-    assets.onCacheClear(() => {
+    const clear = () => {
       // Cached materials also retain decoded images. Release them immediately on
       // pack changes, even when the next schematic contains no item frames.
       caches.get(assets)?.models.clear()
       caches.delete(assets)
-    })
+    }
+    assets.onCacheClear(clear)
+    assets.onTextureEvict?.(clear)
   }
   const revision = assets.cacheRevision
   let cache = caches.get(assets)

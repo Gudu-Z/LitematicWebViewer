@@ -4,7 +4,7 @@
 
 import * as THREE from 'three'
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
-import { buildFaceGroups, fluidOfEntry, fluidHeight } from './geometry.js'
+import { fluidOfEntry, fluidHeight } from './geometry.js'
 import { buildEntityMesh, buildCopperGolemStatueMesh } from './entities.js'
 import { bakeModel } from './modelBaker.js'
 import { addBlockEffects, portalMaterial, animateObject } from './blockEffects.js'
@@ -12,9 +12,32 @@ import { addMovingPistons } from './movingPistons.js'
 import { setEntityHitboxesVisible } from './entityHitboxes.js'
 import { isAssetTexture } from './assets.js'
 import { batchItemFrames, updateFrameBatches, freezeStaticObject } from './frameBatches.js'
+import { collectSceneResources } from './sceneResources.js'
+import { createBlockChunkIndex, buildBlockChunk, planBlockChunkUpdate } from './blockChunks.js'
 
 function disposePrivateTexture(texture) {
   if (texture && !isAssetTexture(texture)) texture.dispose()
+}
+
+function disposeBlockObjects(group, disposeTextures = false, disposeMaterials = true, disposed = new Set()) {
+  const disposeOnce = resource => {
+    if (!resource || disposed.has(resource)) return
+    disposed.add(resource)
+    resource.dispose()
+  }
+  for (const child of [...group.children]) {
+    group.remove(child)
+    child.traverse(object => {
+      disposeOnce(object.geometry)
+      if (!disposeMaterials) return
+      for (const material of [object.material].flat()) {
+        if (!material) continue
+        if (disposeTextures && !isAssetTexture(material.map)) disposeOnce(material.map)
+        disposeOnce(material)
+      }
+    })
+  }
+  return disposed
 }
 
 const MOVE_KEYS = ['KeyW', 'KeyA', 'KeyS', 'KeyD', 'Space', 'ShiftLeft', 'ShiftRight']
@@ -221,6 +244,7 @@ export class Renderer {
   // 检查页与主预览器共用网格、流体染色和方块实体路径，但不为每张卡片创建 WebGL 上下文。
   // 这里只初始化网格构建方法需要的容器；相机、控件、画布和事件仍由检查页统一管理。
   static async buildBlockPreview(data, assets) {
+    const end = assets.beginTextureLoad?.()
     const builder = Object.create(Renderer.prototype)
     // The caller may attach/move this preview later (for example a moving piston).
     builder._freezeStatic = false
@@ -246,6 +270,8 @@ export class Renderer {
         o.material?.dispose()
       })
       throw error
+    } finally {
+      end?.()
     }
   }
 
@@ -253,6 +279,10 @@ export class Renderer {
     this.container = container
     this.orbitOnly = orbitOnly
     this._active = true
+    this._animationFrame = null
+    this._animationTimer = null
+    this._resourcesDirty = true
+    this._needsRender = true
     this.scene = new THREE.Scene()
     this.scene.background = new THREE.Color(0x2a2a2a) // 默认深灰背景
     this._bgColor = 0x2a2a2a
@@ -276,6 +306,7 @@ export class Renderer {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
     this.controls.enableDamping = false // 无惯性
     this.controls.screenSpacePanning = true
+    this.controls.addEventListener('change', () => this.requestRender())
 
     this.scene.add(new THREE.AmbientLight(0xffffff, 0.85))
     const dir = new THREE.DirectionalLight(0xffffff, 0.9)
@@ -308,6 +339,12 @@ export class Renderer {
 
     this.regionGroup = new THREE.Group() // 区域线框
     this.scene.add(this.regionGroup)
+    this._sceneChanged = () => this.requestRender(true)
+    for (const group of [this.group, this.signsGroup, this.headsGroup, this.bannersGroup, this.statuesGroup,
+      this.potsGroup, this.entitiesGroup, this.overlay, this.regionGroup]) {
+      group.addEventListener('childadded', this._sceneChanged)
+      group.addEventListener('childremoved', this._sceneChanged)
+    }
 
     // 移动双模式：orbit（环绕结构中心）/ fly（第一人称飞行）
     this.moveMode = 'orbit'
@@ -343,8 +380,13 @@ export class Renderer {
 
     this._onResize = () => this._resize()
     window.addEventListener('resize', this._onResize)
+    this._onVisibility = () => {
+      if (document.hidden) this._cancelFrame()
+      else { this._lastTime = performance.now(); this.requestRender(true) }
+    }
+    document.addEventListener('visibilitychange', this._onVisibility)
     this._resize()
-    this._animate()
+    this.requestRender(true)
   }
 
   // 飞行模式的鼠标/滚轮控制（原地转头、右键平移、滚轮调速）
@@ -383,6 +425,7 @@ export class Renderer {
         this.camera.position.add(offset)
         this.controls.target.add(offset)
       }
+      this.requestRender()
     })
     const endDrag = () => { this._flyDragging = null }
     el.addEventListener('pointerup', endDrag)
@@ -399,6 +442,7 @@ export class Renderer {
 
   _applyFlyRotation() {
     this.camera.rotation.set(this._pitch, this._yaw, 0)
+    this.requestRender()
   }
 
   // 移动端触摸控制：飞行模式下的虚拟摇杆（左下方）+ 上升/下降按钮（右下方）。
@@ -444,6 +488,7 @@ export class Renderer {
       knob.style.transform = `translate(${dx}px, ${dy}px)`
       this._joy.x = dx / R // 右为正
       this._joy.z = -dy / R // 上（屏幕 -y）为前进
+      this.requestRender()
     })
     joystick.addEventListener('pointerup', reset)
     joystick.addEventListener('pointercancel', reset)
@@ -455,10 +500,12 @@ export class Renderer {
     btnUp.addEventListener('pointerdown', (e) => {
       e.preventDefault()
       this._touchVertical = 1
+      this.requestRender()
     })
     btnDown.addEventListener('pointerdown', (e) => {
       e.preventDefault()
       this._touchVertical = -1
+      this.requestRender()
     })
     btnUp.addEventListener('pointerup', release)
     btnUp.addEventListener('pointercancel', release)
@@ -488,6 +535,7 @@ export class Renderer {
       } else {
         this.keys.delete(e.code)
       }
+      this.requestRender()
     }
   }
 
@@ -503,39 +551,99 @@ export class Renderer {
     }
     this.camera.updateProjectionMatrix()
     this.renderer.setSize(w, h)
+    this.requestRender()
+  }
+
+  requestRender(resourcesChanged = false) {
+    this._needsRender = true
+    if (resourcesChanged) {
+      this._resourcesDirty = true
+      this._sceneResourceVersion = (this._sceneResourceVersion || 0) + 1
+    }
+    this._queueFrame()
+  }
+
+  _queueFrame() {
+    // Prototype-only mesh builders and tests have no drawing context or RAF loop.
+    if (!this.renderer || this._disposed || !this._active || document.hidden || this._animationFrame != null) return
+    if (this._sleeping) { this._lastTime = performance.now(); this._sleeping = false }
+    clearTimeout(this._animationTimer)
+    this._animationTimer = null
+    this._animationFrame = requestAnimationFrame(() => this._animate())
+  }
+
+  _cancelFrame() {
+    cancelAnimationFrame(this._animationFrame)
+    clearTimeout(this._animationTimer)
+    this._animationFrame = null
+    this._animationTimer = null
+  }
+
+  _syncSceneResources(assets = this._assets) {
+    if (!this.scene || this._disposed) return
+    if (this._resourceAssets && this._resourceAssets !== assets) {
+      this._resourceAssets.releaseTextureUsage?.(this)
+      this._resourceAssets.trimTextures?.()
+    }
+    this._assets = assets
+    this._resourceAssets = assets
+    this._sceneResources = collectSceneResources(this.scene)
+    assets?.setTextureUsage?.(this, this._sceneResources.retained, this._sceneResources.active)
+    this._resourcesDirty = false
+    assets?.trimTextures?.()
   }
 
   _animate() {
-    if (!this._active) return
-    this._animationFrame = requestAnimationFrame(() => this._animate())
+    this._animationFrame = null
+    clearTimeout(this._animationTimer)
+    this._animationTimer = null
+    if (!this._active || this._disposed || document.hidden) return
     const now = performance.now()
     const dt = Math.min((now - this._lastTime) / 1000, 0.1)
     this._lastTime = now
+    const requested = this._needsRender
+    this._needsRender = false
+    if (this._resourcesDirty) this._syncSceneResources()
+    const moving = this.keys.size > 0 || (this.moveMode === 'fly' && (this._joy.x !== 0 || this._joy.z !== 0 || this._touchVertical !== 0))
     this._applyMovement(dt)
-    this._assets?.updateAnimations(now / 50)
+    const textureChanged = this._assets?.updateAnimations(now / 50, this)
     this._updateUnderwaterFog()
     // 飞行模式下不跑 OrbitControls.update()——它会 lookAt(target) 覆盖掉原地转头的旋转
-    if (this.moveMode === 'orbit') this.controls.update()
-    this.onCameraFrame?.()
-    this.renderer.render(this.scene, this.camera)
+    const controlsChanged = this.moveMode === 'orbit' && this.controls.update()
+    const continuous = moving || this._sceneResources?.animated ||
+      (this.moveMode === 'orbit' && (this.controls.autoRotate || (this.controls.enableDamping && controlsChanged)))
+    if (requested || moving || controlsChanged || textureChanged || continuous) {
+      this.onCameraFrame?.()
+      this.renderer.render(this.scene, this.camera)
+    }
+    if (continuous) this.requestRender()
+    else if (this._assets?.hasAnimatedTextures?.(this)) {
+      // Minecraft atlas animations change only on integer game ticks. A texture
+      // with a longer frame duration may tick without uploading or redrawing.
+      this._animationTimer = setTimeout(() => this._queueFrame(), Math.max(1, 50 - performance.now() % 50))
+    } else this._sleeping = true
   }
 
   setActive(active) {
     active = !!active
     if (active === this._active) return
     this._active = active
-    cancelAnimationFrame(this._animationFrame)
+    this._cancelFrame()
     this.keys.clear()
-    if (active) { this._lastTime = performance.now(); this._animate() }
+    if (active) { this._lastTime = performance.now(); this.requestRender(true) }
   }
 
   dispose() {
     this.setActive(false)
+    this._disposed = true
     window.removeEventListener('resize', this._onResize)
     window.removeEventListener('keydown', this._onKeyDown)
     window.removeEventListener('keyup', this._onKeyUp)
+    document.removeEventListener('visibilitychange', this._onVisibility)
     this.controls.dispose()
     this.clear(true)
+    this._resourceAssets?.releaseTextureUsage?.(this)
+    this._resourceAssets?.trimTextures?.()
     this.renderer.dispose()
     this.renderer.forceContextLoss()
     this.renderer.domElement.remove()
@@ -646,27 +754,28 @@ export class Renderer {
       this.scene.fog = null
       this.scene.background = this._bgColor === 'transparent' ? null : new THREE.Color(this._bgColor)
     }
+    this._syncSceneResources()
   }
 
   clearBlocks(disposeTextures = false) {
-    while (this.group.children.length) {
-      const child = this.group.children.pop()
-      child.traverse(object => {
-        object.geometry?.dispose()
-        const mats = Array.isArray(object.material) ? object.material : [object.material]
-        mats.forEach((m) => {
-          if (m) {
-            if (disposeTextures) disposePrivateTexture(m.map)
-            m.dispose()
-          }
-        })
-      })
+    const disposed = disposeBlockObjects(this.group, disposeTextures)
+    for (const part of this._blockState?.parts.values() || []) {
+      // An interrupted build may not yet have attached its root to the scene.
+      if (part.root.children.length) disposeBlockObjects(part.root, false, false, disposed)
     }
+    // A failed asynchronous build may have loaded materials before attaching any
+    // mesh. Those still belong to this scene and must also be released.
+    for (const material of this._blockState?.materials.values() || []) {
+      if (!disposed.has(material)) material.dispose()
+    }
+    this._blockState = null
+    this.requestRender(true)
   }
 
   clearHeads() {
     while (this.headsGroup.children.length) {
-      const child = this.headsGroup.children.pop()
+      const child = this.headsGroup.children[this.headsGroup.children.length - 1]
+      this.headsGroup.remove(child)
       child.geometry?.dispose()
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       mats.forEach((m) => {
@@ -678,7 +787,8 @@ export class Renderer {
 
   clearSigns() {
     while (this.signsGroup.children.length) {
-      const child = this.signsGroup.children.pop()
+      const child = this.signsGroup.children[this.signsGroup.children.length - 1]
+      this.signsGroup.remove(child)
       child.geometry?.dispose()
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       mats.forEach((m) => {
@@ -690,7 +800,8 @@ export class Renderer {
 
   clearBanners() {
     while (this.bannersGroup.children.length) {
-      const child = this.bannersGroup.children.pop()
+      const child = this.bannersGroup.children[this.bannersGroup.children.length - 1]
+      this.bannersGroup.remove(child)
       child.traverse((o) => {
         const mats = Array.isArray(o.material) ? o.material : [o.material]
         mats.forEach((m) => {
@@ -705,7 +816,8 @@ export class Renderer {
 
   clearStatues() {
     while (this.statuesGroup.children.length) {
-      const child = this.statuesGroup.children.pop()
+      const child = this.statuesGroup.children[this.statuesGroup.children.length - 1]
+      this.statuesGroup.remove(child)
       child.geometry?.dispose()
       const mats = Array.isArray(child.material) ? child.material : [child.material]
       mats.forEach((m) => {
@@ -719,7 +831,8 @@ export class Renderer {
 
   clearPots() {
     while (this.potsGroup.children.length) {
-      const child = this.potsGroup.children.pop()
+      const child = this.potsGroup.children[this.potsGroup.children.length - 1]
+      this.potsGroup.remove(child)
       child.traverse((o) => {
         if (o.geometry) o.geometry.dispose()
         const mats = Array.isArray(o.material) ? o.material : [o.material]
@@ -759,7 +872,8 @@ export class Renderer {
 
   clearOverlay() {
     while (this.overlay.children.length) {
-      const c = this.overlay.children.pop()
+      const c = this.overlay.children[this.overlay.children.length - 1]
+      this.overlay.remove(c)
       c.geometry?.dispose()
       const mats = Array.isArray(c.material) ? c.material : [c.material]
       mats.forEach((m) => {
@@ -771,7 +885,8 @@ export class Renderer {
 
   clearRegionWireframes() {
     while (this.regionGroup.children.length) {
-      const c = this.regionGroup.children.pop()
+      const c = this.regionGroup.children[this.regionGroup.children.length - 1]
+      this.regionGroup.remove(c)
       c.geometry?.dispose()
       const mats = Array.isArray(c.material) ? c.material : [c.material]
       mats.forEach((m) => m?.dispose())
@@ -811,6 +926,7 @@ export class Renderer {
   setEntityHitboxesVisible(visible) {
     this.showEntityHitboxes = !!visible
     setEntityHitboxesVisible(this.entitiesGroup, visible)
+    this.requestRender(true)
   }
 
   // 渲染玩家头颅：加载对应玩家的皮肤，画成 8×8×8 头颅。heads: [{x, y, z, rotation?, facing?, skinUrl}]
@@ -960,6 +1076,7 @@ export class Renderer {
     this._bgColor = color
     this.scene.background = color === 'transparent' ? null : new THREE.Color(color)
     this.renderer.setClearAlpha(color === 'transparent' ? 0 : 1)
+    this.requestRender()
   }
 
   getProjectionMode() {
@@ -996,6 +1113,7 @@ export class Renderer {
     // Updating OrbitControls in flight would turn the camera back towards its old target.
     if (this.moveMode === 'orbit') this.controls.update()
     camera.updateMatrixWorld(true)
+    this.requestRender()
   }
 
   // —— 移动模式 ——
@@ -1019,6 +1137,7 @@ export class Renderer {
     }
     this._updateTouchControlsVisibility()
     this.onMoveModeChange?.(mode)
+    this.requestRender()
   }
 
   getMoveMode() {
@@ -1062,17 +1181,19 @@ export class Renderer {
       for (const object of this[key].children) this._applyLayerVisibility(object)
     }
     updateFrameBatches(this.entitiesGroup)
+    this.requestRender(true)
   }
 
-  setEntitiesVisible(v) { this.entitiesGroup.visible = !!v }
-  setWireframesVisible(v) { this.regionGroup.visible = !!v }
-  setDimensionsVisible(v) { this.overlay.visible = !!v }
+  setEntitiesVisible(v) { this.entitiesGroup.visible = !!v; this.requestRender(true) }
+  setWireframesVisible(v) { this.regionGroup.visible = !!v; this.requestRender(true) }
+  setDimensionsVisible(v) { this.overlay.visible = !!v; this.requestRender(true) }
   setUnderwaterFogEnabled(v) {
     this._fogEnabled = !!v
     if (!this._fogEnabled && this.scene.fog) {
       this.scene.fog = null
       this.scene.background = this._bgColor === 'transparent' ? null : new THREE.Color(this._bgColor)
     }
+    this.requestRender()
   }
 
   // 渲染告示牌文字：告示牌本身（柱/板）已由方块模型渲染，这里只在板面上加文字。
@@ -1184,83 +1305,143 @@ export class Renderer {
 
   // 只重建方块网格（层级/区域变化时调用，不动相机、告示牌、头颅、实体）。
   async renderBlocks(data, assets, filter) {
-    this.clearBlocks()
     return this._buildBlockMeshes(data, assets, null, filter)
   }
 
   async _buildBlockMeshes(data, assets, onProgress, filter) {
     this._assets = assets
-    await addBlockEffects(this.group, data, assets, filter)
-    await addMovingPistons(this.group, data, assets, filter, Renderer.buildBlockPreview)
-    const { palette, blocks, bounds } = data
-
-    const { groups, emitted } = await buildFaceGroups(palette, blocks, bounds, (f) => onProgress?.(f * 0.45), filter)
-    if (emitted === 0) {
-      return { faces: 0, textures: 0 }
+    let state = this._blockState
+    if (!state || state.data !== data || state.assets !== assets || state.revision !== assets.cacheRevision ||
+      [...state.parts.values()].some(part => !part.complete)) {
+      this.clearBlocks()
+      state = this._blockState = {
+        data, assets, revision: assets.cacheRevision, index: createBlockChunkIndex(data),
+        parts: new Map(), materials: new Map(), descriptor: undefined,
+        effects: new THREE.Group(),
+      }
     }
-    onProgress?.(0.45)
+    const descriptor = filter ? filter.descriptor : null
+    const plan = planBlockChunkUpdate(state.index, state.descriptor, descriptor)
+    // A partial rebuild must never masquerade as the previously completed layer.
+    state.descriptor = undefined
+    if (plan.dirty.length || plan.fullRebuild) {
+      disposeBlockObjects(state.effects, true)
+      await addBlockEffects(state.effects, data, assets, filter)
+      await addMovingPistons(state.effects, data, assets, filter, Renderer.buildBlockPreview)
+      if (state.effects.children.length) this.group.add(state.effects)
+      else state.effects.removeFromParent()
+    }
+    const usedKeys = new Set()
+    for (let partIndex = 0; partIndex < plan.dirty.length; partIndex++) {
+      const id = plan.dirty[partIndex]
+      let part = state.parts.get(id)
+      if (!part) {
+        part = { root: new THREE.Group(), faces: 0, keys: [], complete: false }
+        state.parts.set(id, part)
+      }
+      // Materials belong to the whole block scene and are shared across chunks.
+      part.complete = false
+      disposeBlockObjects(part.root, false, false)
+      const { groups, emitted } = await buildBlockChunk(state.index, id, filter,
+        f => onProgress?.((partIndex + f * .45) / plan.dirty.length))
+      await this._loadBlockMaterials(groups, assets, state.materials,
+        f => onProgress?.((partIndex + .45 + f * .5) / plan.dirty.length))
+      await this._appendBlockMeshes(groups, state.materials, part.root)
+      if (part.root.children.length) this.group.add(part.root)
+      else part.root.removeFromParent()
+      part.faces = emitted
+      part.keys = [...groups.keys()].filter(key => state.materials.has(key))
+      part.complete = part.keys.length === groups.size
+    }
+    let faces = 0
+    for (const part of state.parts.values()) {
+      faces += part.faces
+      part.keys.forEach(key => usedKeys.add(key))
+    }
+    for (const [key, material] of state.materials) if (!usedKeys.has(key)) {
+      material.dispose()
+      state.materials.delete(key)
+    }
+    // Failed texture loads remain retryable even when the selected layer has not
+    // changed. A partial result must not become an incremental-cache hit.
+    state.descriptor = [...state.parts.values()].every(part => part.complete)
+      ? (descriptor ? { ...descriptor } : descriptor) : undefined
+    this.requestRender(true)
+    this._lastBlockUpdate = { ...plan, chunks: state.index.chunks.size, totalBlocks: data.blocks.size }
+    onProgress?.(1)
+    return { faces, textures: state.materials.size }
+  }
 
-    const texKeys = Array.from(groups.keys())
-    const materials = new Map()
+  async _loadBlockMaterials(groups, assets, materials, onProgress) {
+    const texKeys = [...groups.keys()].filter(key => !materials.has(key))
     let loaded = 0
-    await Promise.all(
-      texKeys.map(async (gKey) => {
-        if (gKey.startsWith('special/end_')) {
-          materials.set(gKey, await portalMaterial(assets, gKey === 'special/end_gateway'))
-          return
+    // Fetch concurrently, then create materials in model/group order. Three sorts
+    // opaque meshes by material id: decode timing must not place grass overlays
+    // or a resource pack's redstone numbers underneath their coplanar base faces.
+    const textures = await Promise.all(texKeys.map(async key => {
+      const texture = key.startsWith('special/end_')
+        ? await Promise.all(['environment/end_sky', 'entity/end_portal/end_portal'].map(key => assets.getTexture(key)))
+        : await assets.getTexture(key.split('|p')[0])
+      onProgress?.(++loaded / Math.max(1, texKeys.length))
+      return texture
+    }))
+    for (let index = 0; index < texKeys.length; index++) {
+      const gKey = texKeys[index]
+      if (gKey.startsWith('special/end_')) {
+        materials.set(gKey, await portalMaterial(assets, gKey === 'special/end_gateway'))
+        continue
+      }
+      // 组键可能带强度后缀（如 redstone_dust_dot|p15）
+      const sep = gKey.indexOf('|p')
+      const texKey = sep >= 0 ? gKey.slice(0, sep) : gKey
+      const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
+      const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow' || texKey === 'block/water_overlay'
+      const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
+      // 气泡柱内的气泡：原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡）。
+      // 用点精灵（THREE.Points）渲染，始终面向摄像头，任何角度都可见。
+      const isBubble = texKey === 'particle/bubble'
+      // 铁轨是零厚度平面（含斜坡）：用 Lambert 会让朝下的面被 cull 后露出暗面（斜坡朝南的一面发黑），
+      // 改用无光照 + 双面，让铁轨从任何角度都保持同一亮度（原版铁轨本就不随朝向变暗）。
+      const isRail = texKey.includes('rail')
+      const texture = textures[index]
+      if (texture) {
+        // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
+        // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
+        // flatShading：方块每个面的 4 个顶点本就同法线，用几何导数算平直法线即可，
+        // 省去法线数组（超大投影可省数百 MB 内存），光照效果一致。
+        // DoubleSide：原版水/岩浆的顶面从水下（背面）看也是可见的，不做背面剔除。
+        const mat = isWater || isLava
+          ? new THREE.MeshLambertMaterial(
+              isWater
+                ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75, flatShading: true, side: THREE.DoubleSide }
+                : { map: texture, transparent: true, opacity: 0.9, flatShading: true, side: THREE.DoubleSide },
+            )
+          : isBubble
+            // 气泡直径 0.3 格（原交叉面半径 0.15×2），sizeAttenuation 按距离透视缩放
+            ? new THREE.PointsMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, size: 0.3, sizeAttenuation: true })
+            : isRail
+              ? new THREE.MeshBasicMaterial({ map: texture, alphaTest: 0.5, side: THREE.DoubleSide })
+              : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
+        // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
+        if (power !== null) {
+          const c = redstoneTint(power)
+          mat.color.setRGB(c[0], c[1], c[2])
         }
-        // 组键可能带强度后缀（如 redstone_dust_dot|p15）
-        const sep = gKey.indexOf('|p')
-        const texKey = sep >= 0 ? gKey.slice(0, sep) : gKey
-        const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
-        const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow' || texKey === 'block/water_overlay'
-        const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
-        // 气泡柱内的气泡：原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡）。
-        // 用点精灵（THREE.Points）渲染，始终面向摄像头，任何角度都可见。
-        const isBubble = texKey === 'particle/bubble'
-        // 铁轨是零厚度平面（含斜坡）：用 Lambert 会让朝下的面被 cull 后露出暗面（斜坡朝南的一面发黑），
-        // 改用无光照 + 双面，让铁轨从任何角度都保持同一亮度（原版铁轨本就不随朝向变暗）。
-        const isRail = texKey.includes('rail')
-        const texture = await assets.getTexture(texKey)
-        if (texture) {
-          // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
-          // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
-          // flatShading：方块每个面的 4 个顶点本就同法线，用几何导数算平直法线即可，
-          // 省去法线数组（超大投影可省数百 MB 内存），光照效果一致。
-          // DoubleSide：原版水/岩浆的顶面从水下（背面）看也是可见的，不做背面剔除。
-          const mat = isWater || isLava
-            ? new THREE.MeshLambertMaterial(
-                isWater
-                  ? { map: texture, color: 0x3f76e4, transparent: true, opacity: 0.75, flatShading: true, side: THREE.DoubleSide }
-                  : { map: texture, transparent: true, opacity: 0.9, flatShading: true, side: THREE.DoubleSide },
-              )
-            : isBubble
-              // 气泡直径 0.3 格（原交叉面半径 0.15×2），sizeAttenuation 按距离透视缩放
-              ? new THREE.PointsMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, size: 0.3, sizeAttenuation: true })
-              : isRail
-                ? new THREE.MeshBasicMaterial({ map: texture, alphaTest: 0.5, side: THREE.DoubleSide })
-                : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
-          // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
-          if (power !== null) {
-            const c = redstoneTint(power)
-            mat.color.setRGB(c[0], c[1], c[2])
-          }
-          // 树叶/草染色：灰度贴图 × 树种/草色（无生物群系信息时用默认 foliage/grass 绿）
-          if (power === null) {
-            const fc = foliageTint(texKey) ?? grassTint(texKey)
-            if (fc != null) mat.color.setHex(fc)
-          }
-          materials.set(gKey, mat)
+        // 树叶/草染色：灰度贴图 × 树种/草色（无生物群系信息时用默认 foliage/grass 绿）
+        if (power === null) {
+          const fc = foliageTint(texKey) ?? grassTint(texKey)
+          if (fc != null) mat.color.setHex(fc)
         }
-        loaded++
-        onProgress?.(0.45 + 0.5 * (loaded / Math.max(1, texKeys.length)))
-      })
-    )
+        materials.set(gKey, mat)
+      }
+    }
 
     if (materials.size === 0 && groups.size > 0) {
       throw new Error(`贴图加载失败：${texKeys.length} 张贴图都未能加载（请确认已运行 npm run setup）`)
     }
+  }
 
+  async _appendBlockMeshes(groups, materials, target) {
     let i = 0
     for (const [texKey, g] of groups) {
       const mat = materials.get(texKey)
@@ -1275,7 +1456,7 @@ export class Renderer {
         geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3))
         const points = new THREE.Points(geo, mat)
         points.renderOrder = -1
-        this.group.add(points)
+        target.add(points)
         if (this._freezeStatic !== false) freezeStaticObject(points)
         continue
       }
@@ -1288,13 +1469,12 @@ export class Renderer {
       geo.setIndex(new THREE.BufferAttribute(g.indices, 1))
       const mesh = new THREE.Mesh(geo, mat)
       if (mat.uniforms?.gameTime) animateObject(mesh, age => { mat.uniforms.gameTime.value = (age % 24000) / 24000 })
-      this.group.add(mesh)
+      target.add(mesh)
       if (!mat.uniforms?.gameTime && this._freezeStatic !== false) freezeStaticObject(mesh)
       // 超大几何体上传 GPU 时也定期让出主线程，避免最后一段卡顿
       if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
     }
 
-    return { faces: emitted, textures: materials.size }
   }
 
   // 调试：读取当前画面像素，统计有多少种颜色（判断画面是否有内容）
@@ -1424,5 +1604,29 @@ export class Renderer {
     const aspect = 4 // 宽 4 高 1
     sprite.scale.set(scale * aspect, scale, 1)
     return sprite
+  }
+}
+
+// A texture can be fetched well before its mesh is attached. Keep cache eviction
+// suspended across each asynchronous scene build, then pin its complete result.
+// Nested preview/entity builds share the provider's reference-counted transaction.
+for (const name of ['render', 'renderBlocks', 'renderEntities', 'renderPlayerHeads',
+  'renderBanners', 'renderStatues', 'renderDecoratedPots', 'renderSigns']) {
+  const build = Renderer.prototype[name]
+  Renderer.prototype[name] = async function (...args) {
+    const assets = args[1]
+    const end = assets?.beginTextureLoad?.()
+    try {
+      return await build.apply(this, args)
+    } finally {
+      try {
+        this.requestRender(true)
+        this._syncSceneResources(assets)
+      } finally {
+        end?.()
+        // Prototype-only model builders are owned by their enclosing scene build.
+        if (this.scene) assets?.trimTextures?.()
+      }
+    }
   }
 }

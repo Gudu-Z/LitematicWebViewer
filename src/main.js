@@ -111,6 +111,7 @@ integrationBridge = new FullViewerBridge({
     if (renderer) {
       const i = previewOptions.interaction
       Object.assign(renderer.controls, { enableRotate: i.rotate, enablePan: i.pan, enableZoom: i.zoom, autoRotate: i.autoRotate, autoRotateSpeed: i.autoRotateSpeed })
+      renderer.requestRender()
     }
   },
 })
@@ -418,6 +419,9 @@ async function openFile(file, camera) {
   integrationBridge.loading = true
   integrationBridge.notify('loading', { message: t('parsingFile'), progress: 0 })
   ui.clearError()
+  // Keep the previous entity/skin cache warm across the separate block and
+  // entity builders; each builder pins only the part already attached so far.
+  const endTextureLoad = assets.beginTextureLoad()
   try {
     ui.setStatusKey('parsingFile')
     ui.setProgress(0.02)
@@ -470,7 +474,7 @@ async function openFile(file, camera) {
     return false
   } finally {
     integrationBridge.loading = false
-    setBusy(false)
+    try { setBusy(false) } finally { endTextureLoad(); assets.trimTextures() }
   }
 }
 
@@ -491,22 +495,25 @@ async function autoLoadDemo(sample = false) {
 // 重新解析方块贴图并重渲染当前已加载的结构
 async function reRenderCurrent() {
   if (!currentData || !renderer) return
-  // 资源包集合已变化：贴图缓存已被清空，这里同步移除旧网格并释放其贴图，
-  // 避免旧贴图残留（泄漏）或在异步重解析期间被动画循环重新上传。
-  renderer.clear(true)
-  resolver.clear()
-  const palette = currentData.palette
-  const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
-  palette.forEach((p, i) => {
-    p.baked = baked[i]
-  })
-  await renderer.render(currentData, assets, (p) => ui.setProgress(p), makeBlockFilter(), false)
-  await renderCurrentSigns()
-  await renderCurrentPlayerHeads()
-  await renderCurrentBanners()
-  await renderCurrentStatues()
-  await renderCurrentPots()
-  await renderCurrentEntities()
+  const endTextureLoad = assets.beginTextureLoad()
+  try {
+    // 资源包集合已变化：贴图缓存已被清空，这里同步移除旧网格并释放其贴图，
+    // 避免旧贴图残留（泄漏）或在异步重解析期间被动画循环重新上传。
+    renderer.clear(true)
+    resolver.clear()
+    const palette = currentData.palette
+    const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
+    palette.forEach((p, i) => {
+      p.baked = baked[i]
+    })
+    await renderer.render(currentData, assets, (p) => ui.setProgress(p), makeBlockFilter(), false)
+    await renderCurrentSigns()
+    await renderCurrentPlayerHeads()
+    await renderCurrentBanners()
+    await renderCurrentStatues()
+    await renderCurrentPots()
+    await renderCurrentEntities()
+  } finally { endTextureLoad(); assets.trimTextures() }
 }
 
 // 渲染当前结构里的告示牌
@@ -586,13 +593,15 @@ function makeBlockFilter() {
   if (mode === 'all' && hidden.length === 0) return null
   const inAny = (x, y, z, list) =>
     list.some((r) => x >= r.minX && x <= r.maxX && y >= r.minY && y <= r.maxY && z >= r.minZ && z <= r.maxZ)
-  return (x, y, z) => {
+  const filter = (x, y, z) => {
     if (mode === 'single' && y !== layerY) return false
     if (mode === 'below' && y > layerY) return false
     if (mode === 'above' && y < layerY) return false
     if (hidden.length && inAny(x, y, z, hidden)) return false
     return true
   }
+  filter.descriptor = { mode, layerY, regionKey: hidden.length ? JSON.stringify(hidden.map(r => [r.name, r.minX, r.minY, r.minZ, r.maxX, r.maxY, r.maxZ])) : '' }
+  return filter
 }
 
 // 层级/区域变化：重建方块网格，复用实体和方块实体模型并同步层级显隐。

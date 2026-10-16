@@ -72,6 +72,7 @@ function refreshUI() {
     renderer.setBackgroundColor(background)
     renderer.setUnderwaterFogEnabled(background !== 'transparent')
     Object.assign(renderer.controls, { enableRotate: i.rotate, enablePan: i.pan, enableZoom: i.zoom, autoRotate: i.autoRotate, autoRotateSpeed: i.autoRotateSpeed })
+    renderer.requestRender()
   }
 }
 function cameraSnapshot() {
@@ -143,6 +144,7 @@ async function pump() {
     const request = requested; requested = null; current = null
     controller = new AbortController()
     state('loading', t('loading'))
+    const endTextureLoad = assets.beginTextureLoad()
     try {
       let file, url
       if (typeof request.source === 'string') {
@@ -175,6 +177,9 @@ async function pump() {
       updateActive()
     } catch (error) {
       if (!requested) state('error', words[error.message] ? t(error.message) : `${t('failed')} ${error.message}`)
+    } finally {
+      endTextureLoad()
+      assets.trimTextures()
     }
   }
   pumping = false

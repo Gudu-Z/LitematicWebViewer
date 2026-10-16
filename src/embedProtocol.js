@@ -32,6 +32,7 @@ export function applyCamera(renderer, value) {
   if (Number.isFinite(value.zoom) && value.zoom >= .01 && value.zoom <= 100) renderer.camera.zoom = value.zoom
   renderer.camera.updateProjectionMatrix()
   renderer.controls.update()
+  renderer.requestRender?.()
 }
 
 export async function fetchSchematic(value, base, signal) {

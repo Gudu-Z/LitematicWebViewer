@@ -9,6 +9,9 @@ import { animateTexture } from './textureAnimation.js'
 // WeakSet 不会被 Texture.clone() 复制，也不阻止已释放贴图被垃圾回收。
 const assetTextures = new WeakSet()
 export const isAssetTexture = texture => !!texture && assetTextures.has(texture)
+const textureBytes = new WeakMap()
+const estimateTextureBytes = texture => textureBytes.get(texture) ||
+  (texture.image?.width || 0) * (texture.image?.height || 0) * 8 // decoded RGBA + GPU image
 
 // 默认资源可能因网络抖动或服务器暂时不可用而加载失败。只补试一次，
 // 并将最终失败交给调用方清理缓存；404/SPA 回退仍视为真正缺失，不补试。
@@ -65,6 +68,17 @@ export class AssetProvider {
     this.cacheRevision = 0
     this._ownedTextures = new Set()
     this._cacheClearListeners = new Set()
+    this._textureEvictListeners = new Set()
+    this._textureRecords = new Map()
+    this._cachedTextureRecords = new Map()
+    this._sourceTextures = new WeakMap()
+    this._textureOwners = new Map()
+    this._textureReferences = new Map()
+    this._textureUseClock = 0
+    this._textureLoadDepth = 0
+    this._pendingTextures = 0
+    this._animationTicks = new WeakMap()
+    this._animatedCloneVersions = new WeakMap()
   }
 
   // 派生模型缓存也需及时解除对旧资源包图片的引用，不等待下次模型构建。
@@ -73,14 +87,117 @@ export class AssetProvider {
     return () => this._cacheClearListeners.delete(listener)
   }
 
+  onTextureEvict(listener) {
+    this._textureEvictListeners.add(listener)
+    return () => this._textureEvictListeners.delete(listener)
+  }
+
+  // Loading a model may yield between textures. Its resources become trimmable
+  // only after the caller registers the completed scene and ends the transaction.
+  beginTextureLoad() {
+    this._textureLoadDepth++
+    let ended = false
+    return () => {
+      if (ended) return
+      ended = true
+      this._textureLoadDepth--
+    }
+  }
+
+  // Hidden layers still retain their textures; only visible textures animate.
+  // Texture.clone shares Source, so a clone also retains its provider-owned source.
+  setTextureUsage(owner, retained, active = retained) {
+    const previous = this._textureOwners.get(owner)
+    const usage = { retained: new Set(), animated: new Map() }
+    const collect = (textures, visible) => {
+      for (const texture of textures || []) {
+        const sources = this._ownedTextures.has(texture) ? [texture] : this._sourceTextures.get(texture?.source)
+        if (!sources) continue
+        for (const source of sources) {
+          usage.retained.add(source)
+          if (visible && source.userData.updateAnimation) {
+            if (!usage.animated.has(source)) usage.animated.set(source, new Set())
+            usage.animated.get(source).add(texture)
+          }
+        }
+      }
+    }
+    collect(retained, false)
+    collect(active, true)
+    this._textureOwners.set(owner, usage)
+    for (const texture of usage.retained) {
+      if (!previous?.retained.has(texture)) this._textureReferences.set(texture, (this._textureReferences.get(texture) || 0) + 1)
+      const record = this._textureRecords.get(texture)
+      if (record) record.used = ++this._textureUseClock
+    }
+    for (const texture of previous?.retained || []) {
+      if (!usage.retained.has(texture)) this._releaseTextureReference(texture)
+    }
+  }
+
+  releaseTextureUsage(owner) {
+    const usage = this._textureOwners.get(owner)
+    if (!usage) return
+    this._textureOwners.delete(owner)
+    for (const texture of usage.retained) this._releaseTextureReference(texture)
+  }
+
+  _releaseTextureReference(texture) {
+    const count = (this._textureReferences.get(texture) || 0) - 1
+    if (count > 0) this._textureReferences.set(texture, count)
+    else {
+      this._textureReferences.delete(texture)
+      // Pack changes retire live textures without breaking a scene/export that
+      // still borrows them. They can be disposed after the final owner releases.
+      if (this._textureRecords.get(texture)?.keys.size === 0) texture.dispose()
+    }
+  }
+
+  trimTextures({ maxIdleCount = 256, maxIdleBytes = 64 * 1024 * 1024 } = {}) {
+    if (this._textureLoadDepth || this._pendingTextures) return { skipped: true, evicted: 0 }
+    const idle = [...this._textureRecords].filter(([texture, record]) =>
+      record.keys.size && !this._textureReferences.has(texture)).sort((a, b) => a[1].used - b[1].used)
+    let count = idle.length, bytes = idle.reduce((sum, [, record]) => sum + record.bytes, 0)
+    const evicted = new Set()
+    for (const [texture, record] of idle) {
+      if (count <= maxIdleCount && bytes <= maxIdleBytes) break
+      evicted.add(texture)
+      count--; bytes -= record.bytes
+    }
+    // CPU templates must stop referring to old textures before their GPU images
+    // are released. Active scenes are excluded even if they exceed the budget.
+    if (evicted.size) {
+      for (const listener of this._textureEvictListeners) listener(evicted)
+      for (const texture of evicted) {
+        this._removeTextureKeys(texture)
+        texture.dispose()
+      }
+    }
+    return { skipped: false, evicted: evicted.size, idleCount: count, idleBytes: bytes }
+  }
+
+  _removeTextureKeys(texture) {
+    const record = this._textureRecords.get(texture)
+    for (const [key, request] of record?.keys || []) {
+      if (this.textureCache.get(key) === request) {
+        this.textureCache.delete(key)
+        this._cachedTextureRecords.delete(key)
+      }
+    }
+    record?.keys.clear()
+  }
+
   // 清空两个缓存（资源包集合变化时，需丢弃旧的模型/贴图缓存以便重新解析）
   clearCaches() {
     this.cacheRevision++
     for (const listener of this._cacheClearListeners) listener()
-    for (const texture of this._ownedTextures) texture.dispose()
-    this.animatedTextures.clear()
+    for (const texture of this._ownedTextures) {
+      this._removeTextureKeys(texture)
+      if (!this._textureReferences.has(texture)) texture.dispose()
+    }
     this._animationTick = null
     this.textureCache.clear()
+    this._cachedTextureRecords.clear()
     this.jsonCache.clear()
   }
 
@@ -151,11 +268,21 @@ export class AssetProvider {
   }
 
   _cachedTexture(key, load) {
-    if (this.textureCache.has(key)) return this.textureCache.get(key)
+    if (this.textureCache.has(key)) {
+      // Resolved entries are indexed separately so trimming never needs to await
+      // promises or race the caller that is constructing a model.
+      const request = this.textureCache.get(key)
+      const record = this._cachedTextureRecords.get(key)
+      if (record) record.used = ++this._textureUseClock
+      return request
+    }
     const revision = this.cacheRevision
+    this._pendingTextures++
+    let request
+    try { request = load() } catch (error) { request = Promise.reject(error) }
     // 加载失败（null，如并发导致的瞬时解码失败）不缓存，下次调用重试；
     // 成功则缓存。避免一次瞬时失败把该贴图永久判为缺失。
-    const p = load().catch(() => null).then(texture => {
+    const p = Promise.resolve(request).catch(() => null).then(texture => {
       if (revision !== this.cacheRevision || this.textureCache.get(key) !== p) {
         // 切换资源包后才解码完成的旧贴图不能进入新缓存或动画更新列表。
         if (texture) { assetTextures.add(texture); texture.dispose() }
@@ -168,21 +295,42 @@ export class AssetProvider {
       assetTextures.add(texture)
       if (!this._ownedTextures.has(texture)) {
         this._ownedTextures.add(texture)
+        this._textureRecords.set(texture, { keys: new Map(), bytes: estimateTextureBytes(texture), used: 0 })
+        let sources = this._sourceTextures.get(texture.source)
+        if (!sources) this._sourceTextures.set(texture.source, sources = new Set())
+        sources.add(texture)
         // 缩略图资源会按预算提前淘汰；同步移除所有持有引用，避免清空时再次释放。
         const onDispose = () => {
+          // IconAssets may evict its independent clone through its own budget.
+          if (this._textureRecords.get(texture)?.keys.size) {
+            for (const listener of this._textureEvictListeners) listener(new Set([texture]))
+          }
+          this._removeTextureKeys(texture)
+          this._textureRecords.delete(texture)
+          this._sourceTextures.get(texture.source)?.delete(texture)
           this._ownedTextures.delete(texture)
           this.animatedTextures.delete(texture)
+          if (this._textureReferences.delete(texture)) {
+            for (const usage of this._textureOwners.values()) {
+              usage.retained.delete(texture)
+              usage.animated.delete(texture)
+            }
+          }
           texture.removeEventListener('dispose', onDispose)
         }
         texture.addEventListener('dispose', onDispose)
       }
+      const record = this._textureRecords.get(texture)
+      record.keys.set(key, p)
+      record.used = ++this._textureUseClock
+      this._cachedTextureRecords.set(key, record)
       if (texture.userData.updateAnimation) {
         this.animatedTextures.add(texture)
         // A newly decoded animation still needs to catch up within the current tick.
         this._animationTick = null
       }
       return texture
-    })
+    }).finally(() => { this._pendingTextures-- })
     this.textureCache.set(key, p)
     return p
   }
@@ -251,11 +399,36 @@ export class AssetProvider {
     }
   }
 
-  updateAnimations(age) {
+  hasAnimatedTextures(owner) {
+    return arguments.length ? !!this._textureOwners.get(owner)?.animated.size : !!this.animatedTextures.size
+  }
+
+  updateAnimations(age, owner) {
     const tick = Math.floor(age)
-    if (tick === this._animationTick) return
-    this._animationTick = tick
-    for (const texture of this.animatedTextures) texture.userData.updateAnimation(age)
+    const targeted = arguments.length > 1
+    if (!targeted && tick === this._animationTick) return false
+    this._animationTick = targeted ? null : tick
+    const selected = targeted ? this._textureOwners.get(owner)?.animated : this.animatedTextures
+    if (!selected) return false
+    let changed = false
+    for (const entry of selected) {
+      const [texture, clones] = targeted ? entry : [entry, null]
+      if (this._animationTicks.get(texture) !== tick) {
+        this._animationTicks.set(texture, tick)
+        const version = texture.version
+        texture.userData.updateAnimation(age)
+        changed ||= texture.version !== version
+      }
+      // Updating the common canvas changes Source, but THREE also requires each
+      // independently uploaded clone's own texture version to change.
+      for (const clone of clones || []) {
+        if (clone === texture || this._animatedCloneVersions.get(clone) === texture.version) continue
+        clone.needsUpdate = true
+        this._animatedCloneVersions.set(clone, texture.version)
+        changed = true
+      }
+    }
+    return changed
   }
 }
 
@@ -268,6 +441,9 @@ function textureFromBlob(blob, animated) {
       const heuristic = img.height > img.width && img.height % img.width === 0 && img.height / img.width >= 4
       const tex = new THREE.Texture(img)
       if (animated || (animated == null && heuristic)) animateTexture(tex, img, animated || {})
+      const layout = tex.userData.animation, frameBytes = tex.image.width * tex.image.height * 4
+      textureBytes.set(tex, img.width * img.height * 4 + frameBytes * (layout ? 2 : 1) +
+        (layout && animated?.interpolate ? frameBytes * (new Set(layout.frames.map(frame => frame.index)).size + 1) : 0))
       tex.magFilter = THREE.NearestFilter
       tex.minFilter = THREE.NearestFilter
       tex.generateMipmaps = false

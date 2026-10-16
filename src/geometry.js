@@ -408,7 +408,9 @@ function writeFace(g, verts, uvs, ox, oy, oz) {
 // 内存减半且无扩容峰值，超大投影（上千万面）也不会撑爆内存。
 // 法线不存（每个面的 4 个顶点本就同法线，渲染用 flatShading 即可得到相同光照）。
 // 返回 { groups: Map<texKey, {positions,uvs,indices}>, emitted: 面数 }
-export async function buildFaceGroups(palette, blocks, bounds, onProgress, filter) {
+// options.keys 只限制生成候选，遮挡/流体邻居仍查完整 blocks；候选需可重复迭代。
+// includeGroup 可把少量保守可分块贴图与保持原顺序的全局贴图分开。
+export async function buildFaceGroups(palette, blocks, bounds, onProgress, filter, options) {
   const grid = {
     W: bounds.width,
     D: bounds.depth,
@@ -442,7 +444,10 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
       renderable[i] = 1
       occludes[i] = baked.fullCube && !isTransparent(name) ? 1 : 0
       quadsByPalette[i] = baked.quads
-      groupKeysByPalette[i] = baked.quads.map(q => faceKey(palette, i, q))
+      groupKeysByPalette[i] = baked.quads.map(q => {
+        const key = faceKey(palette, i, q)
+        return options?.includeGroup && !options.includeGroup(key) ? null : key
+      })
     } else {
       quadsByPalette[i] = null
     }
@@ -461,13 +466,20 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     return fullFaceMask(p.baked ? p.baked.quads : null)
   })
 
-  const total = blocks.size
+  const keys = options?.keys
+  const entries = keys ? function* () {
+    for (const key of keys) {
+      const gi = blocks.get(key)
+      if (gi !== undefined) yield [key, gi]
+    }
+  } : () => blocks
+  const total = keys ? (keys.length ?? keys.size ?? blocks.size) : blocks.size
   const counts = new Map() // gKey -> 面数
   let emitted = 0
 
   // —— 第一遍：统计每个贴图组的精确面数 ——
   let n = 0
-  for (const [key, gi] of blocks) {
+  for (const [key, gi] of entries()) {
     if ((++n & 0xffff) === 0) {
       onProgress?.(total ? (0.5 * n) / total : 0)
       await yieldThread()
@@ -482,8 +494,10 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     const finfo = fluidOf[gi]
     if (finfo) {
       // 流体（水/岩浆/气泡柱/含水方块的内部水体）
-      emitted += emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], visible, (texKey) => {
+      emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], visible, (texKey) => {
+        if (options?.includeGroup && !options.includeGroup(texKey)) return
         counts.set(texKey, (counts.get(texKey) || 0) + 1)
+        emitted++
       })
       if (!finfo.waterlogged) continue // 纯流体：不再渲染方块自身
       // 含水方块：继续渲染方块自身的面（下面）
@@ -493,8 +507,8 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     const groupKeys = groupKeysByPalette[gi]
     for (let qi = 0; qi < quads.length; qi++) {
       const q = quads[qi]
-      if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
       const gKey = groupKeys[qi]
+      if (gKey === null || faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
       counts.set(gKey, (counts.get(gKey) || 0) + 1)
       emitted++
     }
@@ -521,7 +535,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
 
   // —— 第二遍：填充几何数据 ——
   n = 0
-  for (const [key, gi] of blocks) {
+  for (const [key, gi] of entries()) {
     if ((++n & 0xffff) === 0) {
       onProgress?.(total ? 0.5 + (0.5 * n) / total : 0)
       await yieldThread()
@@ -537,6 +551,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     if (finfo) {
       emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], visible, (texKey, pos, uvs) => {
         const g = groups.get(texKey)
+        if (!g) return
         if (texKey === 'particle/bubble') {
           g.positions[g.v] = pos[0]
           g.positions[g.v + 1] = pos[1]
@@ -553,6 +568,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     const faceGroups = groupsByPalette[gi]
     for (let qi = 0; qi < quads.length; qi++) {
       const q = quads[qi]
+      if (!faceGroups[qi]) continue
       if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
       writeFace(faceGroups[qi], q.verts, q.uvs, x, y, z)
     }

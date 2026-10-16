@@ -4,6 +4,7 @@ import markup from './imageExport.html?raw'
 import './imageExport.css'
 import { getLang } from './i18n.js'
 import { exportFilename, fitImageCamera, setImageAspect, validImageSize, viewDirection, MAX_EXPORT_EDGE } from './imageExportCamera.js'
+import { collectSceneResources } from './sceneResources.js'
 
 const WORDS = {
   title: ['导出图片', 'Export image'], back: ['返回预览器', 'Back to viewer'],
@@ -148,6 +149,10 @@ export class ImageExport {
     // The scene belongs to the viewer. Release only this context, never shared geometry/textures.
     this.gl?.dispose(); this.gl?.forceContextLoss(); this.gl?.domElement.remove()
     this.gl = null; this.controls = null; this.observer = null; this.camera = null
+    this._textureAssets?.releaseTextureUsage(this)
+    this._textureAssets?.trimTextures()
+    this._textureAssets = null; this._resourceScene = null; this._resourceSignature = null
+    this._resourceVersion = null; this._resourceRevision = null
     // A closed studio must not retain the previous schematic after the viewer replaces it.
     this.modelData = null; this.animated = []
     if (this.wasActive !== undefined) { this.source.setActive(this.wasActive); this.wasActive = undefined }
@@ -167,14 +172,42 @@ export class ImageExport {
     this.el.Empty.hidden = !!data
     this.el.Frame.hidden = !data
     this.el.SourceName.textContent = this.getFileName() || tr('noFile')
-    this.animated = []
-    this.source.scene.traverse(object => { if (object.userData.updateAnimation) this.animated.push(object) })
+    this.syncTextureUsage(true)
     if (data && (force || changed)) {
       this.el.Filename.value = exportFilename(this.getFileName()).slice(0, -4)
       this.age = 0
       this.preset('iso')
     }
     this.validate()
+  }
+
+  syncTextureUsage(force = false) {
+    const { scene, _assets: assets, _sceneResourceVersion: version } = this.source
+    const signature = [this.el.Entities?.checked, this.el.Dimensions?.checked, this.el.Regions?.checked].join(',')
+    if (!force && assets === this._textureAssets && scene === this._resourceScene &&
+      version === this._resourceVersion && assets?.cacheRevision === this._resourceRevision && signature === this._resourceSignature) return
+    if (assets !== this._textureAssets) this._textureAssets?.releaseTextureUsage(this)
+    // Export visibility is independent of the main viewer. Register all retained
+    // textures, but animate only those drawn with the studio's current switches.
+    const background = scene.background, visibility = []
+    try {
+      scene.background = null // Export uses either a colour or transparent background.
+      for (const [key, control] of [['entitiesGroup', 'Entities'], ['overlay', 'Dimensions'], ['regionGroup', 'Regions']]) {
+        const group = this.source[key]
+        if (!group || !this.el[control]) continue
+        visibility.push([group, group.visible])
+        group.visible = this.el[control].checked
+      }
+      const { retained, active } = collectSceneResources(scene)
+      assets?.setTextureUsage(this, retained, active)
+      this.animated = []
+      scene.traverse(object => { if (object.userData.updateAnimation) this.animated.push(object) })
+    } finally {
+      scene.background = background
+      for (const [group, visible] of visibility) group.visible = visible
+    }
+    this._textureAssets = assets; this._resourceScene = scene
+    this._resourceVersion = version; this._resourceRevision = assets?.cacheRevision; this._resourceSignature = signature
   }
 
   bounds() {
@@ -292,6 +325,7 @@ export class ImageExport {
 
   draw() {
     if (!this.modelData || !this.gl || this.contextLost) return
+    this.syncTextureUsage()
     const { scene, entitiesGroup, overlay, regionGroup } = this.source
     const previous = { background: scene.background, fog: scene.fog, entities: entitiesGroup.visible, overlay: overlay.visible, regions: regionGroup.visible }
     const ages = this.animated.map(object => object.userData.animationAge)
@@ -300,7 +334,7 @@ export class ImageExport {
       scene.fog = null
       entitiesGroup.visible = this.el.Entities.checked; overlay.visible = this.el.Dimensions.checked; regionGroup.visible = this.el.Regions.checked
       for (const object of this.animated) object.userData.animationAge = this.age
-      this.source._assets?.updateAnimations(this.age)
+      this._textureAssets?.updateAnimations(this.age, this)
       this.gl.render(scene, this.camera)
     } finally {
       scene.background = previous.background; scene.fog = previous.fog
