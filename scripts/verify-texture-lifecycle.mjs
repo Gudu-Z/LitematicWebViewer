@@ -150,4 +150,53 @@ try {
   globalThis.Image = originalImage
 }
 
-console.log('PASS texture lifecycle: shared ownership, animation cleanup, pack revisions/subscriptions, stale async results, decode retry, independent thumbnail clones/budgets and external skins')
+// Exceptions inside Image.onload are outside the Promise executor. They must
+// reject the load, not leave every frame sharing the texture pending forever.
+{
+  const saved = { fetch: globalThis.fetch, Image: globalThis.Image, document: globalThis.document,
+    create: URL.createObjectURL, revoke: URL.revokeObjectURL }
+  const unhandled = [], revoked = [], images = []
+  let fail = true, id = 0, drawCalls = 0
+  const decoded = deferred()
+  globalThis.fetch = async () => new Response(new Blob(['image fixture']))
+  URL.createObjectURL = () => 'blob:texture-callback-' + (++id)
+  URL.revokeObjectURL = url => revoked.push(url)
+  globalThis.Image = class {
+    width = 16
+    height = 32
+    constructor() { images.push(this) }
+    set src(value) { queueMicrotask(() => { try { this.onload() } catch (error) { unhandled.push(error) } finally { decoded.resolve() } }) }
+  }
+  globalThis.document = { createElement: () => ({ getContext: () => ({
+    clearRect() {}, drawImage() { if (fail) throw Error('Transient animation canvas failure'); drawCalls++ },
+  }) }) }
+  try {
+    const assets = new AssetProvider()
+    assets._isAnimated = async () => ({ frametime: 2 })
+    let settled = false
+    const initial = assets.getTexture('block/magma')
+    const waiting = Array.from({ length: 50 }, () => assets.getTexture('block/magma'))
+    assert.ok(waiting.every(load => load === initial), 'Frames must share the pending texture')
+    initial.then(() => { settled = true })
+    await decoded.promise
+    await new Promise(resolve => setImmediate(resolve))
+    assert.equal(settled, true, 'A canvas exception must settle all waiting frames')
+    assert.deepEqual(unhandled, [], 'Image callbacks must not leak uncaught exceptions')
+    assert.equal(await initial, null)
+    assert.equal(assets._pendingTextures, 0)
+    assert.equal(assets.textureCache.has('block/magma'), false, 'The next frame must be able to retry')
+    assert.deepEqual(revoked, ['blob:texture-callback-1'])
+    fail = false
+    const texture = await assets.getTexture('block/magma')
+    assert.ok(texture?.userData.updateAnimation, 'A later successful decode retains the animation')
+    assert.ok(drawCalls > 0)
+    assert.deepEqual(revoked, ['blob:texture-callback-1', 'blob:texture-callback-2'])
+    assert.ok(images.every(image => !image.onload && !image.onerror), 'Settled decoders release their handlers')
+    assets.clearCaches()
+  } finally {
+    globalThis.fetch = saved.fetch; globalThis.Image = saved.Image; globalThis.document = saved.document
+    URL.createObjectURL = saved.create; URL.revokeObjectURL = saved.revoke
+  }
+}
+
+console.log('PASS texture lifecycle: shared ownership, animation cleanup, pack revisions/subscriptions, stale async results, decode/callback failure recovery, independent thumbnail clones/budgets and external skins')

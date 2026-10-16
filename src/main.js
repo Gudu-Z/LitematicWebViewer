@@ -447,13 +447,8 @@ async function openFile(file, camera) {
     document.body.classList.add('has-model'); closeMobilePanels()
     resetViewForData(data)
     ui.setStatusKey('statusGeometry', { n: data.blocks.size.toLocaleString() })
-    const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.6))
-    await renderCurrentSigns()
-    await renderCurrentPlayerHeads()
-    await renderCurrentBanners()
-    await renderCurrentStatues()
-    await renderCurrentPots()
-    await renderCurrentEntities()
+    const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.4))
+    await renderCurrentDetails()
     ui.showMetadata(data.metadata)
     applyCamera(renderer, camera)
     refreshProjectionButton()
@@ -506,13 +501,9 @@ async function reRenderCurrent() {
     palette.forEach((p, i) => {
       p.baked = baked[i]
     })
-    await renderer.render(currentData, assets, (p) => ui.setProgress(p), makeBlockFilter(), false)
-    await renderCurrentSigns()
-    await renderCurrentPlayerHeads()
-    await renderCurrentBanners()
-    await renderCurrentStatues()
-    await renderCurrentPots()
-    await renderCurrentEntities()
+    await renderer.render(currentData, assets, (p) => ui.setProgress(.35 + p * .4), makeBlockFilter(), false)
+    await renderCurrentDetails()
+    ui.setProgress(1)
   } finally { endTextureLoad(); assets.trimTextures() }
 }
 
@@ -524,13 +515,28 @@ async function renderCurrentSigns() {
 }
 
 // 渲染当前结构里的实体
-async function renderCurrentEntities() {
+async function renderCurrentEntities(onProgress) {
   if (!currentData || !renderer) return
   const ents = filterByRegion(currentData.entities || []).map(entity => ({
     ...entity,
     renderOptions: { ...entity.renderOptions, illagerExtraArms: view.illagerExtraArms },
   }))
-  await renderer.renderEntities(ents, assets, currentData)
+  await renderer.renderEntities(ents, assets, currentData, onProgress)
+}
+
+// Block geometry is only part of a load. Report actual entity completions instead
+// of leaving the bar at 95% while a large item-frame collection is still loading.
+async function renderCurrentDetails() {
+  ui.setStatusKey('statusBlockEntities')
+  const steps = [renderCurrentSigns, renderCurrentPlayerHeads, renderCurrentBanners, renderCurrentStatues, renderCurrentPots]
+  for (let i = 0; i < steps.length; i++) {
+    await steps[i]()
+    ui.setProgress(.75 + (i + 1) / steps.length * .05)
+  }
+  await renderCurrentEntities((progress, { completed, total, phase }) => {
+    if (total) ui.setStatusKey(phase === 'finishing' ? 'statusEntitiesFinishing' : 'statusEntityProgress', { completed, total })
+    ui.setProgress(.8 + progress * .19)
+  })
 }
 
 // 渲染当前结构里的玩家头颅（用玩家自己的皮肤）

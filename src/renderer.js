@@ -894,14 +894,24 @@ export class Renderer {
   }
 
   // 渲染实体（矿车、物品展示框等）
-  async renderEntities(entities, assets, data) {
+  async renderEntities(entities, assets, data, onProgress) {
     this.clearEntities()
-    if (!entities || !entities.length) return
+    const total = entities?.length || 0
+    if (!total) { onProgress?.(1, { completed: 0, total: 0, phase: 'done' }); return }
     const revision = assets.cacheRevision
     // Keep the same concurrency ceiling, but immediately reuse each free slot.
     // A slow skin/model must not hold up the next 50 otherwise-ready entities.
     const meshes = new Array(entities.length)
-    let next = 0
+    let next = 0, completed = 0, reported = -1
+    let resume = null, yieldAt = performance.now() + 8
+    const progress = phase => {
+      const percent = Math.floor(completed / total * 100)
+      if (phase !== 'models' || percent !== reported) {
+        reported = percent
+        onProgress?.(phase === 'done' ? 1 : .95 * completed / total, { completed, total, phase })
+      }
+    }
+    progress('models')
     await Promise.all(Array.from({ length: Math.min(50, entities.length) }, async () => {
       while (next < entities.length) {
         const i = next++, entity = entities[i]
@@ -911,11 +921,23 @@ export class Renderer {
           console.error('实体渲染失败:', entity.id, err)
           meshes[i] = null
         }
+        completed++
+        if (assets.cacheRevision !== revision) return
+        progress('models')
+        // Cached models can keep all 50 workers in microtasks for a long time.
+        // Share one short yield so input and the real progress text can paint.
+        if (!resume && performance.now() >= yieldAt) resume = new Promise(resolve => setTimeout(() => {
+          yieldAt = performance.now() + 8
+          resume = null
+          resolve()
+        }, 0))
+        if (resume) await resume
       }
     }))
     if (assets.cacheRevision !== revision) return
     // A temporary failure can outlast the first shared retry while later workers
     // succeed. Complete those earlier bodies before batching; keep their items.
+    progress('finishing')
     await repairItemFrameBodies(meshes)
     if (assets.cacheRevision !== revision) return
     const frames = []
@@ -927,6 +949,7 @@ export class Renderer {
     }
     batchItemFrames(this.entitiesGroup, frames)
     setEntityHitboxesVisible(this.entitiesGroup, this.showEntityHitboxes)
+    progress('done')
   }
 
   setEntityHitboxesVisible(visible) {

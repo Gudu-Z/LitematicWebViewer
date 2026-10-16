@@ -436,27 +436,38 @@ function textureFromBlob(blob, animated) {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(blob)
     const img = new Image()
-    img.onload = () => {
-      // 资源包可定义横向/竖向帧表、不同帧时长和颜色插值。
-      const heuristic = img.height > img.width && img.height % img.width === 0 && img.height / img.width >= 4
-      const tex = new THREE.Texture(img)
-      if (animated || (animated == null && heuristic)) animateTexture(tex, img, animated || {})
-      const layout = tex.userData.animation, frameBytes = tex.image.width * tex.image.height * 4
-      textureBytes.set(tex, img.width * img.height * 4 + frameBytes * (layout ? 2 : 1) +
-        (layout && animated?.interpolate ? frameBytes * (new Set(layout.frames.map(frame => frame.index)).size + 1) : 0))
-      tex.magFilter = THREE.NearestFilter
-      tex.minFilter = THREE.NearestFilter
-      tex.generateMipmaps = false
-      tex.flipY = false // Minecraft 贴图坐标（v 向下）与模型 UV 约定一致
-      tex.colorSpace = THREE.SRGBColorSpace
-      tex.needsUpdate = true
+    const cleanup = () => {
+      img.onload = img.onerror = null
       URL.revokeObjectURL(url)
-      resolve(tex)
+    }
+    img.onload = () => {
+      let tex
+      try {
+        // 资源包可定义横向/竖向帧表、不同帧时长和颜色插值。
+        const heuristic = img.height > img.width && img.height % img.width === 0 && img.height / img.width >= 4
+        tex = new THREE.Texture(img)
+        if (animated || (animated == null && heuristic)) animateTexture(tex, img, animated || {})
+        const layout = tex.userData.animation, frameBytes = tex.image.width * tex.image.height * 4
+        textureBytes.set(tex, img.width * img.height * 4 + frameBytes * (layout ? 2 : 1) +
+          (layout && animated?.interpolate ? frameBytes * (new Set(layout.frames.map(frame => frame.index)).size + 1) : 0))
+        tex.magFilter = THREE.NearestFilter
+        tex.minFilter = THREE.NearestFilter
+        tex.generateMipmaps = false
+        tex.flipY = false // Minecraft 贴图坐标（v 向下）与模型 UV 约定一致
+        tex.colorSpace = THREE.SRGBColorSpace
+        tex.needsUpdate = true
+        resolve(tex)
+      } catch (error) {
+        // Event-handler exceptions do not reject the enclosing Promise by themselves.
+        // Release this failed attempt so all frames can retry the shared texture.
+        tex?.dispose()
+        reject(error)
+      } finally { cleanup() }
     }
     img.onerror = () => {
-      URL.revokeObjectURL(url)
+      cleanup()
       reject(new Error('贴图加载失败'))
     }
-    img.src = url
+    try { img.src = url } catch (error) { cleanup(); reject(error) }
   })
 }

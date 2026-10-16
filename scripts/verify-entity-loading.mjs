@@ -52,13 +52,18 @@ const entities = Array.from({ length: 64 }, (_, index) => ({
   pos: [index * 3, index % 4 - 2 + .25, 0], rotation: [0, 0],
   nbt: { Facing: 3, Item: { id: 'minecraft:__loading_' + index, count: 1 } },
 }))
-// All real dependency callbacks are promises; this drains their microtasks before observing the next stable gate state.
-const settle = () => new Promise(resolve => setImmediate(resolve))
+// Drain dependency microtasks and the shared UI yield before observing the next gate.
+const settle = async () => {
+  await new Promise(resolve => setImmediate(resolve))
+  await new Promise(resolve => setTimeout(resolve, 0))
+}
 const originalError = console.error
 console.error = (...args) => errors.push(args)
 try {
-  const loading = view.renderEntities(entities, assets)
+  const progress = []
+  const loading = view.renderEntities(entities, assets, undefined, (fraction, state) => progress.push({ fraction, ...state }))
   await settle()
+  assert.deepEqual(progress[0], { fraction: 0, completed: 0, total: 64, phase: 'models' })
   assert.deepEqual(started, Array.from({ length: 50 }, (_, index) => index), 'Start exactly 50 entity builds while every model is pending')
   assert.equal(completed.length, 0)
   // Keep entity 0 and the other early requests blocked. One free slot must keep progressing beyond the original batch.
@@ -69,6 +74,7 @@ try {
     assert.ok(gates.has(next), 'A free worker must start entity ' + next + ' without waiting for the initial slow request')
     assert.equal(completed.includes(0), false, 'The slow first model must still be pending')
     assert.ok(active <= 50, 'Rolling scheduling must retain the concurrency ceiling')
+    assert.ok(progress.at(-1).completed > 0 && progress.at(-1).fraction < 1, 'Report real progress while another model is still pending')
   }
   gates.get(63).release()
   // Finish the earliest models in reverse order, including a deliberate failure.
@@ -78,6 +84,9 @@ try {
   assert.equal(active, 0)
   assert.equal(errors.length, 1, 'A failed model must be isolated and reported once')
   assert.equal(errors[0][2], failure)
+  assert.deepEqual(progress.at(-1), { fraction: 1, completed: 64, total: 64, phase: 'done' })
+  assert.ok(progress.some(p => p.phase === 'finishing' && p.fraction < 1), 'Completion follows frame repair and batching')
+  assert.ok(progress.every((p, i) => p.total === 64 && (!i || p.fraction >= progress[i - 1].fraction)), 'Progress never moves backward')
   const expected = entities.filter((_, index) => index !== failedIndex && index !== unsupportedIndex)
   const roots = view.entitiesGroup.children.filter(object => object.userData.entityHitbox)
   assert.equal(roots.length, expected.length, 'Other entities must survive failed and unsupported neighbors')
@@ -88,9 +97,28 @@ try {
   assert.deepEqual(roots.map(object => object.visible), expected.map(entity => Math.floor(entity.pos[1]) === -1),
     'Newly completed entities must inherit the active layer filter')
   view.clearEntities()
-  await view.renderEntities([], assets)
+  const emptyProgress = []
+  await view.renderEntities([], assets, undefined, (fraction, state) => emptyProgress.push({ fraction, ...state }))
   assert.equal(view.entitiesGroup.children.length, 0)
-  console.log('PASS entity loading: bounded 50-worker scheduling, progress past a slow first request, original order/layers, isolated failures and unsupported entities')
+  assert.deepEqual(emptyProgress, [{ fraction: 1, completed: 0, total: 0, phase: 'done' }])
+  // Force CPU budget exhaustion without relying on the machine's speed. Cached
+  // frames must let a pending input/paint task run before the whole scene ends.
+  const cached = Array.from({ length: 240 }, (_, i) => ({ ...entities[0], pos: [i, 0, 0], nbt: { Facing: 3, Item: { id: 'minecraft:diamond' } } }))
+  await view.renderEntities(cached.slice(0, 1), assets)
+  const descriptor = Object.getOwnPropertyDescriptor(performance, 'now')
+  let clock = 0, current = 0, completedAtPaint
+  Object.defineProperty(performance, 'now', { configurable: true, value: () => { clock += 9; return clock } })
+  try {
+    const paint = new Promise(resolve => setTimeout(() => { completedAtPaint = current; resolve() }, 0))
+    await view.renderEntities(cached, assets, undefined, (_fraction, state) => { current = state.completed })
+    await paint
+    assert.ok(completedAtPaint > 0 && completedAtPaint < cached.length, 'A cached build yields before all frames finish')
+  } finally {
+    if (descriptor) Object.defineProperty(performance, 'now', descriptor)
+    else delete performance.now
+    view.clearEntities()
+  }
+  console.log('PASS entity loading: bounded 50-worker scheduling, accurate progress through slow/failed/empty loads, cached-build UI yields, original order/layers and isolated failures')
 } finally {
   console.error = originalError
 }
