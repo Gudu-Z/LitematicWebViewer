@@ -1269,7 +1269,12 @@ export class Renderer {
       const key = JSON.stringify([DYE_COLORS[sign.color] || '#1a1a1a', lines])
       let textMat = materials.get(key)
       if (!textMat) {
-        textMat = new THREE.MeshBasicMaterial({ map: this._makeSignTexture(lines, sign.color), transparent: true, side: THREE.DoubleSide })
+        // A flat label has no front/back surfaces to blend in separate passes.
+        // Keep both sides visible without submitting every sign twice per frame.
+        textMat = new THREE.MeshBasicMaterial({
+          map: this._makeSignTexture(lines, sign.color), transparent: true,
+          side: THREE.DoubleSide, forceSinglePass: true,
+        })
         materials.set(key, textMat)
       }
       const textPlane = new THREE.Mesh(geometry, textMat)

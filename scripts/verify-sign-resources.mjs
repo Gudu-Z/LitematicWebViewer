@@ -39,6 +39,7 @@ assert.equal(new Set(meshes.map(mesh => mesh.material)).size, 22)
 assert.equal(new Set(meshes.map(mesh => mesh.geometry)).size, 1)
 assert.ok(meshes.every(mesh => mesh.material.map.image.width === 512 && mesh.material.map.image.height === 128))
 assert.ok(meshes.every(mesh => mesh.material.transparent && mesh.material.side === THREE.DoubleSide))
+assert.ok(meshes.every(mesh => mesh.material.forceSinglePass), 'Flat labels avoid duplicate draws and material switches in large storage schematics')
 
 view._layerMode = 'single'; view._layerY = 1
 for (const mesh of meshes) view._applyLayerVisibility(mesh)
