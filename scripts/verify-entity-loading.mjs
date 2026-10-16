@@ -3,6 +3,8 @@ import assert from 'node:assert/strict'
 import { existsSync, readFileSync } from 'node:fs'
 import * as THREE from 'three'
 import { Renderer } from '../src/renderer.js'
+import { buildEntityMesh } from '../src/entities.js'
+import { getMobAppearance } from '../src/entityAppearance.js'
 
 const gates = new Map(), started = [], completed = [], textures = new Map(), errors = []
 const failedIndex = 7, unsupportedIndex = 60, failure = new Error('Synthetic entity model failure')
@@ -92,3 +94,37 @@ try {
 } finally {
   console.error = originalError
 }
+
+// A multi-layer entity must start independent texture reads together, while
+// attaching materials in the original order even if decoding finishes backwards.
+for (const id of ['warden', 'villager']) for (const missing of [false, true]) {
+  const entity = {
+    id: 'minecraft:' + id, pos: [0, 0, 0], rotation: [0, 0],
+    nbt: { Health: 20, VillagerData: { type: 'minecraft:desert', profession: 'minecraft:librarian', level: 5 } },
+  }
+  const appearance = getMobAppearance(entity, id)
+  const keys = [appearance.texture, ...appearance.layers.map(layer => layer.texture)]
+  const waiting = new Map()
+  const pending = buildEntityMesh(entity, {
+    getTexture(key) {
+      assert.ok(!waiting.has(key), 'This fixture uses distinct feature textures')
+      return new Promise(resolve => waiting.set(key, () => {
+        const texture = new THREE.Texture(); texture.name = key
+        texture.image = { width: appearance.model.w, height: appearance.model.h }
+        resolve(missing && key === keys[2] ? null : texture)
+      }))
+    },
+  })
+  await settle()
+  assert.deepEqual([...waiting.keys()], keys, id + ': all feature reads must start before any image is released')
+  for (const key of [...keys].reverse()) { waiting.get(key)(); await settle() }
+  const group = await pending
+  const layers = group.children.filter(object => object.isSkinnedMesh)
+  const expected = [{ name: 'body', texture: appearance.texture }, ...appearance.layers]
+    .filter(layer => !missing || layer.texture !== keys[2])
+  assert.deepEqual(layers.map(layer => layer.name), expected.map(layer => layer.name), id + ': preserve visible layer order after out-of-order image completion')
+  assert.deepEqual(layers.map(layer => layer.material.map.name), expected.map(layer => layer.texture))
+  assert.ok(layers.every((layer, i) => !i || layer.material.id > layers[i - 1].material.id), 'Material order must be independent of request completion')
+  for (const layer of layers) { layer.geometry.dispose(); layer.material.map.dispose(); layer.material.dispose() }
+}
+console.log('PASS entity feature loading: parallel body/layer requests, deterministic material order and missing optional texture isolation')

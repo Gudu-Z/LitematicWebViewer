@@ -49,16 +49,19 @@ function cuboidFaces(c, texW, texH) {
   return out
 }
 
-// 旋转：Rz(roll)*Ry(yaw)*Rx(pitch)（vanilla rotationZYX）
-function rotPoint(pt, rot) {
-  const [x, y, z] = pt
+// 旋转：Rz(roll)*Ry(yaw)*Rx(pitch)（vanilla rotationZYX）。
+// A part's rotation is constant while compiling: calculate its trig once while
+// retaining the exact operation order for each vertex and normal.
+function partRotation(rot) {
   const [pitch, yaw, roll] = rot
   const cx = Math.cos(pitch), sx = Math.sin(pitch)
-  const y1 = y * cx - z * sx, z1 = y * sx + z * cx
   const cy = Math.cos(yaw), sy = Math.sin(yaw)
-  const x2 = x * cy + z1 * sy, z2 = -x * sy + z1 * cy
   const cr = Math.cos(roll), sr = Math.sin(roll)
-  return [x2 * cr - y1 * sr, x2 * sr + y1 * cr, z2]
+  return ([x, y, z]) => {
+    const y1 = y * cx - z * sx, z1 = y * sx + z * cx
+    const x2 = x * cy + z1 * sy, z2 = -x * sy + z1 * cy
+    return [x2 * cr - y1 * sr, x2 * sr + y1 * cr, z2]
+  }
 }
 const add3 = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]]
 
@@ -69,10 +72,10 @@ export function compileModel(model, includeParts = false) {
   const walk = (node, toModel, toDir) => {
     for (const name of Object.keys(node)) {
       const p = node[name]
-      const R = p.rot || [0, 0, 0]
+      const rotate = partRotation(p.rot || [0, 0, 0])
       const pivot = p.pivot || [0, 0, 0]
-      const childToModel = (pt) => toModel(add3(pivot, rotPoint(pt, R)))
-      const childToDir = (d) => toDir(rotPoint(d, R))
+      const childToModel = (pt) => toModel(add3(pivot, rotate(pt)))
+      const childToDir = (d) => toDir(rotate(d))
       for (const c of p.cuboids || []) {
         for (const face of cuboidFaces(c, w, h)) {
           const verts = face.verts.map(childToModel).map(([mx, my, mz]) => [mx / 16, (24 - my) / 16, -mz / 16])
@@ -91,6 +94,10 @@ export function compileModel(model, includeParts = false) {
 
 // quads -> 单一材质网格
 export function quadsToEntityMesh(quads, mat) {
+  return new THREE.Mesh(quadsToEntityGeometry(quads), mat)
+}
+
+function quadsToEntityGeometry(quads) {
   const n = quads.length
   const positions = new Float32Array(n * 12)
   const uvs = new Float32Array(n * 8)
@@ -119,7 +126,59 @@ export function quadsToEntityMesh(quads, mat) {
   geo.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
   geo.setAttribute('normal', new THREE.BufferAttribute(normals, 3))
   geo.setIndex(new THREE.BufferAttribute(indices, 1))
-  return new THREE.Mesh(geo, mat)
+  return geo
+}
+
+// Cache only CPU model data. Every mesh keeps independent buffers, skeleton and
+// materials so animation, transparent-face sorting and disposal stay isolated.
+// Key by content: baby/equipment/boat models are often cloned and then modified.
+const modelTemplates = new Map()
+const MAX_MODEL_TEMPLATES = 128
+const MAX_MODEL_BYTES = 8 * 1024 * 1024
+let modelBytes = 0
+
+function modelTemplate(model) {
+  const key = JSON.stringify([model.w, model.h, model.parts])
+  let template = modelTemplates.get(key)
+  if (template) {
+    modelTemplates.delete(key)
+    modelTemplates.set(key, template)
+    return template
+  }
+  const quads = compileModel(model, true)
+  const geometry = quadsToEntityGeometry(quads)
+  const indices = new Map()
+  let boneIndex = 1 // bone zero is the coordinate-conversion root
+  const walk = nodes => {
+    for (const node of Object.values(nodes)) {
+      indices.set(node, boneIndex++)
+      walk(node.children || {})
+    }
+  }
+  walk(model.parts)
+  const skinIndices = new Uint16Array(quads.length * 16)
+  const skinWeights = new Float32Array(quads.length * 16)
+  for (let i = 0; i < quads.length; i++) for (let k = 0; k < 4; k++) {
+    skinIndices[i * 16 + k * 4] = indices.get(quads[i].part)
+    skinWeights[i * 16 + k * 4] = 1
+  }
+  const bytes = key.length * 2 + geometry.index.array.byteLength + skinIndices.byteLength + skinWeights.byteLength +
+    Object.values(geometry.attributes).reduce((sum, attribute) => sum + attribute.array.byteLength, 0)
+  template = { geometry, skinIndices, skinWeights, sphere: null, bytes }
+  if (bytes <= MAX_MODEL_BYTES) {
+    modelTemplates.set(key, template)
+    modelBytes += bytes
+    while (modelTemplates.size > MAX_MODEL_TEMPLATES || modelBytes > MAX_MODEL_BYTES) {
+      const oldest = modelTemplates.keys().next().value
+      modelBytes -= modelTemplates.get(oldest).bytes
+      modelTemplates.delete(oldest)
+    }
+  }
+  return template
+}
+
+export function createEntityModelMesh(model, material) {
+  return new THREE.Mesh(modelTemplate(model).geometry.clone(), material)
 }
 
 // Three 默认把骨骼 matrixWorld 转成 float32，再在 shader 中消去实体世界变换。
@@ -162,14 +221,13 @@ class EntitySkinnedMesh extends THREE.SkinnedMesh {
 // 每个原版 ModelPart 对应一根骨骼，每个顶点只受所属部件影响。
 // 保留一层一个 draw call；动画只更新骨骼矩阵，不重建几何或材质。
 export function createEntityRig(model, material) {
-  const quads = compileModel(model, true)
-  const geometry = quadsToEntityMesh(quads, material).geometry
+  const template = modelTemplate(model)
+  const geometry = template.geometry.clone()
   const root = new THREE.Bone()
   root.position.y = 24 / 16
   root.scale.set(1 / 16, -1 / 16, -1 / 16)
   const bones = [root]
   const parts = {}
-  const indices = new Map()
   const walk = (nodes, parent) => {
     for (const [name, node] of Object.entries(nodes)) {
       const bone = new THREE.Bone()
@@ -178,7 +236,6 @@ export function createEntityRig(model, material) {
       bone.rotation.set(...(node.rot || [0, 0, 0]), 'ZYX')
       bone.userData.restPosition = bone.position.clone()
       bone.userData.restRotation = bone.rotation.clone()
-      indices.set(node, bones.length)
       bones.push(bone)
       parts[name] = bone
       parent.add(bone)
@@ -186,25 +243,20 @@ export function createEntityRig(model, material) {
     }
   }
   walk(model.parts, root)
-  const skinIndices = new Uint16Array(quads.length * 16)
-  const skinWeights = new Float32Array(quads.length * 16)
-  for (let i = 0; i < quads.length; i++) {
-    for (let k = 0; k < 4; k++) {
-      skinIndices[i * 16 + k * 4] = indices.get(quads[i].part)
-      skinWeights[i * 16 + k * 4] = 1
-    }
-  }
-  geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(skinIndices, 4))
-  geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(skinWeights, 4))
+  geometry.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(template.skinIndices, 4))
+  geometry.setAttribute('skinWeight', new THREE.Float32BufferAttribute(template.skinWeights, 4))
   const mesh = new EntitySkinnedMesh(geometry, material)
   // 在原点绑定，bindMatrix 与 bindMatrixInverse 保持单位矩阵。世界变换由 Three
   // 的 modelViewMatrix 在双精度中合并相机变换后，再交给 GPU。
   mesh.bindMode = THREE.DetachedBindMode
   mesh.add(root)
   mesh.bind(new EntitySkeleton(bones))
-  mesh.computeBoundingSphere()
-  // 待机摆动可越出绑定姿态，留出局部空间余量，避免边缘部件被误剔除。
-  mesh.boundingSphere.radius += 1.5
+  if (!template.sphere) {
+    mesh.computeBoundingSphere()
+    // 待机摆动可越出绑定姿态，留出局部空间余量，避免边缘部件被误剔除。
+    mesh.boundingSphere.radius += 1.5
+    template.sphere = mesh.boundingSphere.clone()
+  } else mesh.boundingSphere = template.sphere.clone()
   mesh.userData.parts = parts
   mesh.userData.resetPose = () => {
     for (let i = 1; i < bones.length; i++) {

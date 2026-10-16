@@ -28,7 +28,7 @@ import { buildCushion } from './cushion.js'
 import { attachEquipment, applyArmorStandPose } from './equipment.js'
 import { EQUIPMENT_MODELS } from './equipmentModelData.js'
 import { equipmentDye } from './equipmentState.js'
-import { compileModel, quadsToEntityMesh, createEntityRig, sortTransparentFaces } from './entityModel.js'
+import { compileModel, quadsToEntityMesh, createEntityModelMesh, createEntityRig, sortTransparentFaces } from './entityModel.js'
 export { compileModel, quadsToEntityMesh } from './entityModel.js'
 
 // Minecraft Direction 枚举：Facing 字节 -> 方向向量
@@ -774,7 +774,7 @@ async function buildMinecart(entity, id, assets, data) {
   const bodyMat = tex
     ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     : new THREE.MeshLambertMaterial({ color: 0x7a7a7a })
-  const body = quadsToEntityMesh(compileModel(model), bodyMat)
+  const body = createEntityModelMesh(model, bodyMat)
   // compileModel 将 Y/Z 翻转且抬高 24/16；还原到原版 scale(-1,-1,1) 的模型坐标。
   // 0.375 的渲染抬高已放到旋转前，不能合并进这里的局部偏移。
   body.name = 'minecart-body'
@@ -829,14 +829,20 @@ export function buildCopperGolemStatueMesh(tex, pose = 'standing') {
   const model = EXTRA_MODELS['CopperStatue_' + pose] || EXTRA_MODELS.CopperStatue_standing
   if (!model || !tex) return null
   const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
-  const mesh = quadsToEntityMesh(compileModel(model), mat)
+  const mesh = createEntityModelMesh(model, mat)
   return mesh
 }
 
 // 生物层的材质/动画统一入口，主体与所有 feature layer 共享游戏时间。
 async function buildMob(entity, id, assets, data) {
   const appearance = getMobAppearance(entity, id, data)
-  const tex = appearance ? await assets.getTexture(appearance.texture) : null
+  // Independent feature textures can load together. Attach them afterwards in
+  // their original order so material/layer ordering does not depend on I/O.
+  const textures = appearance?.model ? await Promise.all([
+    assets.getTexture(appearance.texture),
+    ...appearance.layers.map(layer => assets.getTexture(layer.texture)),
+  ]) : []
+  const tex = textures[0]
   if (!appearance?.model || !tex) return buildMobFallback(entity, id)
   const { model, scale, tint, layers, state } = appearance
   const group = new THREE.Group()
@@ -894,8 +900,8 @@ async function buildMob(entity, id, assets, data) {
   }
   const body = attach({ name: 'body', model, tint, mode: appearance.mode }, tex)
   body.userData.model = model
-  for (const layer of layers) {
-    const layerTex = layer.texture === appearance.texture ? tex : await assets.getTexture(layer.texture)
+  for (const [index, layer] of layers.entries()) {
+    const layerTex = textures[index + 1]
     if (layerTex) attach(layer, layerTex)
   }
   await attachMobBlocks(body, id, state, assets)
@@ -1043,7 +1049,7 @@ async function buildBoat(entity, id, assets) {
   const hullMat = tex
     ? new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
     : new THREE.MeshLambertMaterial({ color: 0x8a6a45 })
-  const hull = quadsToEntityMesh(compileModel(model), hullMat)
+  const hull = createEntityModelMesh(model, hullMat)
   // AbstractBoatRenderer 在实体 Pos 上方 0.375 格绘制模型原点。
   // compileModel 已包含 +24/16 的 Y 基准，因此只需抵消该基准，再加原版位移。
   // 不能按船体几何中心估算吃水线，否则普通船和竹筏都会额外下沉 0.28125 格。
