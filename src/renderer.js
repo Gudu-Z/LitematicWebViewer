@@ -14,6 +14,7 @@ import { isAssetTexture } from './assets.js'
 import { batchItemFrames, updateFrameBatches, freezeStaticObject } from './frameBatches.js'
 import { collectSceneResources } from './sceneResources.js'
 import { createBlockChunkIndex, buildBlockChunk, planBlockChunkUpdate } from './blockChunks.js'
+import { mergeTranslucentBlocks } from './translucentBlocks.js'
 
 function disposePrivateTexture(texture) {
   if (texture && !isAssetTexture(texture)) texture.dispose()
@@ -29,9 +30,9 @@ function disposeBlockObjects(group, disposeTextures = false, disposeMaterials = 
     group.remove(child)
     child.traverse(object => {
       disposeOnce(object.geometry)
-      if (!disposeMaterials) return
       for (const material of [object.material].flat()) {
         if (!material) continue
+        if (!disposeMaterials && !material.userData.privateBlockMaterial) continue
         if (disposeTextures && !isAssetTexture(material.map)) disposeOnce(material.map)
         disposeOnce(material)
       }
@@ -1446,7 +1447,7 @@ export class Renderer {
     const textures = await Promise.all(texKeys.map(async key => {
       const texture = key.startsWith('special/end_')
         ? await Promise.all(['environment/end_sky', 'entity/end_portal/end_portal'].map(key => assets.getTexture(key)))
-        : await assets.getTexture(key.split('|p')[0])
+        : await assets.getTexture(key.split('|')[0])
       onProgress?.(++loaded / Math.max(1, texKeys.length))
       return texture
     }))
@@ -1457,9 +1458,10 @@ export class Renderer {
         continue
       }
       // 组键可能带强度后缀（如 redstone_dust_dot|p15）
-      const sep = gKey.indexOf('|p')
+      const translucent = gKey.endsWith('|translucent')
+      const sep = gKey.indexOf('|')
       const texKey = sep >= 0 ? gKey.slice(0, sep) : gKey
-      const power = sep >= 0 ? Number(gKey.slice(sep + 2)) : null
+      const power = gKey.includes('|p') ? Number(gKey.slice(sep + 2)) : null
       const isWater = texKey === 'block/water_still' || texKey === 'block/water_flow' || texKey === 'block/water_overlay'
       const isLava = texKey === 'block/lava_still' || texKey === 'block/lava_flow'
       // 气泡柱内的气泡：原版气泡粒子贴图（particle/bubble.png，8×8 白色气泡）。
@@ -1470,7 +1472,7 @@ export class Renderer {
       const isRail = texKey.includes('rail')
       const texture = textures[index]
       if (texture) {
-        // 水/岩浆用半透明材质，其余用 alphaTest 裁剪
+        // 流体及粘液/蜂蜜使用半透明材质；其余用 alphaTest 裁剪。
         // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
         // flatShading：方块每个面的 4 个顶点本就同法线，用几何导数算平直法线即可，
         // 省去法线数组（超大投影可省数百 MB 内存），光照效果一致。
@@ -1486,7 +1488,7 @@ export class Renderer {
             ? new THREE.PointsMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, size: 0.3, sizeAttenuation: true })
             : isRail
               ? new THREE.MeshBasicMaterial({ map: texture, alphaTest: 0.5, side: THREE.DoubleSide })
-              : new THREE.MeshLambertMaterial({ map: texture, alphaTest: 0.5, flatShading: true })
+              : new THREE.MeshLambertMaterial({ map: texture, alphaTest: translucent ? .001 : .5, transparent: translucent, flatShading: true })
         // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
         if (power !== null) {
           const c = redstoneTint(power)
@@ -1508,6 +1510,7 @@ export class Renderer {
 
   async _appendBlockMeshes(groups, materials, target) {
     let i = 0
+    const translucent = []
     for (const [texKey, g] of groups) {
       const mat = materials.get(texKey)
       if (!mat) continue
@@ -1533,13 +1536,17 @@ export class Renderer {
       geo.setAttribute('uv', new THREE.BufferAttribute(g.uvs, 2))
       geo.setIndex(new THREE.BufferAttribute(g.indices, 1))
       const mesh = new THREE.Mesh(geo, mat)
+      if (texKey.endsWith('|translucent')) { translucent.push(mesh); continue }
       if (mat.uniforms?.gameTime) animateObject(mesh, age => { mat.uniforms.gameTime.value = (age % 24000) / 24000 })
       target.add(mesh)
       if (!mat.uniforms?.gameTime && this._freezeStatic !== false) freezeStaticObject(mesh)
       // 超大几何体上传 GPU 时也定期让出主线程，避免最后一段卡顿
       if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
     }
-
+    for (const mesh of mergeTranslucentBlocks(translucent)) {
+      target.add(mesh)
+      if (this._freezeStatic !== false) freezeStaticObject(mesh)
+    }
   }
 
   // 调试：读取当前画面像素，统计有多少种颜色（判断画面是否有内容）

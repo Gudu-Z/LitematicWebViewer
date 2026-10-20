@@ -25,7 +25,11 @@ export function isSkipBlock(name) {
   return SKIP_BLOCKS.has(shortName(name))
 }
 
-// 透明方块：不遮挡邻居，但仍以 alphaTest 方式渲染出边框/树叶。
+export function isLayeredTranslucentBlock(name) {
+  return ['slime_block', 'honey_block'].includes(shortName(name))
+}
+
+// 不遮挡邻居的方块，包括镂空贴图和半透明材质。
 // 格栅（铜格栅）、铁栏杆、锁链等是 TransparentBlock（cutout 纹理有洞），同样不遮挡。
 // 红树根/泥泞红树根（_roots）是「满覆盖 cutout」方块：六个面都是满 16×16 但纹理有洞，
 // 含水时水要透出来，不能被 fullFaceMask 当实心面整体剔除（否则含水红树根完全不显示水）。
@@ -33,7 +37,7 @@ export function isTransparent(name) {
   const n = shortName(name)
   return n.endsWith('_leaves') || n.includes('glass') || n === 'ice' || n === 'water' || n === 'lava' || n === 'bubble_column'
     || n.endsWith('_grate') || n.endsWith('_bars') || n === 'chain' || n.endsWith('_chain') || n === 'tripwire'
-    || n.endsWith('_roots')
+    || n.endsWith('_roots') || isLayeredTranslucentBlock(n)
 }
 
 // 原版 FluidRenderer 在水面侧面贴着「半透明方块」（HalfTransparentBlock：玻璃/冰/黏液/蜂蜜）
@@ -98,11 +102,13 @@ function faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible
   // 被层级/区域过滤掉的邻居按空气处理，不遮挡当前面（否则切片边界会错误剔面）
   if (visible && !visible(nx, ny, nz)) return false
   const ngi = blocks.get(nx + nz * grid.W + ny * grid.strideY)
-  return ngi !== undefined && (occludes[ngi] || (ngi === gi && hideSame[ngi]))
+  return ngi !== undefined && (occludes[ngi] || (hideSame[gi] && hideSame[ngi] === hideSame[gi]))
 }
 
 // 非流体方块的贴图组 key：红石粉按信号强度细分，便于渲染时按强度上色。
 function faceKey(palette, gi, q) {
+  // Keep the render layer separate from the sprite: packs can reuse or rename it.
+  if (isLayeredTranslucentBlock(palette[gi].name)) return q.texKey + '|translucent'
   if (isRedstoneDustTex(q.texKey)) {
     return q.texKey + '|p' + (Number(palette[gi].properties?.power) || 0)
   }
@@ -427,7 +433,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
 
   const renderable = new Uint8Array(palette.length)
   const occludes = new Uint8Array(palette.length)
-  const hideSame = new Uint8Array(palette.length)
+  const hideSame = new Uint32Array(palette.length), sameBlockGroups = new Map()
   const quadsByPalette = new Array(palette.length)
   const groupKeysByPalette = new Array(palette.length)
   for (let i = 0; i < palette.length; i++) {
@@ -451,8 +457,11 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     } else {
       quadsByPalette[i] = null
     }
-    // 原版 isSideInvisible：玻璃/树叶同类相邻时隐藏共享面
-    hideSame[i] = sn.includes('glass') || sn.endsWith('_leaves') ? 1 : 0
+    // HalfTransparentBlock.skipRendering compares block types, not palette indices.
+    if (sn.includes('glass') || sn.endsWith('_leaves') || isLayeredTranslucentBlock(sn)) {
+      if (!sameBlockGroups.has(sn)) sameBlockGroups.set(sn, i + 1)
+      hideSame[i] = sameBlockGroups.get(sn)
+    }
   }
 
   // 每个调色板条目所属流体（含含水方块/气泡柱）与其「满覆盖」面掩码。

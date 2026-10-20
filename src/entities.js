@@ -18,6 +18,8 @@ import { createMobPlacement } from './entityPlacement.js'
 import { BlockModelResolver } from './blocks.js'
 import { frameItemKey, getFrameModel } from './frameModelCache.js'
 import { bakeModel } from './modelBaker.js'
+import { isLayeredTranslucentBlock } from './geometry.js'
+import { mergeTranslucentBlocks } from './translucentBlocks.js'
 import { parsePotSherds } from './schematicDetails.js'
 import { ENTITY_MODELS } from './entityModelData.js'
 import { EXTRA_MODELS } from './extraEntityModels.js'
@@ -642,7 +644,12 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
       }),
     )
     const center = baked.center || [-0.5, -0.5, -0.5]
-    holder.add(quadsToMesh(baked.quads, center, (tk, shade) => mats.get(quadMaterialKey(tk, shade)), context === 'gui'))
+    const parts = quadsToMesh(baked.quads, center, (tk, shade) => mats.get(quadMaterialKey(tk, shade)), context === 'gui')
+    if (isLayeredTranslucentBlock(name)) {
+      const meshes = [...parts.children]; parts.clear()
+      parts.add(...mergeTranslucentBlocks(meshes, { disposeMaterials: true }))
+    }
+    holder.add(parts)
     return applyFrameItemDisplay(holder, fixed)
   }
 
