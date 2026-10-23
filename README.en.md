@@ -46,6 +46,8 @@ For everyday use, open the [online viewer](https://lwv.loafing.club/). The insta
 
 Schematic archives and build pages can embed the viewer without deploying the renderer or uploading schematics to our server. [Try the interactive examples](https://lwv.loafing.club/embed-example.html?lang=en).
 
+Embedded cards prioritize loading speed: block/entity inspection is disabled, and parsing skips container inventories, mob AI, trades and other data not used for rendering. Equipment, variants, passengers and sign text remain visible. **Full viewer** opens the original file, preserving access to all saved inspection data.
+
 ![Archive integration examples: click a list entry to preview, or switch an image gallery to 3D](docs/images/embed-cards.png)
 
 There are two presentation options: **click a schematic to open a preview over the current page**, or **embed a 3D preview inside a build page's image gallery**. Both support left-drag to rotate, right-drag to pan and the mouse wheel to zoom. On mobile, use one finger to rotate and two fingers to pan or pinch to zoom; swipe outside the preview to scroll the page. The top-right controls provide **Reset view** and **Full viewer**. Only the latter opens the full website in a new tab. Quick previews do not enable WASD flight.

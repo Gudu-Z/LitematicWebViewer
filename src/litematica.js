@@ -8,6 +8,7 @@
 //   - 世界最小角 world = min(origin, origin + size + 1)
 
 import { parseNBT, decompressNBT, LITTLE_ENDIAN } from './nbt.js'
+import { selectRenderNbtField, renderedBlockEntities } from './renderNbt.js'
 
 // 空气类方块：解析时直接跳过、不存入 blocks Map，避免超大型投影占用过多内存。
 const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
@@ -53,8 +54,8 @@ function vec(v) {
 // （lx = wx-minX，W=宽，D=深，strideY = W*D）。相比 "x,y,z" 字符串 key，
 // 整数 key 的邻居查找是纯整数算术、速度快数倍，内存也更小，超大投影收益显著。
 // onProgress(fraction) 在解析过程中回调进度（0~1），用于超大文件显示进度。
-export async function parseLitematicaRaw(rawBytes, onProgress) {
-  const root = parseNBT(rawBytes)
+export async function parseLitematicaRaw(rawBytes, onProgress, { renderOnly = false } = {}) {
+  const root = parseNBT(rawBytes, renderOnly ? selectRenderNbtField : undefined)
 
   const meta = root.Metadata || {}
   const metadata = {
@@ -165,6 +166,7 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
     // Position 是最大角，不能直接加 Position）。实体（Pos）才是相对 Position 的。
     if (Array.isArray(region.TileEntities)) {
       for (const te of region.TileEntities) {
+        if (renderOnly && !renderedBlockEntities.has(te.id)) continue
         tileEntities.push({ id: te.id, x: te.x + wx0, y: te.y + wy0, z: te.z + wz0, nbt: te, region: name })
       }
     }
@@ -232,7 +234,7 @@ export async function parseLitematicaRaw(rawBytes, onProgress) {
   return { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList }
 }
 
-export async function parseLitematica(buffer, onProgress) {
+export async function parseLitematica(buffer, onProgress, options) {
   const raw = await decompressNBT(new Uint8Array(buffer))
-  return parseLitematicaRaw(raw, onProgress)
+  return parseLitematicaRaw(raw, onProgress, options)
 }

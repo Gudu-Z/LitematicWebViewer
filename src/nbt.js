@@ -6,9 +6,11 @@ export const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 
 const textDecoder = new TextDecoder()
 
 class NBTReader {
-  constructor(data) {
+  constructor(data, selectField) {
     this.dv = new DataView(data.buffer, data.byteOffset, data.byteLength)
     this.pos = 0
+    this.selectField = selectField
+    this.path = []
   }
 
   u8() {
@@ -97,9 +99,42 @@ class NBTReader {
       const type = this.u8()
       if (type === 0) break // TAG_End
       const name = this.string()
-      obj[name] = this.payload(type)
+      if (this.selectField && !this.selectField(this.path, name)) {
+        this.skipPayload(type)
+      } else {
+        if (this.selectField) this.path.push(name)
+        obj[name] = this.payload(type)
+        if (this.selectField) this.path.pop()
+      }
     }
     return obj
+  }
+
+  skip(bytes) {
+    if (!Number.isSafeInteger(bytes) || bytes < 0 || this.pos + bytes > this.dv.byteLength) {
+      throw new RangeError('NBT 字段超出数据范围')
+    }
+    this.pos += bytes
+  }
+
+  // Skip binary payloads without decoding strings or allocating item/AI trees.
+  // Compounds have no length prefix, so their tag headers still need scanning.
+  skipPayload(type) {
+    if (type >= 1 && type <= 6) { this.skip([0, 1, 2, 4, 8, 4, 8][type]); return }
+    if (type === 8) { const length = this.dv.getUint16(this.pos, false); this.pos += 2; this.skip(length); return }
+    if (type === 7 || type === 11 || type === 12) { this.skip(this.i32() * (type === 7 ? 1 : type === 11 ? 4 : 8)); return }
+    if (type === 9) {
+      const itemType = this.u8(), length = this.i32()
+      if (length < 0) throw new RangeError('NBT 列表长度无效')
+      if (itemType >= 1 && itemType <= 6) this.skip(length * [0, 1, 2, 4, 8, 4, 8][itemType])
+      else for (let i = 0; i < length; i++) this.skipPayload(itemType)
+      return
+    }
+    if (type === 10) {
+      for (let child; (child = this.u8()) !== 0;) { this.skipPayload(8); this.skipPayload(child) }
+      return
+    }
+    throw new Error('未知的 NBT 标签类型：' + type)
   }
 
   payload(type) {
@@ -122,8 +157,10 @@ class NBTReader {
 }
 
 // 解析一个完整的 NBT 文件，返回根 compound 的普通对象。
-export function parseNBT(data) {
-  const r = new NBTReader(data)
+// Optional selector receives the enclosing field path (list indices omitted).
+// Returning false skips the entire value, not merely its returned JS property.
+export function parseNBT(data, selectField) {
+  const r = new NBTReader(data, selectField)
   const type = r.u8()
   if (type !== 10) throw new Error('根 NBT 标签不是 compound（类型 ' + type + '）')
   r.string() // 根标签名（通常为空串）

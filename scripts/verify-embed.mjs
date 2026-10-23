@@ -135,7 +135,9 @@ try {
   assert.equal(await frameEval('b', 'document.documentElement.lang'), 'en')
   assert.equal(await frameEval('b', 'document.querySelector("canvas").style.touchAction'), 'none')
   await shot('embed-cross-origin')
-  const hash = () => frameEval('b', 'document.querySelector("canvas").toDataURL()')
+  // Commands arrive through postMessage and rendering is scheduled separately.
+  // Wait for a painted frame rather than assuming a fixed 150 ms is sufficient.
+  const hash = () => frameEval('b', '(async()=>{await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));return document.querySelector("canvas").toDataURL()})()')
   const before = await hash()
   const mouse = (type, x, y, extra = {}) => send('Input.dispatchMouseEvent', { type, x, y, ...extra })
   const targets = async () => (await send('Target.getTargets')).targetInfos.filter(t => t.type === 'page')
@@ -258,13 +260,24 @@ try {
   assert.equal(await frameEval('b', 'getComputedStyle(document.getElementById("fit")).color'), 'rgb(18, 52, 86)')
   assert.equal(await frameEval('b', 'getComputedStyle(document.getElementById("fit")).borderRadius'), '0px')
   await evaluate('cards.b.setCamera({zoom:1.4})'); await delay(150)
+  await waitFor('cameras.b?.zoom===1.4', 'configured camera notification')
   assert.equal(await evaluate('cameras.b.zoom'), 1.4)
   assert.notEqual(await hash(), locked, 'host zoom command changes actual rendering')
   const configuredView = await hash()
+  const configuredCamera = await evaluate('cameras.b')
   await mouse('mouseWheel', 530, 140, { deltaX: 0, deltaY: -160 }); await delay(150)
   assert.notEqual(await hash(), configuredView)
   await evaluate('cards.b.resetView()'); await delay(150)
-  assert.equal(await hash(), configuredView, 'reset restores the configured camera')
+  await waitFor('cameras.b?.zoom===1.4', 'reset camera notification')
+  const resetCamera = await evaluate('cameras.b')
+  assert.equal(resetCamera.projection, configuredCamera.projection)
+  // OrbitControls normalizes its vectors again on reset (~1e-15 differences).
+  // Those can change edge pixels despite an identical view; test the camera
+  // itself rather than requiring byte-identical PNG compression output.
+  for (const key of ['position', 'target', 'zoom', 'height']) {
+    const actual = [resetCamera[key]].flat(), expected = [configuredCamera[key]].flat()
+    assert.ok(actual.every((n, i) => Math.abs(n - expected[i]) < 1e-9), 'reset restores configured camera ' + key)
+  }
   await evaluate('cards.b.setOptions({theme:"auto",background:null,style:null})')
   await send('Emulation.setEmulatedMedia', { features: [{ name:'prefers-color-scheme', value:'dark' }] }); await delay(100)
   assert.equal(await frameEval('b', 'document.documentElement.dataset.theme'), 'dark')

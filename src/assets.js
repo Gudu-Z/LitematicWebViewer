@@ -392,6 +392,17 @@ export class AssetProvider {
         try { return JSON.parse(await entry.async('string')).animation || false } catch { return false }
       }
     }
+    // The built-in metadata index is generated alongside the installed assets.
+    // Pack overrides above still win, including explicit nonanimated metadata.
+    // Keep legacy/custom asset servers working when they do not have an index.
+    const url = this.baseUrl + 'texture-metadata.json'
+    if (this._textureMetadata?.url !== url) {
+      this._textureMetadata = { url, promise: fetchAsset(url, resp => resp.json())
+        .then(index => index?.version === 1 && index.animation && typeof index.animation === 'object' && !Array.isArray(index.animation) ? index.animation : null)
+        .catch(() => null) }
+    }
+    const indexed = await this._textureMetadata.promise
+    if (indexed) return Object.hasOwn(indexed, texKey) ? indexed[texKey] : null
     try {
       return await fetchAsset(this.baseUrl + rel, async resp => (await resp.json()).animation || false)
     } catch {

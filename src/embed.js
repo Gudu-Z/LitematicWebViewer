@@ -158,7 +158,7 @@ async function pump() {
       if (requested) continue
       await initialize()
       endSceneUpdate = renderer.beginSceneUpdate()
-      const data = await parseLitematica(await file.arrayBuffer(), value => state('loading', t('loading'), value * .2))
+      const data = await parseLitematica(await file.arrayBuffer(), value => state('loading', t('loading'), value * .2), { renderOnly: true })
       if (requested) continue
       const baked = await Promise.all(data.palette.map(entry => resolver.resolve(entry.name, entry.properties)))
       data.palette.forEach((entry, i) => { entry.baked = baked[i] })

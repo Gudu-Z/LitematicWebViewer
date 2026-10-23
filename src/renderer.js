@@ -811,6 +811,7 @@ export class Renderer {
   }
 
   clearBanners() {
+    const disposed = new Set()
     while (this.bannersGroup.children.length) {
       const child = this.bannersGroup.children[this.bannersGroup.children.length - 1]
       this.bannersGroup.remove(child)
@@ -818,8 +819,8 @@ export class Renderer {
         const mats = Array.isArray(o.material) ? o.material : [o.material]
         mats.forEach((m) => {
           if (m) {
-            disposePrivateTexture(m.map)
-            m.dispose()
+            if (!disposed.has(m.map)) { disposePrivateTexture(m.map); disposed.add(m.map) }
+            if (!disposed.has(m)) { m.dispose(); disposed.add(m) }
           }
         })
       })
@@ -991,15 +992,22 @@ export class Renderer {
     }
   }
 
-  // 渲染旗帜旗面（底色 + 图案，每个实例单独绘制）。
+  // 相同底色/图案共用一份合成贴图；每面旗帜保留自己的位置和动画相位。
   // banners: [{x, y, z, rotation?, facing?, baseColor, patterns: [{pattern, color}]}]
   async renderBanners(banners, assets) {
     this.clearBanners()
     if (!banners || !banners.length) return
+    const materials = new Map()
+    let yieldAt = performance.now() + 8
     for (const b of banners) {
-      const tex = await this._makeBannerTexture(b.baseColor, b.patterns, assets)
-      if (!tex) continue
-      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
+      const key = JSON.stringify([b.baseColor, (b.patterns || []).map(p => [p.pattern, p.color])])
+      let mat = materials.get(key)
+      if (!mat) {
+        const tex = await this._makeBannerTexture(b.baseColor, b.patterns, assets)
+        if (!tex) continue
+        mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
+        materials.set(key, mat)
+      }
       const mesh = new THREE.Mesh(BANNER_FLAG_GEO, mat)
       const group = new THREE.Group()
       group.add(mesh)
@@ -1027,6 +1035,10 @@ export class Renderer {
         mesh.rotation.x = (-.0125 + .01 * Math.cos(Math.PI * 2 * phase)) * Math.PI
         mesh.position.copy(resting).sub(pivot).applyAxisAngle(new THREE.Vector3(1, 0, 0), mesh.rotation.x).add(pivot)
       })
+      if (performance.now() >= yieldAt) {
+        await new Promise(resolve => setTimeout(resolve, 0))
+        yieldAt = performance.now() + 8
+      }
     }
   }
 
@@ -1516,7 +1528,7 @@ export class Renderer {
   }
 
   async _appendBlockMeshes(groups, materials, target) {
-    let i = 0
+    let yieldAt = performance.now() + 8
     const translucent = []
     for (const [texKey, g] of groups) {
       const mat = materials.get(texKey)
@@ -1548,8 +1560,12 @@ export class Renderer {
       if (mat.uniforms?.gameTime) animateObject(mesh, age => { mat.uniforms.gameTime.value = (age % 24000) / 24000 })
       target.add(mesh)
       if (!mat.uniforms?.gameTime && this._freezeStatic !== false) freezeStaticObject(mesh)
-      // 超大几何体上传 GPU 时也定期让出主线程，避免最后一段卡顿
-      if ((++i & 3) === 0) await new Promise((r) => setTimeout(r, 0))
+      // Yield by actual CPU work, not every four textures. A large palette can
+      // otherwise spend seconds in hundreds of clamped timers while doing no work.
+      if (performance.now() >= yieldAt) {
+        await new Promise(resolve => setTimeout(resolve, 0))
+        yieldAt = performance.now() + 8
+      }
     }
     for (const mesh of mergeTranslucentBlocks(translucent)) {
       target.add(mesh)
