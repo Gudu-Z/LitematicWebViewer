@@ -3,6 +3,7 @@ import { ENTITY_DIMENSIONS, BABY_DIMENSIONS } from './entityDimensionData.js'
 import { isBaby } from './entityBabies.js'
 import { vehicleId, ridingOffset } from './entityPassengers.js'
 import { entityScale } from './entityScale.js'
+import { markEntityObject } from './selectionSources.js'
 
 const f = Math.fround
 const short = value => String(value || '').replace(/^minecraft:/, '')
@@ -80,6 +81,7 @@ export function getEntityHitbox(entity) {
 // Store the correction before a parent vehicle moves its children into local space.
 // This also handles item frames, whose existing meshes use world-space vertices.
 export function registerEntityHitbox(root, entity) {
+  markEntityObject(root, entity)
   const bounds = getEntityHitbox(entity)
   if (!bounds) return root
   root.updateMatrix()

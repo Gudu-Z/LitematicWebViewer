@@ -1,4 +1,5 @@
 import { BlockModelResolver } from './blocks.js'
+import { markBlockObject } from './selectionSources.js'
 
 const DIRECTIONS = ['down', 'up', 'north', 'south', 'west', 'east']
 const OFFSETS = [[0, -1, 0], [0, 1, 0], [0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0]]
@@ -42,7 +43,7 @@ export async function addMovingPistons(group, data, assets, visible, buildPrevie
       }, assets)
       preview.name = 'moving-piston-block'
       preview.position.set(te.x + part.offset[0], te.y + part.offset[1], te.z + part.offset[2])
-      group.add(preview)
+      group.add(markBlockObject(preview, te.x, te.y, te.z))
     }
   }
 }

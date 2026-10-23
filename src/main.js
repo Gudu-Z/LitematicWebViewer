@@ -9,6 +9,7 @@ import { BlockModelResolver } from './blocks.js'
 import { Renderer } from './renderer.js'
 import { UI } from './ui.js'
 import { MaterialIcons } from './materialIcons.js'
+import { SchematicInspector } from './schematicInspector.js'
 import { t, setLang, getLang, applyTranslations, blockName } from './i18n.js'
 import { fetchSchematic, receivePreviewFile, applyCamera } from './embedProtocol.js'
 import { ImageExport } from './imageExport.js'
@@ -35,7 +36,7 @@ ui.setStatusKey('dragHint')
 // 渲染器初始化可能因 WebGL 不可用而失败，做保护
 let renderer = null
 try {
-  renderer = new Renderer(container, { alpha: integration.themed })
+  renderer = new Renderer(container, { alpha: integration.themed, selectable: true })
   const background = /^#[0-9a-f]{6}$/i.test(startupParams.get('background')) ? startupParams.get('background') : '#172332'
   renderer.setBackgroundColor(background)
   document.getElementById('bgColor').value = background
@@ -43,7 +44,7 @@ try {
     if (document.body.classList.contains('ui-hidden')) return {}
     if (matchMedia('(max-width:900px)').matches || document.body.classList.contains('viewer-compact')) return { top: 16, bottom: 76 }
     const left = document.getElementById('sidebar').getBoundingClientRect()
-    const right = document.getElementById('right-panel').getBoundingClientRect()
+    const right = (document.body.classList.contains('has-selection') ? document.getElementById('schematicInspector') : document.getElementById('right-panel')).getBoundingClientRect()
     return { left: left.width ? left.right + 20 : 20, right: right.width ? innerWidth - right.left + 20 : 20, top: 20, bottom: 20 }
   }
 } catch (e) {
@@ -80,9 +81,15 @@ const imageExport = renderer ? new ImageExport({
   getError: () => ui.errorBanner.classList.contains('hidden') ? '' : ui.errorBanner.textContent,
   changeLanguage: () => { setLang(getLang() === 'zh' ? 'en' : 'zh'); refreshLocalizedUI() },
 }) : null
+const inspector = renderer ? new SchematicInspector({
+  renderer, assets, getData: () => currentData,
+  enabled: () => !!currentData && !busy && !document.body.classList.contains('ui-hidden') && !document.querySelector('dialog[open]'),
+  onSelect: () => closeMobilePanels(),
+}) : null
 function openImageExport() {
   if (busy || !imageExport) return
   closeMobilePanels()
+  inspector?.clear()
   try { imageExport.open() }
   catch (error) { ui.showError(t('webglInitFailed') + error.message) }
 }
@@ -177,6 +184,7 @@ document.getElementById('welcomeOpenBtn').addEventListener('click', () => fileIn
 document.getElementById('packBtn').addEventListener('click', () => packInput.click())
 document.getElementById('clearBtn').addEventListener('click', () => {
   if (busy) return
+  inspector?.clear()
   renderer?.clear()
   currentData = null
   currentFile = null
@@ -252,10 +260,12 @@ function closeMobilePanels() {
 for (const [button, panel] of [['controlsPanelBtn', 'sidebar'], ['infoPanelBtn', 'right-panel']]) document.getElementById(button).onclick = () => {
   const open = document.getElementById(panel).classList.contains('mobile-open')
   closeMobilePanels()
+  inspector?.clear()
   if (!open) { document.getElementById(panel).classList.add('mobile-open'); document.getElementById(button).setAttribute('aria-expanded', 'true') }
 }
 // 界面显示开关：隐藏时仅保留右上角按钮
 document.getElementById('uiToggleBtn').addEventListener('click', () => {
+  inspector?.clear()
   const hidden = document.body.classList.toggle('ui-hidden')
   const btn = document.getElementById('uiToggleBtn')
   btn.title = hidden ? t('showUi') : t('hideUi')
@@ -325,6 +335,7 @@ if (renderer) {
 
   // 设置：显示实体 / 区域线框 / 尺寸
   document.getElementById('showEntities').addEventListener('change', (e) => {
+    if (inspector?.selection?.kind === 'entity') inspector.clear()
     view.showEntities = e.target.checked
     renderer.setEntitiesVisible(view.showEntities)
   })
@@ -754,6 +765,7 @@ function refreshLocalizedUI() {
   toggleBtn.setAttribute('aria-label', toggleBtn.title)
   refreshProjectionButton()
   imageExport?.translate()
+  inspector?.translate()
   appearance?.update(previewOptions)
 }
 
@@ -774,6 +786,7 @@ const packManager = new ViewerPacks({
       assets.clearPacks()
       for (const pack of values) assets.addPack(pack.zip, pack.id ?? pack.name)
       materialIcons.reset()
+      inspector?.resetIcons()
     }
     replace(packs)
     try { await reRenderCurrent() }
@@ -786,6 +799,7 @@ const packManager = new ViewerPacks({
 })
 
 function setBusy(on) {
+  if (on) inspector?.clear()
   if (on && !busy) endSceneUpdate = renderer?.beginSceneUpdate()
   else if (!on && busy) { endSceneUpdate?.(); endSceneUpdate = null }
   busy = on

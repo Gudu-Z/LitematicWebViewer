@@ -1,4 +1,5 @@
 import * as THREE from 'three'
+import { blockFaceKeys, setBlockFaceKeys } from './selectionSources.js'
 
 const sorting = new WeakMap()
 
@@ -9,6 +10,7 @@ class TranslucentBlockMesh extends THREE.Mesh {
     super.copy(source, recursive)
     // Cached frame instances need independent camera-dependent index buffers.
     this.geometry = source.geometry.clone()
+    setBlockFaceKeys(this.geometry, blockFaceKeys(source.geometry))
     const original = sorting.get(source)?.indices
     if (original) this.geometry.index.array.set(original)
     sorting.delete(this)
@@ -82,6 +84,7 @@ export function mergeTranslucentBlocks(meshes, { disposeMaterials = false } = {}
           geometry.setAttribute(key, new THREE.BufferAttribute(attr.array.slice(face * 4 * attr.itemSize, (face + 1) * 4 * attr.itemSize), attr.itemSize))
         }
         geometry.setIndex([0, 1, 2, 2, 1, 3])
+        setBlockFaceKeys(geometry, blockFaceKeys(mesh.geometry)?.slice(face, face + 1))
         result.push(...mergeTranslucentBlocks([new THREE.Mesh(geometry, mesh.material)]))
       }
     }
@@ -91,9 +94,12 @@ export function mergeTranslucentBlocks(meshes, { disposeMaterials = false } = {}
   const count = meshes.reduce((n, mesh) => n + mesh.geometry.attributes.position.count, 0)
   const positions = new Float32Array(count * 3), uvs = new Float32Array(count * 2), colors = new Float32Array(count * 3)
   const textures = new Float32Array(count), unlit = new Float32Array(count), indices = new Uint32Array(count / 4 * 6)
+  const sources = meshes.map(mesh => blockFaceKeys(mesh.geometry))
+  const keys = sources.every(Boolean) ? new (sources.some(a => a instanceof Float64Array) ? Float64Array : Uint32Array)(count / 4) : null
   let vertex = 0, index = 0
   for (const mesh of meshes) {
     const g = mesh.geometry, m = mesh.material, size = g.attributes.position.count
+    if (keys) keys.set(blockFaceKeys(g), vertex / 4)
     positions.set(g.attributes.position.array, vertex * 3); uvs.set(g.attributes.uv.array, vertex * 2)
     textures.fill(maps.indexOf(m.map), vertex, vertex + size)
     unlit.fill(m.isMeshBasicMaterial ? 1 : 0, vertex, vertex + size)
@@ -107,6 +113,7 @@ export function mergeTranslucentBlocks(meshes, { disposeMaterials = false } = {}
     geometry.setAttribute(key, new THREE.BufferAttribute(array, size))
   }
   geometry.setIndex(new THREE.BufferAttribute(indices, 1))
+  setBlockFaceKeys(geometry, keys)
   release(meshes, disposeMaterials)
   return [new TranslucentBlockMesh(geometry, materialFor(maps))]
 }

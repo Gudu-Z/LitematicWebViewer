@@ -121,13 +121,13 @@ export function createBlockChunkIndex(data, options = {}) {
   return index
 }
 
-export async function buildBlockChunk(index, id, filter, onProgress) {
+export async function buildBlockChunk(index, id, filter, onProgress, trackBlocks = false) {
   const keys = id === null ? index.globalKeys : index.chunks.get(id)?.keys
   if (!keys) throw new Error(`Unknown block chunk: ${id}`)
   const includeGroup = !index.enabled ? undefined
     : id === null ? key => !index.splitGroups.has(key) : key => index.splitGroups.has(key)
   const { palette, blocks, bounds } = index.data
-  const result = await buildFaceGroups(palette, blocks, bounds, onProgress, filter, { keys, includeGroup })
+  const result = await buildFaceGroups(palette, blocks, bounds, onProgress, filter, { keys, includeGroup, trackBlocks })
   return { ...result, scannedBlocks: keys.length }
 }
 

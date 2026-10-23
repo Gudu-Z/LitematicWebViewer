@@ -1,5 +1,6 @@
 // 方块实体的模型和持续动画，与主预览器/检查页共用。
 import * as THREE from 'three'
+import { markBlockObject } from './selectionSources.js'
 import { createEntityRig } from './entityModel.js'
 
 const cuboid = (u, v, x, y, z, dx, dy, dz) => ({ u, v, x, y, z, dx, dy, dz })
@@ -121,7 +122,10 @@ export async function addBlockEffects(group, data, assets, visible) {
     const x = key % w, z = Math.floor(key / w) % d, y = Math.floor(key / (w * d))
     if (visible && !visible(x + minX, y + minY, z + minZ, y)) continue
     const effect = await buildBlockEffect(p.name.replace('minecraft:', ''), p.properties, assets)
-    if (effect.children.length) { effect.position.set(x + minX, y + minY, z + minZ); group.add(effect) }
+    if (effect.children.length) {
+      effect.position.set(x + minX, y + minY, z + minZ)
+      group.add(markBlockObject(effect, x + minX, y + minY, z + minZ))
+    }
   }
 }
 

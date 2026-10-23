@@ -161,3 +161,14 @@ export function updateFrameBatches(group) {
     batch.computeBoundingSphere()
   }
 }
+
+// Raycaster instanceId follows the compacted visible instances, not the original
+// record index. Hidden layers must never resolve to a different frame's NBT.
+export function frameInstanceRoot(batch, instanceId) {
+  if (!Number.isInteger(instanceId) || instanceId < 0) return null
+  let index = 0
+  for (const record of batchRecords.get(batch) || []) {
+    if (record.root.visible && index++ === instanceId) return record.root
+  }
+  return null
+}

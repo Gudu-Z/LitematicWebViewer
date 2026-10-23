@@ -42,6 +42,9 @@ jobs:
       - name: Verify Minecraft rendering coverage
         run: npm run test:rendering
 
+      - name: Verify selection and saved details
+        run: npm run test:selection
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:

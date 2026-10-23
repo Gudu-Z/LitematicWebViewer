@@ -15,6 +15,7 @@ import { batchItemFrames, updateFrameBatches, freezeStaticObject } from './frame
 import { collectSceneResources } from './sceneResources.js'
 import { createBlockChunkIndex, buildBlockChunk, planBlockChunkUpdate } from './blockChunks.js'
 import { mergeTranslucentBlocks } from './translucentBlocks.js'
+import { markBlockObject, setBlockFaceKeys } from './selectionSources.js'
 
 function disposePrivateTexture(texture) {
   if (texture && !isAssetTexture(texture)) texture.dispose()
@@ -276,9 +277,10 @@ export class Renderer {
     }
   }
 
-  constructor(container, { orbitOnly = false, pixelRatio = 2, alpha = false } = {}) {
+  constructor(container, { orbitOnly = false, pixelRatio = 2, alpha = false, selectable = false } = {}) {
     this.container = container
     this.orbitOnly = orbitOnly
+    this.selectable = selectable
     this._active = true
     this._animationFrame = null
     this._animationTimer = null
@@ -984,6 +986,7 @@ export class Renderer {
       const mat = new THREE.MeshLambertMaterial({ map: skinTex, alphaTest: 0.5, flatShading: true })
       const mesh = new THREE.Mesh(quadsToHeadGeometry(quads), mat)
       mesh.position.set(head.x, head.y, head.z)
+      markBlockObject(mesh, head.x, head.y, head.z)
       this._addLayerObject(this.headsGroup, mesh, head.y, true)
     }
   }
@@ -1016,6 +1019,7 @@ export class Renderer {
         group.rotation.y = (a * Math.PI) / 180
       }
       this._addLayerObject(this.bannersGroup, group, b.y)
+      markBlockObject(group, b.x, b.y, b.z)
       // BannerFlagBlockModel：旗面绕横杆处轻摆，位置相位由方块坐标决定。
       const resting = mesh.position.clone(), pivot = resting.clone().add(new THREE.Vector3(0, 5 / 6, 0))
       animateObject(mesh, age => {
@@ -1036,6 +1040,7 @@ export class Renderer {
       const mesh = buildCopperGolemStatueMesh(tex, s.pose)
       if (!mesh) continue
       mesh.position.set(s.x + 0.5, s.y, s.z + 0.5)
+      markBlockObject(mesh, s.x, s.y, s.z)
       mesh.rotation.y = ((BANNER_FACING_Y[s.facing] ?? 0) * Math.PI) / 180
       this._addLayerObject(this.statuesGroup, mesh, s.y, true)
     }
@@ -1059,6 +1064,7 @@ export class Renderer {
         group.add(new THREE.Mesh(POT_SIDE_GEO[i], mat))
       }
       group.position.set(pot.x + 0.5, pot.y + 0.5, pot.z + 0.5)
+      markBlockObject(group, pot.x, pot.y, pot.z)
       group.rotation.y = ((BANNER_FACING_Y[pot.facing] ?? 0) * Math.PI) / 180
       this._addLayerObject(this.potsGroup, group, pot.y, true)
     }
@@ -1281,6 +1287,7 @@ export class Renderer {
       const textPlane = new THREE.Mesh(geometry, textMat)
       textPlane.position.copy(boardCenter).addScaledVector(front, 0.05)
       textPlane.setRotationFromQuaternion(quat)
+      markBlockObject(textPlane, sign.x, sign.y, sign.z)
       this._addLayerObject(this.signsGroup, textPlane, sign.y, true)
       if (performance.now() >= yieldAt) {
         await new Promise(resolve => setTimeout(resolve, 0))
@@ -1407,7 +1414,7 @@ export class Renderer {
       part.complete = false
       disposeBlockObjects(part.root, false, false)
       const { groups, emitted } = await buildBlockChunk(state.index, id, filter,
-        f => progress(f * .45))
+        f => progress(f * .45), this.selectable)
       await this._loadBlockMaterials(groups, assets, state.materials,
         f => progress(.45 + f * .5))
       await this._appendBlockMeshes(groups, state.materials, part.root)
@@ -1535,6 +1542,7 @@ export class Renderer {
       geo.setAttribute('position', new THREE.BufferAttribute(g.positions, 3))
       geo.setAttribute('uv', new THREE.BufferAttribute(g.uvs, 2))
       geo.setIndex(new THREE.BufferAttribute(g.indices, 1))
+      setBlockFaceKeys(geo, g.blockKeys)
       const mesh = new THREE.Mesh(geo, mat)
       if (texKey.endsWith('|translucent')) { translucent.push(mesh); continue }
       if (mat.uniforms?.gameTime) animateObject(mesh, age => { mat.uniforms.gameTime.value = (age % 24000) / 24000 })

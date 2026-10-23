@@ -27,6 +27,7 @@ Preview Minecraft `.litematic` / `.litematica` schematics—building blueprints 
 
 **Interaction**
 
+- Click a block, mob or entity to inspect its coordinates, block states, health, facing, equipment and raw NBT. Containers show saved slots, item counts and occupancy, including both halves of a double chest. Missing data is identified explicitly. Click empty space or press Esc to clear the selection.
 - Orbit and first-person flight camera modes.
 - Perspective and orthographic projection, with perspective as the default. Orthographic views help compare dimensions and inspect structures.
 - Image export studio with isometric views, transparent PNGs, custom resolution and aspect ratios, using the current schematic, resource packs and layer selection.

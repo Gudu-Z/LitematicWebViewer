@@ -380,12 +380,13 @@ function emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid,
 
 // 把一个面写入已预分配好的 typed arrays。
 // verts：4 个顶点 [x,y,z]（局部坐标，需加 ox/oy/oz 偏移）；uvs：4 个 [u,v]。
-function writeFace(g, verts, uvs, ox, oy, oz) {
+function writeFace(g, verts, uvs, ox, oy, oz, blockKey) {
   const v = g.v
   const p = g.positions
   const u = g.uvs
   const ix = g.indices
   const f = g.f
+  if (g.blockKeys) g.blockKeys[v / 4] = blockKey
   for (let k = 0; k < 4; k++) {
     // 顶点 k 的分量起点是 (v+k)*3，不是 v+k*3（v 是顶点游标，每面 +4）
     p[(v + k) * 3] = ox + verts[k][0]
@@ -534,6 +535,10 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
           uvs: new Float32Array(count * 8),
           // 65535 是 WebGL2 的固定重启索引；满 65536 个顶点时仍使用 Uint32。
           indices: count * 4 < 65536 ? new Uint16Array(count * 6) : new Uint32Array(count * 6),
+          // One source cell per quad (CPU only), not per vertex. Large sparse
+          // schematics can have grid keys beyond Uint32 despite few blocks.
+          ...(options?.trackBlocks ? { blockKeys: bounds.width * bounds.height * bounds.depth <= 2 ** 32
+            ? new Uint32Array(count) : new Float64Array(count) } : {}),
           v: 0,
           f: 0,
         })
@@ -567,7 +572,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
           g.positions[g.v + 2] = pos[2]
           g.v += 3
         } else {
-          writeFace(g, pos, uvs, 0, 0, 0)
+          writeFace(g, pos, uvs, 0, 0, 0, key)
         }
       })
       if (!finfo.waterlogged) continue
@@ -579,7 +584,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
       const q = quads[qi]
       if (!faceGroups[qi]) continue
       if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
-      writeFace(faceGroups[qi], q.verts, q.uvs, x, y, z)
+      writeFace(faceGroups[qi], q.verts, q.uvs, x, y, z, key)
     }
   }
 

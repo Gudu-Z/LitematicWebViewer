@@ -69,7 +69,7 @@ export class ViewerAppearance {
     const left = p.file || p.controls || tools.packs || tools.help, right = p.metadata || p.regions || p.materials
     visible('sidebar', left); visible('right-panel', right)
     visible('controlsPanelBtn', left); visible('infoPanelBtn', right); visible('mobilePanels', left || right)
-    for (const [key, ids] of Object.entries({ packs: ['packSummaryBtn', 'packsTab'], export: ['imageExportBtn', 'welcomeExportBtn'], catalog: ['entityPreviewBtn', 'welcomeCatalogBtn'], settings: ['settingsBtn'], language: ['langBtn', 'exportLang'], help: ['operationHelp', 'githubBtn'], interface: ['uiToggleBtn'], projection: ['projectionBtn'] })) for (const id of ids) visible(id, tools[key])
+    for (const [key, ids] of Object.entries({ packs: ['packSummaryBtn', 'packsTab'], export: ['imageExportBtn', 'welcomeExportBtn'], catalog: ['entityPreviewBtn', 'welcomeCatalogBtn'], settings: ['settingsBtn'], language: ['langBtn', 'exportLang'], help: ['operationHelp', 'selectionHint', 'githubBtn'], interface: ['uiToggleBtn'], projection: ['projectionBtn'] })) for (const id of ids) visible(id, tools[key])
     visible('welcomeOpenBtn', p.file)
     if (!tools.packs && document.getElementById('packsTab').getAttribute('aria-selected') === 'true') document.getElementById('generalTab').click()
     for (const [key, prefix] of [['regions', 'region'], ['materials', 'material']]) {
