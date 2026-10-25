@@ -167,47 +167,4 @@ export function parseNBT(data, selectField) {
   return r.compound()
 }
 
-// 解压 NBT 数据：自动识别 gzip / zlib / 未压缩，返回未压缩的 Uint8Array。
-// 使用浏览器自带的 DecompressionStream，无需任何第三方压缩库。
-export async function decompressNBT(data) {
-  const u8 = data instanceof Uint8Array ? data : new Uint8Array(data)
-  if (u8.length >= 2 && u8[0] === 0x1f && u8[1] === 0x8b) {
-    return inflate(u8, 'gzip')
-  }
-  if (u8.length >= 2 && u8[0] === 0x78) {
-    return inflate(u8, 'deflate')
-  }
-  return u8
-}
-
-// 解压后数据超过该体积时视为「文件过大」直接报错，避免浏览器一次性分配
-// 超大 ArrayBuffer（上百 MB 甚至 GB）导致内存不足崩溃。
-const MAX_DECOMPRESSED = 512 * 1024 * 1024 // 512 MB
-
-async function inflate(data, format) {
-  const ds = new DecompressionStream(format)
-  const stream = new Blob([data]).stream().pipeThrough(ds)
-  // 分块读取并累计体积，超限即中止，而不是等解压完一次性分配
-  const reader = stream.getReader()
-  const chunks = []
-  let total = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    total += value.byteLength
-    if (total > MAX_DECOMPRESSED) {
-      await reader.cancel().catch(() => {})
-      const err = new Error('解压后数据过大')
-      err.code = 'FILE_TOO_LARGE'
-      throw err
-    }
-    chunks.push(value)
-  }
-  const out = new Uint8Array(total)
-  let off = 0
-  for (const c of chunks) {
-    out.set(c, off)
-    off += c.byteLength
-  }
-  return out
-}
+export { decompressNBT } from './decompression.js'

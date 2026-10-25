@@ -24,6 +24,8 @@ const words = {
   open: ['打开完整预览', 'Open full viewer'], retry: ['重试', 'Retry'],
   invalidURL: ['请使用 HTTPS 投影文件直链。', 'Use a direct HTTPS schematic URL.'],
   fileLimit: ['文件必须非空且不超过 64 MiB。', 'File must be nonempty and no larger than 64 MiB.'],
+  fileTooLarge: ['投影过大，无法在浏览器中完整预览。', 'The schematic is too large to preview in the browser.'],
+  decompressedTooLarge: ['投影解压后超过 512 MiB，请减少物品 NBT 数据或拆分投影后重试。', 'The decompressed schematic exceeds 512 MiB. Reduce item NBT data or split the schematic before retrying.'],
   notSchematic: ['链接返回了网页，请使用投影文件下载地址。', 'The URL returned a web page. Use a schematic download URL.'],
   failed: ['加载失败，请检查文件、网络及下载服务器的跨域设置。', 'Loading failed. Check the file, network and download server CORS settings.'],
   popupBlocked: ['请允许打开新标签页，再点击右上角箭头。', 'Allow popups, then click the arrow to open the viewer.'],
@@ -178,7 +180,10 @@ async function pump() {
       notify('camera', { camera: cameraSnapshot() })
       updateActive()
     } catch (error) {
-      if (!requested) state('error', words[error.message] ? t(error.message) : `${t('failed')} ${error.message}`)
+      if (!requested) {
+        const key = error.code === 'FILE_TOO_LARGE' ? error.reason === 'decompressed' ? 'decompressedTooLarge' : 'fileTooLarge' : error.message
+        state('error', words[key] ? t(key) : `${t('failed')} ${error.message}`)
+      }
     } finally {
       try {
         endTextureLoad()

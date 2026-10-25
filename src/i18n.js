@@ -152,6 +152,7 @@ const STRINGS = {
   statusEntities: ['，{n} 个实体', ', {n} entities'],
   loadFailed: ['加载失败：', 'Load failed: '],
   fileTooLarge: ['文件过大，浏览器内存不足以完整预览', 'File too large — not enough memory to preview'],
+  decompressedTooLarge: ['投影解压后超过 512 MiB，无法在浏览器中完整预览。请减少物品 NBT 数据或拆分投影后重试。', 'The decompressed schematic exceeds 512 MiB. Reduce item NBT data or split the schematic before retrying.'],
   layerValue: ['层 {y}', 'Layer {y}'],
   layerDash: ['层 -', 'Layer -'],
   webglInitFailed: ['无法初始化 3D 渲染（WebGL 可能不可用）：', 'Failed to initialize 3D rendering (WebGL may be unavailable): '],
