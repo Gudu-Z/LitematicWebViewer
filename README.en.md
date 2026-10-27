@@ -46,7 +46,7 @@ For everyday use, open the [online viewer](https://lwv.loafing.club/). The insta
 
 Schematic archives and build pages can embed the viewer without deploying the renderer or uploading schematics to our server. [Try the interactive examples](https://lwv.loafing.club/embed-example.html?lang=en).
 
-Embedded cards prioritize loading speed: block/entity inspection is disabled, and parsing skips container inventories, mob AI, trades and other data not used for rendering. Equipment, variants, passengers and sign text remain visible. **Full viewer** opens the original file, preserving access to all saved inspection data.
+Embedded cards prioritize loading speed: block/entity inspection is disabled, and streaming parsing skips container inventories, mob AI, trades and other data not used for rendering as it decompresses. Equipment, variants, passengers and sign text remain visible. **Full viewer** opens the original file for container and entity inspection. Both modes omit non-rendered book page contents. The full viewer retains item counts, titles and authors, and its inspector identifies omitted contents; the original file is unchanged.
 
 ![Archive integration examples: click a list entry to preview, or switch an image gallery to 3D](docs/images/embed-cards.png)
 
@@ -465,6 +465,7 @@ npm run build
 ## 5. Known limitations
 
 - Very large schematics, roughly over 20 million blocks, report “file too large”: browser memory cannot hold all blocks and merged geometry.
+- Streaming NBT filtering supports single-member and concatenated GZIP, zlib and uncompressed data. The 512 MiB limit applies to retained NBT after filtering, excluding discarded book pages. A separate 16 GiB scan limit and nesting/node limits bound processing. Skipped contents still require decompression and integrity checks, so files with extensive book data still take time to load.
 - Without biome data, grass, foliage and vines use default colors instead of vanilla biome gradients.
 - Some model corners, `uvlock` cases and extreme rotation combinations may differ slightly from vanilla.
 - Some textures in very old saves may differ slightly.
@@ -480,7 +481,10 @@ src/
   embedConfigurator.js Style configurator and integration code generator
   embedProtocol.js     Downloads, cross-window transfer and parameter validation
   schematicDetails.js  Shared block entity extraction for the full viewer and cards
-  nbt.js               Binary NBT parsing and gzip/zlib decompression
+  nbt.js               Binary NBT parsing
+  nbtStream.js         Streaming NBT filter that discards book page contents
+  schematicNbt.js      Schematic NBT loading and full-viewer/card filtering
+  decompression.js     gzip/zlib, checked gzip members and streamed decoding
   litematica.js        Schematic parsing, bit decoding and region normalization
   blocks.js            Blockstate to model resolution, including multipart/variants
   modelBaker.js        Model JSON to baked faces/quads

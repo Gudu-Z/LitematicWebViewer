@@ -1,5 +1,5 @@
-// Optional real-browser integration. Pass a local schematic to check the
-// reported oversized file; otherwise generate a small, highly compressed fixture.
+// Optional real-browser integration. Pass a local schematic with huge book NBT;
+// otherwise generate a fixture whose discarded pages exceed 512 MiB.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
 import { readFile, mkdir, writeFile } from 'node:fs/promises'
@@ -11,12 +11,17 @@ import { createServer } from 'vite'
 const single = await readFile('public/demo.litematic'), raw = gunzipSync(single)
 const multi = Buffer.concat([gzipSync(raw.subarray(0, 7)), gzipSync(Buffer.alloc(0)), gzipSync(raw.subarray(7))])
 const repeated = gzipSync(Buffer.alloc(1024 * 1024, 1))
-const oversized = process.argv[2] ? await readFile(process.argv[2]) : Buffer.concat(Array(513).fill(repeated))
-const fixtures = { single, multi, oversized }
+const int = n => { const b = Buffer.alloc(4); b.writeInt32BE(n); return b }
+const oversized = Buffer.concat([gzipSync(Buffer.concat([Buffer.from([10, 0, 0, 7, 0, 4, 100, 97, 116, 97]), int(513 * 1024 * 1024)])), ...Array(513).fill(repeated), gzipSync(Buffer.from([0]))])
+const page = Buffer.concat([Buffer.from([127, 252]), Buffer.alloc(32764, 49)])
+const pageGroup = gzipSync(Buffer.concat(Array(64).fill(page)))
+const bookPrefix = Buffer.concat([raw.subarray(0, -1), Buffer.from([10, 0, 4, 66, 111, 111, 107, 10, 0, 3, 116, 97, 103, 9, 0, 5, 112, 97, 103, 101, 115, 8]), int(16400)])
+const books = process.argv[2] ? await readFile(process.argv[2]) : Buffer.concat([gzipSync(bookPrefix), ...Array(256).fill(pageGroup), gzipSync(Buffer.concat(Array(16).fill(page))), gzipSync(Buffer.from([0, 0, 0]))])
+const fixtures = { single, multi, oversized, books }
 const server = await createServer({
   plugins: [{ name: 'gzip-test',
     transform(code, id) {
-      if (id.replaceAll('\\', '/').endsWith('/src/main.js')) return code + '\nwindow.__gzipTest = { openFile, getBusy: () => busy, getData: () => currentData };'
+      if (id.replaceAll('\\', '/').endsWith('/src/main.js')) return code + '\nwindow.__gzipTest = { openFile, inspector, getBusy: () => busy, getData: () => currentData };'
     },
     configureServer(server) {
       server.middlewares.use('/__gzip/', (request, response, next) => {
@@ -49,7 +54,7 @@ try {
     else if (message.method === 'Runtime.exceptionThrown') errors.push(message.params.exceptionDetails)
   }
   const send = (method, params = {}) => new Promise((resolve, reject) => {
-    const id = ++serial, timer = setTimeout(() => { pending.delete(id); reject(Error('CDP timeout ' + method)) }, 30000)
+    const id = ++serial, timer = setTimeout(() => { pending.delete(id); reject(Error('CDP timeout ' + method)) }, 120000)
     pending.set(id, { resolve, reject, timer }); socket.send(JSON.stringify({ id, method, params }))
   })
   const evaluate = async expression => {
@@ -58,7 +63,7 @@ try {
     return result.result?.value
   }
   const until = async expression => {
-    for (let i = 0; i < 300; i++) { if (await evaluate(expression)) return; await delay(100) }
+    for (let i = 0; i < 1200; i++) { if (await evaluate(expression)) return; await delay(100) }
     throw Error('Browser timeout: ' + expression)
   }
   const base = 'http://127.0.0.1:5195'
@@ -84,23 +89,44 @@ try {
   assert.equal(await evaluate('__gzipTest.getData().blocks.size'), count)
   await screenshot('multi-loaded')
   console.log('PASS Chrome reproduces native failure and renders the complete multi-member schematic')
+  const started = performance.now()
+  assert.equal(await load('books'), true)
+  const bookStats = await evaluate('({ ...__gzipTest.getData().nbtInfo, blocks: __gzipTest.getData().blocks.size, tiles: __gzipTest.getData().tileEntities.length })')
+  assert.ok(bookStats.readBytes > 512 * 1024 * 1024 && bookStats.retainedBytes < 1024 * 1024 && bookStats.bookPageFields > 0)
+  console.log('PASS huge book NBT renders with bounded retained data', { ...bookStats, ms: Math.round(performance.now() - started) })
+  if (process.argv[2]) {
+    const contents = await evaluate(`(() => {
+      const d = __gzipTest.getData(), tile = d.tileEntities[0];
+      __gzipTest.inspector.select({ kind: 'block', position: [tile.x, tile.y, tile.z] });
+      return { total: __gzipTest.inspector.details.containers[0].total, first: __gzipTest.inspector.details.containers[0].entries[0].stack };
+    })()`)
+    assert.ok(contents.total > 0 && contents.first.id === 'minecraft:written_book')
+    assert.ok(contents.first.tag.title && contents.first.tag.author)
+    assert.equal(Object.hasOwn(contents.first.tag, 'pages'), false)
+    assert.match(await evaluate('document.querySelector(".inspector-nbt-omissions").textContent'), /书页正文已跳过/)
+  }
+  await screenshot('books-loaded')
   assert.equal(await load('oversized'), false)
-  assert.match(await evaluate('document.getElementById("errorBanner").textContent'), /解压后超过 512 MiB/)
+  assert.match(await evaluate('document.getElementById("errorBanner").textContent'), /需要保留的 NBT 仍超过 512 MiB/)
   assert.equal(await evaluate('__gzipTest.getBusy()'), false)
   await screenshot('oversized-main')
   await evaluate('document.getElementById("langBtn").click()')
   assert.equal(await load('oversized'), false)
-  assert.match(await evaluate('document.getElementById("errorBanner").textContent'), /decompressed schematic exceeds 512 MiB/)
+  assert.match(await evaluate('document.getElementById("errorBanner").textContent'), /retained NBT still exceeds 512 MiB/)
   assert.equal(await load('single'), true, 'A rejected oversized load does not break subsequent loads')
   console.log('PASS main viewer rejects oversized expansion with Chinese/English messages and recovers')
 
   await send('Page.navigate', { url: base + '/embed.html?file=/__gzip/multi&pack=vanilla&lang=en' })
   await until('document.getElementById("preview")?.dataset.state === "loaded"')
   await screenshot('multi-embed')
+  await send('Page.navigate', { url: base + '/embed.html?file=/__gzip/books&pack=vanilla&lang=en' })
+  await until('document.getElementById("preview")?.dataset.state === "loaded"')
+  await screenshot('books-embed')
+  console.log('PASS huge book NBT also renders in the embedded card')
   for (const lang of ['zh', 'en']) {
     await send('Page.navigate', { url: base + '/embed.html?file=/__gzip/oversized&pack=vanilla&lang=' + lang })
     await until('document.getElementById("preview")?.dataset.state === "error"')
-    assert.match(await evaluate('document.getElementById("status").textContent'), lang === 'zh' ? /解压后超过 512 MiB/ : /decompressed schematic exceeds 512 MiB/)
+    assert.match(await evaluate('document.getElementById("status").textContent'), lang === 'zh' ? /需要保留的 NBT 仍超过 512 MiB/ : /retained NBT still exceeds 512 MiB/)
   }
   await screenshot('oversized-embed')
   assert.deepEqual(errors, [], 'No unhandled browser errors')

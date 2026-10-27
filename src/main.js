@@ -476,7 +476,7 @@ async function openFile(file, camera) {
   } catch (e) {
     console.error(e)
     ui.setProgress(0)
-    if (e && e.code === 'FILE_TOO_LARGE') ui.showError(t(e.reason === 'decompressed' ? 'decompressedTooLarge' : 'fileTooLarge'))
+    if (e && e.code === 'FILE_TOO_LARGE') ui.showError(t({ decompressed: 'decompressedTooLarge', retained: 'retainedNbtTooLarge', scan: 'nbtScanTooLarge', complexity: 'nbtComplexityTooLarge' }[e.reason] || 'fileTooLarge'))
     else ui.showError(t('loadFailed') + (e.message || e))
     return false
   } finally {

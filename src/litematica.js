@@ -7,8 +7,9 @@
 //   - 位序：小端序（第 0 个方块在第 0 个 long 的低位）
 //   - 世界最小角 world = min(origin, origin + size + 1)
 
-import { parseNBT, decompressNBT, LITTLE_ENDIAN } from './nbt.js'
-import { selectRenderNbtField, renderedBlockEntities } from './renderNbt.js'
+import { LITTLE_ENDIAN } from './nbt.js'
+import { renderedBlockEntities } from './renderNbt.js'
+import { readSchematicNBT } from './schematicNbt.js'
 
 // 空气类方块：解析时直接跳过、不存入 blocks Map，避免超大型投影占用过多内存。
 const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
@@ -55,7 +56,11 @@ function vec(v) {
 // 整数 key 的邻居查找是纯整数算术、速度快数倍，内存也更小，超大投影收益显著。
 // onProgress(fraction) 在解析过程中回调进度（0~1），用于超大文件显示进度。
 export async function parseLitematicaRaw(rawBytes, onProgress, { renderOnly = false } = {}) {
-  const root = parseNBT(rawBytes, renderOnly ? selectRenderNbtField : undefined)
+  const { root, stats } = await readSchematicNBT(rawBytes, { renderOnly })
+  return parseLitematicaRoot(root, onProgress, renderOnly, stats)
+}
+
+async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo) {
 
   const meta = root.Metadata || {}
   const metadata = {
@@ -231,10 +236,10 @@ export async function parseLitematicaRaw(rawBytes, onProgress, { renderOnly = fa
   }
 
   onProgress?.(1)
-  return { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList }
+  return { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList, nbtInfo }
 }
 
 export async function parseLitematica(buffer, onProgress, options) {
-  const raw = await decompressNBT(new Uint8Array(buffer))
-  return parseLitematicaRaw(raw, onProgress, options)
+  const { root, stats } = await readSchematicNBT(buffer, { ...options, onProgress: value => onProgress?.(value * .5) })
+  return parseLitematicaRoot(root, value => onProgress?.(.5 + value * .5), options?.renderOnly ?? false, stats)
 }

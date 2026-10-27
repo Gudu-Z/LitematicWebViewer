@@ -4,13 +4,38 @@
 
 export const LITTLE_ENDIAN = new Uint8Array(new Uint32Array([1]).buffer)[0] === 1
 const textDecoder = new TextDecoder()
+export const MAX_NBT_BYTES = 512 * 1024 * 1024
+export const MAX_NBT_DEPTH = 256
+export const MAX_NBT_NODES = 2_000_000
+const widths = [0, 1, 2, 4, 8, 4, 8]
+
+export function nbtLimitError(reason) {
+  return Object.assign(new Error(reason === 'retained' ? 'Retained NBT data exceeds the preview limit' : 'NBT structure is too complex to preview'), { code: 'FILE_TOO_LARGE', reason })
+}
+
+export function validateNbtLimit(maxBytes) {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes < 0 || maxBytes > MAX_NBT_BYTES) throw new RangeError('Invalid retained NBT limit')
+}
 
 class NBTReader {
-  constructor(data, selectField) {
+  constructor(data, selectField, { maxBytes = MAX_NBT_BYTES, stats } = {}) {
+    validateNbtLimit(maxBytes)
     this.dv = new DataView(data.buffer, data.byteOffset, data.byteLength)
     this.pos = 0
     this.selectField = selectField
     this.path = []
+    this.maxBytes = maxBytes; this.stats = stats; this.omittedBytes = 0
+    this.depth = -1; this.nodes = 0
+  }
+
+  checkLength(length, width = 1, retained = true) {
+    if (!Number.isSafeInteger(length) || length < 0 || this.pos + length * width > this.dv.byteLength) throw new RangeError('Truncated or invalid NBT data')
+    if (retained) this.checkRetained(this.pos + length * width)
+    return length
+  }
+
+  checkRetained(end = this.pos) {
+    if (end - this.omittedBytes > this.maxBytes) throw nbtLimitError('retained')
   }
 
   u8() {
@@ -49,30 +74,31 @@ class NBTReader {
     return v
   }
 
-  string() {
+  string(retained = true) {
     const len = this.dv.getUint16(this.pos, false)
     this.pos += 2
+    this.checkLength(len, 1, retained)
     const bytes = new Uint8Array(this.dv.buffer, this.dv.byteOffset + this.pos, len)
     this.pos += len
     return textDecoder.decode(bytes)
   }
 
   byteArray() {
-    const len = this.i32()
+    const len = this.checkLength(this.i32())
     const arr = new Int8Array(len)
     for (let i = 0; i < len; i++) arr[i] = this.dv.getInt8(this.pos++)
     return arr
   }
 
   intArray() {
-    const len = this.i32()
+    const len = this.checkLength(this.i32(), 4)
     const arr = new Int32Array(len)
     for (let i = 0; i < len; i++) arr[i] = this.i32()
     return arr
   }
 
   longArray() {
-    const len = this.i32()
+    const len = this.checkLength(this.i32(), 8)
     const arr = new BigInt64Array(len)
     // 保留 BigInt64Array 的返回格式，但直接写入两个 32 位半区，避免逐 long 创建 BigInt。
     const words = new Uint32Array(arr.buffer)
@@ -88,6 +114,9 @@ class NBTReader {
   list() {
     const type = this.u8()
     const len = this.i32()
+    if (len < 0 || type > 12 || type === 0 && len) throw new RangeError('Invalid NBT list')
+    if (len > MAX_NBT_NODES - this.nodes) throw nbtLimitError('complexity')
+    this.checkLength(len, widths[type] || 1)
     const arr = new Array(len)
     for (let i = 0; i < len; i++) arr[i] = this.payload(type)
     return arr
@@ -96,17 +125,21 @@ class NBTReader {
   compound() {
     const obj = {}
     for (;;) {
+      const start = this.pos
       const type = this.u8()
       if (type === 0) break // TAG_End
-      const name = this.string()
+      const name = this.string(false)
       if (this.selectField && !this.selectField(this.path, name)) {
         this.skipPayload(type)
+        this.omittedBytes += this.pos - start
+        if (this.stats) this.stats.retainedBytes -= this.pos - start
       } else {
         if (this.selectField) this.path.push(name)
         obj[name] = this.payload(type)
         if (this.selectField) this.path.pop()
       }
     }
+    this.checkRetained()
     return obj
   }
 
@@ -119,52 +152,59 @@ class NBTReader {
 
   // Skip binary payloads without decoding strings or allocating item/AI trees.
   // Compounds have no length prefix, so their tag headers still need scanning.
-  skipPayload(type) {
+  skipPayload(type, depth = this.depth + 1) {
+    if (depth > MAX_NBT_DEPTH) throw nbtLimitError('complexity')
     if (type >= 1 && type <= 6) { this.skip([0, 1, 2, 4, 8, 4, 8][type]); return }
     if (type === 8) { const length = this.dv.getUint16(this.pos, false); this.pos += 2; this.skip(length); return }
     if (type === 7 || type === 11 || type === 12) { this.skip(this.i32() * (type === 7 ? 1 : type === 11 ? 4 : 8)); return }
     if (type === 9) {
       const itemType = this.u8(), length = this.i32()
-      if (length < 0) throw new RangeError('NBT 列表长度无效')
+      if (length < 0 || itemType > 12 || itemType === 0 && length) throw new RangeError('Invalid NBT list')
       if (itemType >= 1 && itemType <= 6) this.skip(length * [0, 1, 2, 4, 8, 4, 8][itemType])
-      else for (let i = 0; i < length; i++) this.skipPayload(itemType)
+      else for (let i = 0; i < length; i++) this.skipPayload(itemType, depth + 1)
       return
     }
     if (type === 10) {
-      for (let child; (child = this.u8()) !== 0;) { this.skipPayload(8); this.skipPayload(child) }
+      for (let child; (child = this.u8()) !== 0;) { this.skipPayload(8, depth); this.skipPayload(child, depth + 1) }
       return
     }
     throw new Error('未知的 NBT 标签类型：' + type)
   }
 
   payload(type) {
-    switch (type) {
-      case 1: return this.dv.getInt8(this.pos++)
-      case 2: return this.i16()
-      case 3: return this.i32()
-      case 4: return this.i64()
-      case 5: return this.f32()
-      case 6: return this.f64()
-      case 7: return this.byteArray()
-      case 8: return this.string()
-      case 9: return this.list()
-      case 10: return this.compound()
-      case 11: return this.intArray()
-      case 12: return this.longArray()
-      default: throw new Error('未知的 NBT 标签类型：' + type)
-    }
+    if (++this.depth > MAX_NBT_DEPTH || ++this.nodes > MAX_NBT_NODES) throw nbtLimitError('complexity')
+    this.checkRetained(this.pos + (widths[type] || 0))
+    try {
+      switch (type) {
+        case 1: return this.dv.getInt8(this.pos++)
+        case 2: return this.i16()
+        case 3: return this.i32()
+        case 4: return this.i64()
+        case 5: return this.f32()
+        case 6: return this.f64()
+        case 7: return this.byteArray()
+        case 8: return this.string()
+        case 9: return this.list()
+        case 10: return this.compound()
+        case 11: return this.intArray()
+        case 12: return this.longArray()
+        default: throw new Error('未知的 NBT 标签类型：' + type)
+      }
+    } finally { this.depth-- }
   }
 }
 
 // 解析一个完整的 NBT 文件，返回根 compound 的普通对象。
 // Optional selector receives the enclosing field path (list indices omitted).
 // Returning false skips the entire value, not merely its returned JS property.
-export function parseNBT(data, selectField) {
-  const r = new NBTReader(data, selectField)
+export function parseNBT(data, selectField, options) {
+  const r = new NBTReader(data, selectField, options)
   const type = r.u8()
   if (type !== 10) throw new Error('根 NBT 标签不是 compound（类型 ' + type + '）')
   r.string() // 根标签名（通常为空串）
-  return r.compound()
+  const root = r.payload(10)
+  if (r.pos !== r.dv.byteLength) throw new Error('Unexpected data after root NBT compound')
+  return root
 }
 
 export { decompressNBT } from './decompression.js'

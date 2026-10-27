@@ -26,6 +26,9 @@ const words = {
   fileLimit: ['文件必须非空且不超过 64 MiB。', 'File must be nonempty and no larger than 64 MiB.'],
   fileTooLarge: ['投影过大，无法在浏览器中完整预览。', 'The schematic is too large to preview in the browser.'],
   decompressedTooLarge: ['投影解压后超过 512 MiB，请减少物品 NBT 数据或拆分投影后重试。', 'The decompressed schematic exceeds 512 MiB. Reduce item NBT data or split the schematic before retrying.'],
+  retainedNbtTooLarge: ['跳过非渲染内容后，需要保留的 NBT 仍超过 512 MiB，请拆分投影后重试。', 'The retained NBT still exceeds 512 MiB after skipping non-rendered content. Split the schematic before retrying.'],
+  nbtScanTooLarge: ['投影数据超过 16 GiB 的扫描上限，请减少无关 NBT 或拆分投影后重试。', 'The schematic exceeds the 16 GiB scan limit. Reduce unused NBT or split the schematic before retrying.'],
+  nbtComplexityTooLarge: ['NBT 结构过于复杂，请减少嵌套数据或拆分投影后重试。', 'The NBT structure is too complex. Reduce nested data or split the schematic before retrying.'],
   notSchematic: ['链接返回了网页，请使用投影文件下载地址。', 'The URL returned a web page. Use a schematic download URL.'],
   failed: ['加载失败，请检查文件、网络及下载服务器的跨域设置。', 'Loading failed. Check the file, network and download server CORS settings.'],
   popupBlocked: ['请允许打开新标签页，再点击右上角箭头。', 'Allow popups, then click the arrow to open the viewer.'],
@@ -181,7 +184,8 @@ async function pump() {
       updateActive()
     } catch (error) {
       if (!requested) {
-        const key = error.code === 'FILE_TOO_LARGE' ? error.reason === 'decompressed' ? 'decompressedTooLarge' : 'fileTooLarge' : error.message
+        const key = error.code === 'FILE_TOO_LARGE'
+          ? { decompressed: 'decompressedTooLarge', retained: 'retainedNbtTooLarge', scan: 'nbtScanTooLarge', complexity: 'nbtComplexityTooLarge' }[error.reason] || 'fileTooLarge' : error.message
         state('error', words[key] ? t(key) : `${t('failed')} ${error.message}`)
       }
     } finally {

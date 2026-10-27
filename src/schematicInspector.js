@@ -24,6 +24,8 @@ const WORDS = {
   loot: ['战利品尚未生成', 'Loot has not been generated'],
   enderChest: ['末影箱内容属于玩家，投影文件中的方块不保存该库存。', 'Ender chest contents belong to the player and are not stored in this schematic block.'],
   nbt: ['原始 NBT 数据', 'Raw NBT data'], noNBT: ['文件没有保存此方块的方块实体数据。', 'No block entity data was saved for this block.'],
+  filteredNBT: ['已读取的 NBT 数据', 'Loaded NBT data'],
+  skippedBooks: ['本投影的书页正文已跳过，不在详情中显示；物品数量、书名和作者仍保留。', 'Book page contents were skipped for this schematic and are not shown here. Item counts, titles and authors are retained.'],
   saved: ['显示投影文件保存的状态。单击空白处或按 Esc 取消选中。', 'Shows the state saved in the schematic. Click empty space or press Esc to clear.'],
   entries: ['{n} 项', '{n} entries'], more: ['显示更多', 'Show more'],
   blockEntity: ['方块实体', 'Block entity'], details: ['已保存的信息', 'Saved information'],
@@ -190,7 +192,12 @@ export class SchematicInspector {
       const values = this.section(tr('details'), false)
       this.rows(values, fields.map(([key, value]) => [key, NBT_BOOLEAN.has(key) ? tr(value ? 'true' : 'false') : String(value), key]))
     }
-    if (d.nbt) this.nbtTree(this.section(tr('nbt'), false), d.nbt)
+    if (d.nbt) {
+      const filtered = this.getData()?.nbtInfo?.bookPageFields > 0
+      const section = this.section(tr(filtered ? 'filteredNBT' : 'nbt'), false)
+      if (filtered) section.append(el('p', 'inspector-note inspector-nbt-omissions', tr('skippedBooks')))
+      this.nbtTree(section, d.nbt)
+    }
     else if (d.containers?.length) this.body.append(el('p', 'inspector-note', tr('noNBT')))
     this.icons ||= new MaterialIcons(this.body, this.assets)
     this.icons.observe()
@@ -211,6 +218,7 @@ export class SchematicInspector {
     if (!grid) { const text = el('span'); text.append(el('small', null, label), el('span', null, name)); button.append(text) }
     button.onclick = () => {
       this.itemPane.hidden = false; this.itemPane.replaceChildren(el('h3', null, tr('item')), el('p', null, name + ' × ' + count), el('code', null, stack.id))
+      if (this.getData()?.nbtInfo?.bookPageFields > 0) this.itemPane.append(el('p', 'inspector-note', tr('skippedBooks')))
       this.nbtTree(this.itemPane, stack)
       this.itemPane.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
     }
