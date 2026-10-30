@@ -2,6 +2,7 @@
 // the legacy blocks Map omitted; other values are local palette indices + 1.
 // Pages stay in file order so transparent/coplanar faces keep their draw order.
 export const BLOCK_PAGE_SIZE = 4096
+export const MAX_CACHED_BLOCK_PAGES = 512
 const SKIP = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
 const MAX_PAGE_BYTES = 1024 * 1024 * 1024
 const skip = name => SKIP.has((name || '').replace(/^minecraft:/, ''))
@@ -143,6 +144,8 @@ export class BlockStatePageWriter {
 
 // A bounded decoded-page cache is shared by every region in one schematic.
 // Sequential iteration and six-neighbour queries do not expand the whole world.
+// Keep up to 8 MiB: a 585 × 585 layer spans 84 pages, so 128 entries evict
+// neighbours before the next layer visits them. FIFO needs no per-hit mutation.
 class PageCache {
   constructor() { this.pages = new Map() }
   get(page) {
@@ -150,7 +153,7 @@ class PageCache {
     let values = this.pages.get(page)
     if (!values) {
       values = decodeBlockPage(page)
-      if (this.pages.size >= 128) this.pages.delete(this.pages.keys().next().value)
+      if (this.pages.size >= MAX_CACHED_BLOCK_PAGES) this.pages.delete(this.pages.keys().next().value)
       this.pages.set(page, values)
     }
     this.last = page; this.values = values
@@ -206,6 +209,7 @@ export class PagedBlockStore {
       r.after = r.overlaps.filter(other => regions.indexOf(other) > regions.indexOf(r)).reverse()
     }
     this.regionGrid = indexRegions(regions, bounds)
+    this.lastRegionCell = -1; this.lastRegionCandidates = undefined
     const first = regions[0]
     this.onlyRegion = regions.length === 1 && first.lx === 0 && first.ly === 0 && first.lz === 0
       && first.width === bounds.width && first.height === bounds.height && first.depth === bounds.depth ? first : null
@@ -238,9 +242,33 @@ export class PagedBlockStore {
     if (!Number.isSafeInteger(key) || key < 0 || key >= stride * b.height) return undefined
     if (this.onlyRegion) return this.local(this.onlyRegion, key)
     const x = key % b.width, z = Math.floor(key / b.width) % b.depth, y = Math.floor(key / stride)
+    return this.getAtUnchecked(x, y, z)
+  }
+
+  // Bounds-local coordinates let geometry reuse the neighbour coordinates it
+  // already checked, instead of encoding a global key and immediately decoding
+  // it again. Palette masks never apply here: hidden/renderless cells can still
+  // affect their neighbours, and overlapping air must fall through as before.
+  getAt(x, y, z) {
+    const b = this.bounds
+    if (!Number.isSafeInteger(x) || !Number.isSafeInteger(y) || !Number.isSafeInteger(z)
+      || x < 0 || y < 0 || z < 0 || x >= b.width || y >= b.height || z >= b.depth) return undefined
+    if (this.onlyRegion) return this.local(this.onlyRegion, x + b.width * (z + b.depth * y))
+    return this.getAtUnchecked(x, y, z)
+  }
+
+  getAtUnchecked(x, y, z) {
     const grid = this.regionGrid
-    const candidates = grid ? grid.cells.get(Math.floor(x / grid.cellSize) + Math.floor(z / grid.cellSize) * grid.width
-      + Math.floor(y / grid.cellSize) * grid.stride) : this.regions
+    let candidates = this.regions
+    if (grid) {
+      const cell = Math.floor(x / grid.cellSize) + Math.floor(z / grid.cellSize) * grid.width
+        + Math.floor(y / grid.cellSize) * grid.stride
+      if (cell !== this.lastRegionCell) {
+        this.lastRegionCell = cell
+        this.lastRegionCandidates = grid.cells.get(cell)
+      }
+      candidates = this.lastRegionCandidates
+    }
     if (!candidates) return undefined
     for (let i = candidates.length - 1; i >= 0; i--) {
       const value = this.at(candidates[i], x, y, z)
@@ -260,6 +288,17 @@ export class PagedBlockStore {
         if (typeof page === 'number' ? !selected(page) : wanted && !page.palette.some(selected)) continue
         const base = pi * BLOCK_PAGE_SIZE, length = Math.min(BLOCK_PAGE_SIZE, r.states.volume - base)
         const values = typeof page === 'number' ? null : this.cache.get(page)
+        if (this.onlyRegion) {
+          // A full-bounds region's local index already is the global Map key.
+          // Keep independent entry tuples and their exact original order.
+          for (let j = 0; j < length; j++) {
+            const value = values ? values[j] : page
+            if (!value) continue
+            const gi = r.localToGlobal[value - 1]
+            if (!wanted || wanted[gi]) yield [base + j, gi]
+          }
+          continue
+        }
         for (let j = 0; j < length; j++) {
           const value = values ? values[j] : page
           if (!value) continue

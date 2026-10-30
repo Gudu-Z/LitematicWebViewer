@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { deflateSync, gzipSync, gunzipSync, inflateRawSync } from 'node:zlib'
-import { BLOCK_PAGE_SIZE, BlockStatePageWriter, PagedBlockStore, createBlockPageBudget, decodeBlockPage, encodeBlockPage } from '../src/pagedBlocks.js'
+import { BLOCK_PAGE_SIZE, MAX_CACHED_BLOCK_PAGES, BlockStatePageWriter, PagedBlockStore, createBlockPageBudget, decodeBlockPage, encodeBlockPage } from '../src/pagedBlocks.js'
 import { readSchematicNBT } from '../src/schematicNbt.js'
 import { parseLitematica, parseLitematicaRaw } from '../src/litematica.js'
 import { NbtStreamFilter } from '../src/nbtStream.js'
@@ -205,17 +205,22 @@ for (let i = 0; i < 3; i++) {
 assert.equal([...wide].length, BLOCK_PAGE_SIZE * 3)
 console.log('PASS region candidate-grid boundaries, sparse holes, neighbour seams and adaptive allocation budget')
 
-// A reader traversing more than 128 nonuniform pages must keep its decoded
+// A reader traversing more nonuniform pages than the limit must keep its decoded
 // cache bounded while revisiting evicted pages still returns exact values.
-const pages = Array.from({ length: 256 }, (_, i) => encodeBlockPage(Uint32Array.from({ length: BLOCK_PAGE_SIZE }, (_, n) => n % 3 ? 1 : i % 2 + 1)))
+const pages = Array.from({ length: MAX_CACHED_BLOCK_PAGES + 16 }, (_, i) => encodeBlockPage(Uint32Array.from({ length: BLOCK_PAGE_SIZE }, (_, n) => n % 3 ? 3 : i % 2 + 1)))
 const volume = pages.length * BLOCK_PAGE_SIZE
+const markedCells = Math.ceil(BLOCK_PAGE_SIZE / 3)
 const bounded = new PagedBlockStore([{
   minX: 0, minY: 0, minZ: 0, maxX: volume - 1, maxY: 0, maxZ: 0, width: volume, height: 1, depth: 1,
-  states: { pages, volume, count: volume, counts: Float64Array.of(0, volume), bytes: 0 }, localToGlobal: [0, 1],
-}], { minX: 0, minY: 0, minZ: 0, width: volume, height: 1, depth: 1 }, 2)
+  states: { pages, volume, count: volume, counts: Float64Array.of(Math.ceil(pages.length / 2) * markedCells,
+    Math.floor(pages.length / 2) * markedCells, pages.length * (BLOCK_PAGE_SIZE - markedCells)), bytes: 0 }, localToGlobal: [0, 1, 2],
+}], { minX: 0, minY: 0, minZ: 0, width: volume, height: 1, depth: 1 }, 3)
 for (let i = 0; i < pages.length; i++) assert.equal(bounded.get(i * BLOCK_PAGE_SIZE), i % 2)
-assert.ok(bounded.cache.pages.size <= 128)
+assert.equal(bounded.cache.pages.size, MAX_CACHED_BLOCK_PAGES)
+assert.ok([...bounded.cache.pages.values()].reduce((bytes, values) => bytes + values.byteLength, 0) <= 8 * 1024 ** 2)
+assert.equal(bounded.cache.pages.has(pages[1]), false)
 assert.equal(bounded.get(BLOCK_PAGE_SIZE), 1)
+assert.equal(bounded.cache.pages.size, MAX_CACHED_BLOCK_PAGES)
 console.log('PASS bounded decoded-page cache and exact lookup after eviction')
 
 // Direct NBT streaming uses cuts through tag names, lengths and long payloads;

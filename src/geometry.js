@@ -15,6 +15,7 @@ import { CompactFaceData, canCompactFaces } from './compactFaceData.js'
 import { estimateGeometryBytes, geometryLimit } from './geometryBudget.js'
 import { throwIfAborted } from './loadingTask.js'
 import { GeometryStream, validateGeometryStream } from './geometryStream.js'
+import { CullMaskCache } from './cullMaskCache.js'
 
 const SKIP_BLOCKS = new Set([
   'air', 'cave_air', 'void_air',
@@ -96,7 +97,7 @@ function yieldThread() {
 // 该面不可见。此外「同类互隐」（原版 isSideInvisible）只有玻璃、树叶这类方块才有：
 // 楼梯等方块即使邻居状态相同也不能剔面，否则楼梯之间会出现错误的镂空面。
 // 邻居越界视为空气（不剔除）。
-function faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible) {
+function faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible, cardinalGetAt) {
   if (!q.cullface) return false
   const cf = q.cullface
   const nx = lx + cf[0]
@@ -105,7 +106,9 @@ function faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible
   if (nx < 0 || nx >= grid.W || ny < 0 || ny >= grid.H || nz < 0 || nz >= grid.D) return false
   // 被层级/区域过滤掉的邻居按空气处理，不遮挡当前面（否则切片边界会错误剔面）
   if (visible && !visible(nx, ny, nz)) return false
-  const ngi = blocks.get(nx + nz * grid.W + ny * grid.strideY)
+  // Coordinate lookup is only supplied for exact cardinal cullfaces. Unknown
+  // vectors keep the original flat-key behavior, including fractional offsets.
+  const ngi = cardinalGetAt ? cardinalGetAt(nx, ny, nz) : blocks.get(nx + nz * grid.W + ny * grid.strideY)
   return ngi !== undefined && (occludes[ngi] || (hideSame[gi] && hideSame[ngi] === hideSame[gi]))
 }
 
@@ -492,6 +495,58 @@ async function buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filt
     return fullFaceMask(p.baked ? p.baked.quads : null)
   })
 
+  // Share counters across palette entries, but register their draw order only
+  // when a face is actually visible. Palette order is not texture draw order.
+  const registry = new Map(), orderedCounters = []
+  const counterFor = key => {
+    let counter = registry.get(key)
+    if (!counter) { counter = { key, count: 0 }; registry.set(key, counter) }
+    return counter
+  }
+  const counterRefs = groupKeysByPalette.map(keys => keys?.map(key => key === null ? null : counterFor(key)))
+  const addCount = (counter, amount) => { if (!counter.count) orderedCounters.push(counter); counter.count += amount; emitted += amount }
+  const cardinalBit = cf => {
+    if (!cf) return 0
+    if (cf[0] === 0 && cf[2] === 0 && (cf[1] === -1 || cf[1] === 1)) return cf[1] === 1 ? 1 : 2
+    if (cf[0] === 0 && cf[1] === 0 && (cf[2] === -1 || cf[2] === 1)) return cf[2] === -1 ? 4 : 8
+    if (cf[1] === 0 && cf[2] === 0 && (cf[0] === -1 || cf[0] === 1)) return cf[0] === -1 ? 16 : 32
+    return 64
+  }
+  // Repeated model elements often use the same cull direction. The decision is
+  // shared within a cell; per-mask count plans keep the first visible quad order
+  // while adding one total per texture instead of hashing every emitted face.
+  const compiled = quadsByPalette.map((quads, gi) => {
+    if (!quads) return null
+    const bits = quads.map(q => cardinalBit(q.cullface)), directions = []
+    let seen = 0, unknown = false
+    for (let qi = 0; qi < quads.length; qi++) {
+      if (!counterRefs[gi][qi]) continue
+      const bit = bits[qi]
+      if (bit === 64) unknown = true
+      else if (bit && !(seen & bit)) { directions.push({ bit, quad: quads[qi] }); seen |= bit }
+    }
+    return { bits, directions, plans: unknown ? null : new Array(64) }
+  })
+  const cardinalGetAt = typeof blocks.getAt === 'function' && !blocks.onlyRegion ? blocks.getAt.bind(blocks) : null
+  const hiddenMask = (info, lx, lz, ly, gi) => {
+    let mask = 0
+    for (const { bit, quad } of info.directions) if (faceCulled(blocks, occludes, hideSame, quad, lx, lz, ly, gi, grid, visible, cardinalGetAt)) mask |= bit
+    return mask
+  }
+  const planFor = (gi, mask) => {
+    const info = compiled[gi]
+    let plan = info.plans[mask]
+    if (!plan) {
+      const seen = new Map()
+      for (let qi = 0; qi < counterRefs[gi].length; qi++) {
+        const counter = counterRefs[gi][qi]
+        if (counter && !(info.bits[qi] & mask)) seen.set(counter, (seen.get(counter) || 0) + 1)
+      }
+      plan = [...seen].map(([counter, count]) => ({ counter, count })); info.plans[mask] = plan
+    }
+    return plan
+  }
+  const cullCache = new CullMaskCache(options?.cullCacheBytes)
   const keys = options?.keys
   const entries = keys && keys !== blocks.keyView ? function* () {
     for (const key of keys) {
@@ -500,7 +555,7 @@ async function buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filt
     }
   } : () => blocks
   const total = keys ? (keys.length ?? keys.size ?? blocks.size) : blocks.size
-  const counts = new Map() // gKey -> 面数
+
   let emitted = 0
   const report = (phase, completed) => {
     throwIfAborted(options?.signal)
@@ -512,53 +567,58 @@ async function buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filt
 
   // —— 第一遍：统计每个贴图组的精确面数 ——
   let n = 0
-  report('count', 0)
-  for (const [key, gi] of entries()) {
-    if ((++n & 0xffff) === 0) {
-      report('count', n)
-      await yieldWork()
-      throwIfAborted(options?.signal)
-    }
-    const lx = key % grid.W
-    const lz = Math.floor(key / grid.W) % grid.D
-    const ly = Math.floor(key / grid.strideY)
-    const x = lx + minX
-    const y = ly + minY
-    const z = lz + minZ
-    if (filter && !filter(x, y, z, ly)) continue
-    const finfo = fluidOf[gi]
-    if (finfo) {
-      // 流体（水/岩浆/气泡柱/含水方块的内部水体）
-      emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], visible, (texKey) => {
-        if (options?.includeGroup && !options.includeGroup(texKey)) return
-        counts.set(texKey, (counts.get(texKey) || 0) + 1)
-        emitted++
-      })
-      if (!finfo.waterlogged) continue // 纯流体：不再渲染方块自身
-      // 含水方块：继续渲染方块自身的面（下面）
-    }
-    if (!renderable[gi]) continue
-    const quads = quadsByPalette[gi]
-    const groupKeys = groupKeysByPalette[gi]
-    for (let qi = 0; qi < quads.length; qi++) {
-      const q = quads[qi]
-      const gKey = groupKeys[qi]
-      if (gKey === null || faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
-      counts.set(gKey, (counts.get(gKey) || 0) + 1)
-      emitted++
-    }
-  }
-
-  // 分配精确大小的 typed arrays。
-  // 气泡组是「点」而非面：只存中心坐标（每点 3 个 float），渲染端用 THREE.Points。
-  report('count', total)
-  let geometryBytes = estimateGeometryBytes(counts, bounds, options)
-  options?.onStage?.({ phase: 'allocate', fraction: .5, bytes: geometryBytes,
-    groups: [...counts].map(([key, count]) => ({ key, count, compact: !!options?.compactFaces && canCompactFaces(bounds, key) })) })
-  throwIfAborted(options?.signal)
-  const stream = streaming ? new GeometryStream(counts, bounds, options, emitted, geometryBytes) : null
-  const groups = stream ? stream.groups : new Map()
+  let stream = null
   try {
+    report('count', 0)
+    for (const [key, gi] of entries()) {
+      if ((++n & 0xffff) === 0) {
+        report('count', n)
+        await yieldWork()
+        throwIfAborted(options?.signal)
+      }
+      const lx = key % grid.W
+      const lz = Math.floor(key / grid.W) % grid.D
+      const ly = Math.floor(key / grid.strideY)
+      const x = lx + minX
+      const y = ly + minY
+      const z = lz + minZ
+      if (filter && !filter(x, y, z, ly)) continue
+      const finfo = fluidOf[gi]
+      if (finfo) {
+        // 流体（水/岩浆/气泡柱/含水方块的内部水体）
+        emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], visible, (texKey) => {
+          if (options?.includeGroup && !options.includeGroup(texKey)) return
+          addCount(counterFor(texKey), 1)
+        })
+        if (!finfo.waterlogged) continue // 纯流体：不再渲染方块自身
+        // 含水方块：继续渲染方块自身的面（下面）
+      }
+      if (!renderable[gi]) continue
+      const info = compiled[gi], mask = hiddenMask(info, lx, lz, ly, gi)
+      if (info.directions.length) cullCache.append(mask)
+      if (info.plans) {
+        for (const { counter, count } of planFor(gi, mask)) addCount(counter, count)
+      } else {
+        const quads = quadsByPalette[gi], refs = counterRefs[gi]
+        for (let qi = 0; qi < quads.length; qi++) {
+          const counter = refs[qi], bit = info.bits[qi]
+          if (!counter || (bit === 64 ? faceCulled(blocks, occludes, hideSame, quads[qi], lx, lz, ly, gi, grid, visible) : (bit & mask))) continue
+          addCount(counter, 1)
+        }
+      }
+    }
+
+    // 分配精确大小的 typed arrays。
+    // 气泡组是「点」而非面：只存中心坐标（每点 3 个 float），渲染端用 THREE.Points。
+    cullCache.finish()
+    const counts = new Map(orderedCounters.map(counter => [counter.key, counter.count]))
+    report('count', total)
+    let geometryBytes = estimateGeometryBytes(counts, bounds, options)
+    options?.onStage?.({ phase: 'allocate', fraction: .5, bytes: geometryBytes,
+      groups: [...counts].map(([key, count]) => ({ key, count, compact: !!options?.compactFaces && canCompactFaces(bounds, key) })) })
+    throwIfAborted(options?.signal)
+    stream = streaming ? new GeometryStream(counts, bounds, options, emitted, geometryBytes) : null
+    const groups = stream ? stream.groups : new Map()
     if (stream) await stream.start()
     else for (const [gKey, count] of counts) {
       if (options?.compactFaces && canCompactFaces(bounds, gKey)) {
@@ -628,12 +688,15 @@ async function buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filt
         if (!finfo.waterlogged) continue
       }
       if (!renderable[gi]) continue
-      const quads = quadsByPalette[gi]
+      const quads = quadsByPalette[gi], info = compiled[gi]
+      let mask = info.directions.length ? cullCache.read() : 0
+      if (mask === undefined) mask = hiddenMask(info, lx, lz, ly, gi)
       const faceGroups = groupsByPalette[gi]
       for (let qi = 0; qi < quads.length; qi++) {
         const q = quads[qi]
         if (!faceGroups[qi]) continue
-        if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
+        const bit = info.bits[qi]
+        if (bit === 64 ? faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible) : (bit & mask)) continue
         const group = faceGroups[qi]
         if (group.isCompactFaceData) {
           if (stream && group.cursor >= group.recordLimit && !stream.prepare(group)) await stream.flushFor(group)
@@ -657,5 +720,5 @@ async function buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filt
     }
     report('fill', total)
     return { groups, emitted, geometryBytes }
-  } finally { stream?.dispose() }
+  } finally { stream?.dispose(); cullCache.dispose() }
 }
