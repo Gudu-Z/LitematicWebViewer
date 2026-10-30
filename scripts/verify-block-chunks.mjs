@@ -97,7 +97,7 @@ const partial = await buildFaceGroups(palette, blocks, bounds, null, null, {
 })
 assert.deepEqual([...partial.groups.keys()], ['block/stone'])
 assert.ok(partial.emitted < full.emitted)
-assert.deepEqual(await buildFaceGroups(palette, blocks, bounds, null, null, { keys: [] }), { groups: new Map(), emitted: 0 })
+assert.deepEqual(await buildFaceGroups(palette, blocks, bounds, null, null, { keys: [] }), { groups: new Map(), emitted: 0, geometryBytes: 0 })
 
 const steps = [
   null,

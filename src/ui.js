@@ -3,10 +3,21 @@
 import { t } from './i18n.js'
 import { materialStorage } from './materialStorage.js'
 
+const LOADING_STAGE_KEYS = {
+  decompress: 'loadingDecompress', parse: 'loadingBlocks', count: 'loadingCount',
+  fill: 'loadingGeometry', textures: 'loadingTextures', assemble: 'loadingDisplay',
+  models: 'loadingModels', details: 'loadingDetails', entities: 'loadingEntities',
+}
+
 export class UI {
   constructor(root) {
     this.metadataEl = root.querySelector('#metadata')
     this.statusEl = root.querySelector('#status')
+    this.welcomeStatus = root.querySelector('#welcomeStatus')
+    this.app = root.querySelector('#app') || (root.id === 'app' ? root : null)
+    this.loadingControls = root.querySelector('#loadingControls')
+    this.loadingStatus = root.querySelector('#loadingStatus')
+    this.cancelLoadingBtn = root.querySelector('#cancelLoadingBtn')
     this.progressFill = root.querySelector('#progressFill')
     this.dropOverlay = root.querySelector('#dropOverlay')
     this.errorBanner = root.querySelector('#errorBanner')
@@ -25,6 +36,18 @@ export class UI {
     this.materialListToggle = root.querySelector('#materialListToggle')
     this.materialSortBtn = root.querySelector('#materialSortBtn')
     this.onMaterialSort = null // 由 main.js 设置，点击排序按钮时触发
+    this._statusLiveRegions = [this.statusEl, this.welcomeStatus].filter(Boolean)
+      .map(el => [el, el.getAttribute('aria-live')])
+    this.cancelLoadingBtn?.addEventListener('click', () => {
+      const cancel = this._cancelLoading
+      if (!cancel) return
+      this._cancelLoading = null
+      this.cancelLoadingBtn.disabled = true
+      this.cancelLoadingBtn.setAttribute('data-i18n', 'cancelingLoading')
+      this.cancelLoadingBtn.textContent = t('cancelingLoading')
+      cancel()
+    })
+    this.setLoadingCancelable(false)
 
     // 区域列表折叠
     if (this.regionListToggle) {
@@ -63,8 +86,46 @@ export class UI {
   }
 
   setStatus(text) {
-    this.statusEl.textContent = text
-    document.getElementById('welcomeStatus').textContent = document.getElementById('app').getAttribute('aria-busy') === 'true' ? text : ''
+    if (this.statusEl) this.statusEl.textContent = text
+    if (this.loadingStatus) this.loadingStatus.textContent = text
+    if (this.welcomeStatus) this.welcomeStatus.textContent = this.app?.getAttribute('aria-busy') === 'true' ? text : ''
+  }
+
+  // This control remains reachable when the sidebar is hidden (mobile/first load).
+  // Optional DOM keeps small hosts that use UI without a loading bar compatible.
+  setLoadingCancelable(active, callback) {
+    this._cancelLoading = active && typeof callback === 'function' ? callback : null
+    if (this.loadingControls) this.loadingControls.hidden = !active
+    if (this.cancelLoadingBtn) {
+      this.cancelLoadingBtn.hidden = !active
+      this.cancelLoadingBtn.disabled = !this._cancelLoading
+      this.cancelLoadingBtn.setAttribute('data-i18n', 'cancelLoading')
+      this.cancelLoadingBtn.textContent = t('cancelLoading')
+    }
+    // Announce each update once, through the visible loading bar while it is open.
+    if (this.loadingStatus && this.loadingControls) {
+      for (const [el, live] of this._statusLiveRegions) {
+        if (active) el.setAttribute('aria-live', 'off')
+        else if (live == null) el.removeAttribute('aria-live')
+        else el.setAttribute('aria-live', live)
+      }
+    }
+  }
+
+  // Stage percentages are separate from the overall progress passed to setProgress.
+  setLoadingStage(phase, details = {}) {
+    if (phase === 'decompress' && Number.isFinite(details.processedBytes) && details.processedBytes > 0) {
+      const bytes = details.processedBytes, gib = bytes >= 1024 ** 3
+      const size = `${(bytes / 1024 ** (gib ? 3 : 2)).toFixed(1)} ${gib ? 'GiB' : 'MiB'}`
+      this.setStatusKey('loadingDecompressBytes', { size })
+      return
+    }
+    let fraction = details.stageFraction ?? details.fraction
+    if (!Number.isFinite(fraction) && Number.isFinite(details.completed) && details.total > 0) {
+      fraction = details.completed / details.total
+    }
+    const progress = Number.isFinite(fraction) ? ` ${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%` : ''
+    this.setStatusKey(LOADING_STAGE_KEYS[phase] || 'loadingFile', { progress })
   }
 
   // 记录状态来源（key + 插值变量），语言切换后能重新翻译

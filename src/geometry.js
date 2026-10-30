@@ -12,6 +12,8 @@
 
 import { FLUID_FLOW_BLOCKS } from './fluidFlowBlocks.js'
 import { CompactFaceData, canCompactFaces } from './compactFaceData.js'
+import { estimateGeometryBytes, geometryLimit } from './geometryBudget.js'
+import { throwIfAborted } from './loadingTask.js'
 
 const SKIP_BLOCKS = new Set([
   'air', 'cave_air', 'void_air',
@@ -419,6 +421,8 @@ function writeFace(g, verts, uvs, ox, oy, oz, blockKey) {
 // options.keys 只限制生成候选，遮挡/流体邻居仍查完整 blocks；候选需可重复迭代。
 // includeGroup 可把少量保守可分块贴图与保持原顺序的全局贴图分开。
 export async function buildFaceGroups(palette, blocks, bounds, onProgress, filter, options) {
+  throwIfAborted(options?.signal)
+  const yieldWork = options?.yieldTask || yieldThread
   const grid = {
     W: bounds.width,
     D: bounds.depth,
@@ -487,13 +491,22 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
   const total = keys ? (keys.length ?? keys.size ?? blocks.size) : blocks.size
   const counts = new Map() // gKey -> 面数
   let emitted = 0
+  const report = (phase, completed) => {
+    throwIfAborted(options?.signal)
+    const stageFraction = total ? completed / total : 1
+    const fraction = phase === 'count' ? stageFraction * .5 : .5 + stageFraction * .5
+    onProgress?.(fraction)
+    options?.onStage?.({ phase, fraction, stageFraction, completed, total })
+  }
 
   // —— 第一遍：统计每个贴图组的精确面数 ——
   let n = 0
+  report('count', 0)
   for (const [key, gi] of entries()) {
     if ((++n & 0xffff) === 0) {
-      onProgress?.(total ? (0.5 * n) / total : 0)
-      await yieldThread()
+      report('count', n)
+      await yieldWork()
+      throwIfAborted(options?.signal)
     }
     const lx = key % grid.W
     const lz = Math.floor(key / grid.W) % grid.D
@@ -527,6 +540,11 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
 
   // 分配精确大小的 typed arrays。
   // 气泡组是「点」而非面：只存中心坐标（每点 3 个 float），渲染端用 THREE.Points。
+  report('count', total)
+  let geometryBytes = estimateGeometryBytes(counts, bounds, options)
+  options?.onStage?.({ phase: 'allocate', fraction: .5, bytes: geometryBytes,
+    groups: [...counts].map(([key, count]) => ({ key, count, compact: !!options?.compactFaces && canCompactFaces(bounds, key) })) })
+  throwIfAborted(options?.signal)
   const groups = new Map()
   for (const [gKey, count] of counts) {
     if (options?.compactFaces && canCompactFaces(bounds, gKey)) {
@@ -554,10 +572,12 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
 
   // —— 第二遍：填充几何数据 ——
   n = 0
+  report('fill', 0)
   for (const [key, gi] of entries()) {
     if ((++n & 0xffff) === 0) {
-      onProgress?.(total ? 0.5 + (0.5 * n) / total : 0)
-      await yieldThread()
+      report('fill', n)
+      await yieldWork()
+      throwIfAborted(options?.signal)
     }
     const lx = key % grid.W
     const lz = Math.floor(key / grid.W) % grid.D
@@ -595,6 +615,11 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
     }
   }
 
-  for (const group of groups.values()) if (group.isCompactFaceData) group.finish()
-  return { groups, emitted }
+  for (const group of groups.values()) if (group.isCompactFaceData) {
+    throwIfAborted(options?.signal)
+    group.finish()
+    geometryBytes = geometryLimit(geometryBytes + group.templateData.byteLength, options?.maxGeometryBytes)
+  }
+  report('fill', total)
+  return { groups, emitted, geometryBytes }
 }

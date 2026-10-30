@@ -3,7 +3,8 @@
 import './styles.css'
 import { extractPlayerHeads, extractSigns, extractBanners, extractStatues, extractDecoratedPots } from './schematicDetails.js'
 import { ViewerPacks } from './viewerPacks.js'
-import { parseLitematica } from './litematica.js'
+import { SchematicWorkerClient } from './workerClient.js'
+import { throwIfAborted, withAbort } from './loadingTask.js'
 import { AssetProvider } from './assets.js'
 import { BlockModelResolver } from './blocks.js'
 import { Renderer } from './renderer.js'
@@ -29,6 +30,7 @@ const ui = new UI(document.body)
 const assets = new AssetProvider()
 const materialIcons = new MaterialIcons(ui.materialListBody, assets)
 const resolver = new BlockModelResolver(assets)
+const workerClient = new SchematicWorkerClient()
 
 // 初始状态文案（默认中文）
 ui.setStatusKey('dragHint')
@@ -37,6 +39,7 @@ ui.setStatusKey('dragHint')
 let renderer = null
 try {
   renderer = new Renderer(container, { alpha: integration.themed, selectable: true })
+  renderer.workerClient = workerClient
   const background = /^#[0-9a-f]{6}$/i.test(startupParams.get('background')) ? startupParams.get('background') : '#172332'
   renderer.setBackgroundColor(background)
   document.getElementById('bgColor').value = background
@@ -186,6 +189,7 @@ document.getElementById('clearBtn').addEventListener('click', () => {
   if (busy) return
   inspector?.clear()
   renderer?.clear()
+  workerClient.release(currentData)
   currentData = null
   currentFile = null
   currentFileName = ''; document.body.classList.remove('has-model')
@@ -427,7 +431,10 @@ async function openFile(file, camera) {
     return false
   }
   setBusy(true)
-  currentFile = null
+  const controller = new AbortController(), { signal } = controller
+  const options = { signal, onStage: detail => ui.setLoadingStage(detail.phase, detail) }
+  let data, replaced = false
+  ui.setLoadingCancelable(true, () => controller.abort())
   integrationBridge.loading = true
   integrationBridge.notify('loading', { message: t('parsingFile'), progress: 0 })
   ui.clearError()
@@ -436,31 +443,45 @@ async function openFile(file, camera) {
   const endTextureLoad = assets.beginTextureLoad()
   try {
     ui.setStatusKey('parsingFile')
+    ui.setLoadingStage('parse', { fraction: 0 })
     ui.setProgress(0.02)
-    const buffer = await file.arrayBuffer()
+    const buffer = await withAbort(file.arrayBuffer(), signal)
 
-    const data = await parseLitematica(buffer, (f) => {
+    data = await workerClient.parse(buffer, (f, detail) => {
       ui.setProgress(0.02 + f * 0.18)
-      ui.setStatusKey('parsingFilePct', { p: Math.round(f * 100) })
-    })
+      const stage = detail || { phase: f < .5 ? 'decompress' : 'parse', stageFraction: f < .5 ? f * 2 : f * 2 - 1 }
+      ui.setLoadingStage(stage.phase, stage.detail || stage)
+    }, { signal })
+    throwIfAborted(signal)
     ui.setProgress(0.2)
 
     const palette = data.palette
     ui.setStatusKey('statusParsing', { n: palette.length })
-    const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
+    ui.setLoadingStage('models', { completed: 0, total: palette.length })
+    let prepared = 0
+    const baked = await withAbort(Promise.all(palette.map(async p => {
+      const model = await resolver.resolve(p.name, p.properties)
+      throwIfAborted(signal)
+      ui.setLoadingStage('models', { completed: ++prepared, total: palette.length })
+      return model
+    })), signal)
+    throwIfAborted(signal)
     palette.forEach((p, i) => {
       p.baked = baked[i]
     })
     ui.setProgress(0.35)
 
     currentData = data
+    replaced = true
+    currentFile = null
     currentFileName = file.name
     document.getElementById('fileName').textContent = currentFileName
     document.body.classList.add('has-model'); closeMobilePanels()
     resetViewForData(data)
     ui.setStatusKey('statusGeometry', { n: data.blocks.size.toLocaleString() })
-    const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.4))
-    await renderCurrentDetails()
+    const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.4), null, true, options)
+    await renderCurrentDetails(options)
+    throwIfAborted(signal)
     ui.showMetadata(data.metadata)
     applyCamera(renderer, camera)
     refreshProjectionButton()
@@ -474,12 +495,25 @@ async function openFile(file, camera) {
     integrationBridge.cameraChanged()
     return true
   } catch (e) {
-    console.error(e)
+    workerClient.release(data)
+    if (replaced) {
+      renderer.clear(); currentData = null; currentFile = null; currentFileName = ''
+      document.getElementById('fileName').textContent = ''
+      document.body.classList.remove('has-model')
+      resetViewForClear(); ui.showMetadata({}); updateMaterialList()
+    }
     ui.setProgress(0)
-    if (e && e.code === 'FILE_TOO_LARGE') ui.showError(t({ decompressed: 'decompressedTooLarge', retained: 'retainedNbtTooLarge', scan: 'nbtScanTooLarge', complexity: 'nbtComplexityTooLarge' }[e.reason] || 'fileTooLarge'))
+    if (e?.name === 'AbortError') {
+      ui.setStatusKey('loadingCancelled')
+      integrationBridge.notify('waiting', { message: t('loadingCancelled'), progress: 0 })
+      return false
+    }
+    console.error(e)
+    if (e && e.code === 'FILE_TOO_LARGE') ui.showError(t({ decompressed: 'decompressedTooLarge', retained: 'retainedNbtTooLarge', scan: 'nbtScanTooLarge', complexity: 'nbtComplexityTooLarge', geometry: 'geometryTooLarge' }[e.reason] || 'fileTooLarge'))
     else ui.showError(t('loadFailed') + (e.message || e))
     return false
   } finally {
+    ui.setLoadingCancelable(false)
     integrationBridge.loading = false
     try { setBusy(false) } finally { endTextureLoad(); assets.trimTextures() }
   }
@@ -520,72 +554,81 @@ async function reRenderCurrent() {
 }
 
 // 渲染当前结构里的告示牌
-async function renderCurrentSigns() {
+async function renderCurrentSigns(options = {}) {
   if (!currentData || !renderer) return
   const tes = filterByRegion(currentData.tileEntities || [])
-  await renderer.renderSigns(extractSigns(tes, currentData), assets)
+  await renderer.renderSigns(extractSigns(tes, currentData), assets, options)
 }
 
 // 渲染当前结构里的实体
-async function renderCurrentEntities(onProgress) {
+async function renderCurrentEntities(onProgress, options = {}) {
   if (!currentData || !renderer) return
   const ents = filterByRegion(currentData.entities || []).map(entity => ({
     ...entity,
     renderOptions: { ...entity.renderOptions, illagerExtraArms: view.illagerExtraArms },
   }))
-  await renderer.renderEntities(ents, assets, currentData, onProgress)
+  await renderer.renderEntities(ents, assets, currentData, onProgress, options)
 }
 
 // Block geometry is only part of a load. Report actual entity completions instead
 // of leaving the bar at 95% while a large item-frame collection is still loading.
-async function renderCurrentDetails() {
+async function renderCurrentDetails(options = {}) {
+  throwIfAborted(options.signal)
   ui.setStatusKey('statusBlockEntities')
+  ui.setLoadingStage('details', { fraction: 0 })
   const steps = [renderCurrentSigns, renderCurrentPlayerHeads, renderCurrentBanners, renderCurrentStatues, renderCurrentPots]
   for (let i = 0; i < steps.length; i++) {
-    await steps[i]()
+    throwIfAborted(options.signal)
+    await steps[i](options)
+    ui.setLoadingStage('details', { completed: i + 1, total: steps.length })
     ui.setProgress(.75 + (i + 1) / steps.length * .05)
   }
   await renderCurrentEntities((progress, { completed, total, phase }) => {
+    throwIfAborted(options.signal)
     if (total) ui.setStatusKey(phase === 'finishing' ? 'statusEntitiesFinishing' : 'statusEntityProgress', { completed, total })
+    else ui.setLoadingStage('entities', { fraction: progress, completed, total })
     ui.setProgress(.8 + progress * .19)
-  })
+  }, options)
 }
 
 // 渲染当前结构里的玩家头颅（用玩家自己的皮肤）
-async function renderCurrentPlayerHeads() {
+async function renderCurrentPlayerHeads(options = {}) {
   if (!currentData || !renderer) return
   const tes = filterByRegion(currentData.tileEntities || [])
-  await renderer.renderPlayerHeads(extractPlayerHeads(tes, currentData), assets)
+  await renderer.renderPlayerHeads(extractPlayerHeads(tes, currentData), assets, options)
 }
 
 // 渲染当前结构里的旗帜（底色 + 图案）
-async function renderCurrentBanners() {
+async function renderCurrentBanners(options = {}) {
   if (!currentData || !renderer) return
   try {
     const tes = filterByRegion(currentData.tileEntities || [])
-    await renderer.renderBanners(extractBanners(tes, currentData), assets)
+    await renderer.renderBanners(extractBanners(tes, currentData), assets, options)
   } catch (e) {
+    if (e.name === 'AbortError') throw e
     console.error('旗帜渲染失败', e)
   }
 }
 
 // 渲染当前结构里的铜傀儡雕像
-async function renderCurrentStatues() {
+async function renderCurrentStatues(options = {}) {
   if (!currentData || !renderer) return
   try {
-    await renderer.renderStatues(extractStatues(currentData), assets)
+    await renderer.renderStatues(extractStatues(currentData), assets, options)
   } catch (e) {
+    if (e.name === 'AbortError') throw e
     console.error('铜傀儡雕像渲染失败', e)
   }
 }
 
 // 渲染当前结构里的装饰罐侧面（陶片图案）
-async function renderCurrentPots() {
+async function renderCurrentPots(options = {}) {
   if (!currentData || !renderer) return
   try {
     const tes = filterByRegion(currentData.tileEntities || [])
-    await renderer.renderDecoratedPots(extractDecoratedPots(tes, currentData), assets)
+    await renderer.renderDecoratedPots(extractDecoratedPots(tes, currentData), assets, options)
   } catch (e) {
+    if (e.name === 'AbortError') throw e
     console.error('装饰罐渲染失败', e)
   }
 }
@@ -618,7 +661,8 @@ function makeBlockFilter() {
     if (hidden.length && inAny(x, y, z, hidden)) return false
     return true
   }
-  filter.descriptor = { mode, layerY, regionKey: hidden.length ? JSON.stringify(hidden.map(r => [r.name, r.minX, r.minY, r.minZ, r.maxX, r.maxY, r.maxZ])) : '' }
+  filter.descriptor = { mode, layerY, hiddenRegions: hidden.map(({ minX, minY, minZ, maxX, maxY, maxZ }) => ({ minX, minY, minZ, maxX, maxY, maxZ })),
+    regionKey: hidden.length ? JSON.stringify(hidden.map(r => [r.name, r.minX, r.minY, r.minZ, r.maxX, r.maxY, r.maxZ])) : '' }
   return filter
 }
 

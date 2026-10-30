@@ -2,6 +2,7 @@
 import * as THREE from 'three'
 import { markBlockObject } from './selectionSources.js'
 import { createEntityRig } from './entityModel.js'
+import { throwIfAborted, withAbort } from './loadingTask.js'
 
 const cuboid = (u, v, x, y, z, dx, dy, dz) => ({ u, v, x, y, z, dx, dy, dz })
 const part = (cuboids, pivot = [0, 0, 0], rot = [0, 0, 0]) => ({ cuboids, pivot, rot, children: {} })
@@ -112,25 +113,68 @@ export async function buildBlockEffect(id, properties, assets) {
   return root
 }
 
-export async function addBlockEffects(group, data, assets, visible) {
+// Effect rigs and buildBlockPreview roots own their geometry/materials. Their
+// source textures belong to AssetProvider and remain reusable by the next load.
+export function disposeBlockEffect(root) {
+  if (!root) return
+  root.removeFromParent()
+  const disposed = new Set()
+  const dispose = resource => {
+    if (!resource || disposed.has(resource)) return
+    disposed.add(resource); resource.dispose()
+  }
+  root.traverse(object => {
+    if (object.isInstancedMesh) dispose(object)
+    dispose(object.geometry)
+    dispose(object.skeleton)
+    for (const material of [object.material].flat()) dispose(material)
+  })
+}
+
+export async function addBlockEffects(group, data, assets, visible, options = {}) {
+  const { signal } = options
+  throwIfAborted(signal)
   const { width: w, depth: d, minX, minY, minZ } = data.bounds
   const supported = new Set(['bell', 'enchanting_table', 'conduit', 'lectern'])
   const entries = data.palette.map(p => supported.has(p.name.replace('minecraft:', '')) ? p : null)
   if (!entries.some(Boolean)) return
-  for (const [key, index] of data.blocks.entriesForPalette?.(entries) || data.blocks) {
-    const p = entries[index]; if (!p) continue
-    const x = key % w, z = Math.floor(key / w) % d, y = Math.floor(key / (w * d))
-    if (visible && !visible(x + minX, y + minY, z + minZ, y)) continue
-    const effect = await buildBlockEffect(p.name.replace('minecraft:', ''), p.properties, assets)
-    if (effect.children.length) {
-      effect.position.set(x + minX, y + minY, z + minZ)
-      group.add(markBlockObject(effect, x + minX, y + minY, z + minZ))
+  const created = []
+  let scanned = 0, yieldAt = performance.now() + 8
+  try {
+    for (const [key, index] of data.blocks.entriesForPalette?.(entries) || data.blocks) {
+      if ((++scanned & 4095) === 0 && performance.now() >= yieldAt) {
+        await withAbort(new Promise(resolve => setTimeout(resolve, 0)), signal)
+        throwIfAborted(signal); yieldAt = performance.now() + 8
+      }
+      const p = entries[index]; if (!p) continue
+      throwIfAborted(signal)
+      const x = key % w, z = Math.floor(key / w) % d, y = Math.floor(key / (w * d))
+      if (visible && !visible(x + minX, y + minY, z + minZ, y)) continue
+      const pending = buildBlockEffect(p.name.replace('minecraft:', ''), p.properties, assets).then(effect => {
+        if (signal?.aborted) { disposeBlockEffect(effect); return null }
+        return effect
+      })
+      const effect = await withAbort(pending, signal)
+      if (signal?.aborted) { disposeBlockEffect(effect); throwIfAborted(signal) }
+      if (effect.children.length) {
+        effect.position.set(x + minX, y + minY, z + minZ)
+        group.add(markBlockObject(effect, x + minX, y + minY, z + minZ))
+        created.push(effect)
+      }
+      if (performance.now() >= yieldAt) {
+        await withAbort(new Promise(resolve => setTimeout(resolve, 0)), signal)
+        throwIfAborted(signal); yieldAt = performance.now() + 8
+      }
     }
-  }
+  } catch (error) { created.forEach(disposeBlockEffect); throw error }
 }
 
-export async function portalMaterial(assets, gateway) {
-  const sky = await assets.getTexture('environment/end_sky'), stars = await assets.getTexture('entity/end_portal/end_portal')
+export async function portalMaterial(assets, gateway, { signal } = {}) {
+  throwIfAborted(signal)
+  const sky = await withAbort(assets.getTexture('environment/end_sky'), signal)
+  throwIfAborted(signal)
+  const stars = await withAbort(assets.getTexture('entity/end_portal/end_portal'), signal)
+  throwIfAborted(signal)
   for (const texture of [sky, stars]) if (texture) { texture.wrapS = texture.wrapT = THREE.RepeatWrapping; texture.colorSpace = THREE.NoColorSpace; texture.needsUpdate = true }
   const colors = [[.022087,.098399,.110818],[.011892,.095924,.089485],[.027636,.101689,.100326],[.046564,.109883,.114838],[.064901,.117696,.097189],[.063761,.086895,.123646],[.084817,.111994,.166380],[.097489,.154120,.091064],[.106152,.131144,.195191],[.097721,.110188,.187229],[.133516,.138278,.148582],[.070006,.243332,.235792],[.196766,.142899,.214696],[.047281,.315338,.321970],[.204675,.390010,.302066],[.080955,.314821,.661491]]
   // rendertype_end_portal：屏幕投影采样，逐层旋转、缩放、滚动；门 15 层，折跃门 16 层。

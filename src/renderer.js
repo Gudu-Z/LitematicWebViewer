@@ -16,6 +16,7 @@ import { collectSceneResources } from './sceneResources.js'
 import { createBlockChunkIndex, buildBlockChunk, planBlockChunkUpdate } from './blockChunks.js'
 import { CompactFaceMesh } from './compactFaceMesh.js'
 import { enableSpatialFaces } from './spatialFaces.js'
+import { throwIfAborted, withAbort } from './loadingTask.js'
 import { mergeTranslucentBlocks } from './translucentBlocks.js'
 import { markBlockObject, setBlockFaceKeys } from './selectionSources.js'
 
@@ -909,17 +910,57 @@ export class Renderer {
   }
 
   // 渲染实体（矿车、物品展示框等）
-  async renderEntities(entities, assets, data, onProgress) {
+  async renderEntities(entities, assets, data, onProgress, options = {}) {
+    const signal = options.signal
+    throwIfAborted(signal)
     this.clearEntities()
+    const job = this._entityRenderJob = {}
     const total = entities?.length || 0
     if (!total) { onProgress?.(1, { completed: 0, total: 0, phase: 'done' }); return }
     const revision = assets.cacheRevision
+    const stale = () => signal?.aborted || assets.cacheRevision !== revision || this._entityRenderJob !== job
     // Keep the same concurrency ceiling, but immediately reuse each free slot.
     // A slow skin/model must not hold up the next 50 otherwise-ready entities.
     const meshes = new Array(entities.length)
+    const disposed = new WeakSet()
+    let repairPending = false
+    const retainedResources = () => {
+      // Frame templates share geometry/materials. A late cancelled result must
+      // not release resources already reused by the replacement scene.
+      const retained = new Set()
+      this.scene?.traverse(object => {
+        if (object.geometry) retained.add(object.geometry)
+        if (object.skeleton) retained.add(object.skeleton)
+        for (const material of [object.material].flat()) if (material) { retained.add(material); retained.add(material.map) }
+      })
+      return retained
+    }
+    const disposeMesh = (root, retained = retainedResources()) => {
+      if (!root) return
+      const dispose = resource => {
+        if (!resource || retained.has(resource) || disposed.has(resource)) return
+        disposed.add(resource); resource.dispose()
+      }
+      root.traverse(object => {
+        if (object.isInstancedMesh) dispose(object)
+        dispose(object.geometry); dispose(object.skeleton)
+        for (const material of [object.material].flat()) if (material) {
+          if (!isAssetTexture(material.map)) dispose(material.map)
+          dispose(material)
+        }
+      })
+    }
+    const discard = () => {
+      const retained = retainedResources()
+      for (let i = 0; i < meshes.length; i++) {
+        disposeMesh(meshes[i], retained)
+        if (!repairPending) meshes[i] = null
+      }
+    }
     let next = 0, completed = 0, reported = -1
     let resume = null, yieldAt = performance.now() + 8
     const progress = phase => {
+      if (stale()) return
       const percent = Math.floor(completed / total * 100)
       if (phase !== 'models' || percent !== reported) {
         reported = percent
@@ -927,44 +968,59 @@ export class Renderer {
       }
     }
     progress('models')
-    await Promise.all(Array.from({ length: Math.min(50, entities.length) }, async () => {
-      while (next < entities.length) {
-        const i = next++, entity = entities[i]
-        try {
-          meshes[i] = await buildEntityMesh(entity, assets, data)
-        } catch (err) {
-          console.error('实体渲染失败:', entity.id, err)
-          meshes[i] = null
+    throwIfAborted(signal)
+    try {
+      const loading = Promise.all(Array.from({ length: Math.min(50, entities.length) }, async () => {
+        while (!stale() && next < entities.length) {
+          const i = next++, entity = entities[i]
+          try {
+            const mesh = await buildEntityMesh(entity, assets, data)
+            if (stale()) { disposeMesh(mesh); return }
+            meshes[i] = mesh
+          } catch (err) {
+            if (stale()) return
+            console.error('实体渲染失败:', entity.id, err)
+            meshes[i] = null
+          }
+          completed++
+          if (stale()) return
+          progress('models')
+          // Cached models can keep all 50 workers in microtasks for a long time.
+          // Share one short yield so input and the real progress text can paint.
+          if (!resume && performance.now() >= yieldAt) resume = new Promise(resolve => setTimeout(() => {
+            yieldAt = performance.now() + 8
+            resume = null
+            resolve()
+          }, 0))
+          if (resume) await resume
         }
-        completed++
-        if (assets.cacheRevision !== revision) return
-        progress('models')
-        // Cached models can keep all 50 workers in microtasks for a long time.
-        // Share one short yield so input and the real progress text can paint.
-        if (!resume && performance.now() >= yieldAt) resume = new Promise(resolve => setTimeout(() => {
-          yieldAt = performance.now() + 8
-          resume = null
-          resolve()
-        }, 0))
-        if (resume) await resume
+      }))
+      await withAbort(loading, signal)
+      throwIfAborted(signal)
+      if (stale()) return
+      // A temporary failure can outlast the first shared retry while later workers
+      // succeed. Complete those earlier bodies before batching; keep their items.
+      progress('finishing')
+      throwIfAborted(signal)
+      repairPending = true
+      const repairing = repairItemFrameBodies(meshes).finally(() => { repairPending = false; if (stale()) discard() })
+      await withAbort(repairing, signal)
+      throwIfAborted(signal)
+      if (stale()) return
+      const frames = []
+      for (let i = 0; i < meshes.length; i++) {
+        if (!meshes[i]) continue
+        this._addLayerObject(this.entitiesGroup, meshes[i], entities[i].pos[1])
+        const id = entities[i].id?.replace(/^minecraft:/, '')
+        if ((id === 'item_frame' || id === 'glow_item_frame') && !entities[i].nbt?.Passengers?.length) frames.push(meshes[i])
       }
-    }))
-    if (assets.cacheRevision !== revision) return
-    // A temporary failure can outlast the first shared retry while later workers
-    // succeed. Complete those earlier bodies before batching; keep their items.
-    progress('finishing')
-    await repairItemFrameBodies(meshes)
-    if (assets.cacheRevision !== revision) return
-    const frames = []
-    for (let i = 0; i < meshes.length; i++) {
-      if (!meshes[i]) continue
-      this._addLayerObject(this.entitiesGroup, meshes[i], entities[i].pos[1])
-      const id = entities[i].id?.replace(/^minecraft:/, '')
-      if ((id === 'item_frame' || id === 'glow_item_frame') && !entities[i].nbt?.Passengers?.length) frames.push(meshes[i])
+      batchItemFrames(this.entitiesGroup, frames)
+      setEntityHitboxesVisible(this.entitiesGroup, this.showEntityHitboxes)
+      progress('done')
+    } finally {
+      // In-flight model/repair promises also dispose their late results above.
+      if (stale()) discard()
     }
-    batchItemFrames(this.entitiesGroup, frames)
-    setEntityHitboxesVisible(this.entitiesGroup, this.showEntityHitboxes)
-    progress('done')
   }
 
   setEntityHitboxesVisible(visible) {
@@ -974,14 +1030,18 @@ export class Renderer {
   }
 
   // 渲染玩家头颅：加载对应玩家的皮肤，画成 8×8×8 头颅。heads: [{x, y, z, rotation?, facing?, skinUrl}]
-  async renderPlayerHeads(heads, assets) {
+  async renderPlayerHeads(heads, assets, options = {}) {
+    const signal = options.signal
+    throwIfAborted(signal)
     this.clearHeads()
     if (!heads || !heads.length) return
     for (const head of heads) {
+      throwIfAborted(signal)
       // 有皮肤 URL 就加载玩家皮肤，否则用默认 Steve 皮肤
-      const skinTex = head.skinUrl
-        ? await assets.getExternalTexture(head.skinUrl)
-        : await assets.getTexture('entity/player/wide/steve')
+      const skinTex = await withAbort(head.skinUrl
+        ? assets.getExternalTexture(head.skinUrl)
+        : assets.getTexture('entity/player/wide/steve'), signal)
+      throwIfAborted(signal)
       if (!skinTex) continue
       // 立地头颅用 rotation(0-15)，墙上头颅用 facing（与 blocks.js headVariant 一致）
       const yDeg = head.facing ? (HEAD_FACING_Y[head.facing] || 0) : (Number(head.rotation) || 0) * 22.5
@@ -996,16 +1056,24 @@ export class Renderer {
 
   // 相同底色/图案共用一份合成贴图；每面旗帜保留自己的位置和动画相位。
   // banners: [{x, y, z, rotation?, facing?, baseColor, patterns: [{pattern, color}]}]
-  async renderBanners(banners, assets) {
+  async renderBanners(banners, assets, options = {}) {
+    const signal = options.signal
+    throwIfAborted(signal)
     this.clearBanners()
     if (!banners || !banners.length) return
     const materials = new Map()
     let yieldAt = performance.now() + 8
     for (const b of banners) {
+      throwIfAborted(signal)
       const key = JSON.stringify([b.baseColor, (b.patterns || []).map(p => [p.pattern, p.color])])
       let mat = materials.get(key)
       if (!mat) {
-        const tex = await this._makeBannerTexture(b.baseColor, b.patterns, assets)
+        const pending = this._makeBannerTexture(b.baseColor, b.patterns, assets, signal).then(texture => {
+          if (signal?.aborted) { disposePrivateTexture(texture); throwIfAborted(signal) }
+          return texture
+        })
+        const tex = await withAbort(pending, signal)
+        if (signal?.aborted) { disposePrivateTexture(tex); throwIfAborted(signal) }
         if (!tex) continue
         mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
         materials.set(key, mat)
@@ -1038,18 +1106,23 @@ export class Renderer {
         mesh.position.copy(resting).sub(pivot).applyAxisAngle(new THREE.Vector3(1, 0, 0), mesh.rotation.x).add(pivot)
       })
       if (performance.now() >= yieldAt) {
-        await new Promise(resolve => setTimeout(resolve, 0))
+        await withAbort(new Promise(resolve => setTimeout(resolve, 0)), signal)
+        throwIfAborted(signal)
         yieldAt = performance.now() + 8
       }
     }
   }
 
   // 渲染铜傀儡雕像（BER 绘制，无 JSON 模型）。statues: [{x, y, z, facing, texKey}]
-  async renderStatues(statues, assets) {
+  async renderStatues(statues, assets, options = {}) {
+    const signal = options.signal
+    throwIfAborted(signal)
     this.clearStatues()
     if (!statues || !statues.length) return
     for (const s of statues) {
-      const tex = await assets.getTexture(s.texKey)
+      throwIfAborted(signal)
+      const tex = await withAbort(assets.getTexture(s.texKey), signal)
+      throwIfAborted(signal)
       if (!tex) continue
       const mesh = buildCopperGolemStatueMesh(tex, s.pose)
       if (!mesh) continue
@@ -1062,31 +1135,45 @@ export class Renderer {
 
   // 渲染装饰罐的四个侧面（每只罐子的陶片图案可能不同）。
   // pots: [{x, y, z, facing, sherds: {front, back, left, right}}]，sherds 各项为陶片物品 ID 或 null。
-  async renderDecoratedPots(pots, assets) {
+  async renderDecoratedPots(pots, assets, options = {}) {
+    const signal = options.signal
+    throwIfAborted(signal)
     this.clearPots()
     if (!pots || !pots.length) return
-    const blankTex = await assets.getTexture('entity/decorated_pot/decorated_pot_side')
+    const blankTex = await withAbort(assets.getTexture('entity/decorated_pot/decorated_pot_side'), signal)
+    throwIfAborted(signal)
     if (!blankTex) return
     const SIDES = ['front', 'back', 'left', 'right']
     for (const pot of pots) {
+      throwIfAborted(signal)
       const group = new THREE.Group()
-      for (let i = 0; i < 4; i++) {
-        const pattern = potPatternTexture(pot.sherds && pot.sherds[SIDES[i]])
-        const tex = pattern ? await assets.getTexture(pattern) : blankTex
-        if (!tex) continue
-        const mat = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide, flatShading: true })
-        group.add(new THREE.Mesh(POT_SIDE_GEO[i], mat))
+      try {
+        for (let i = 0; i < 4; i++) {
+          const pattern = potPatternTexture(pot.sherds && pot.sherds[SIDES[i]])
+          const tex = pattern ? await withAbort(assets.getTexture(pattern), signal) : blankTex
+          throwIfAborted(signal)
+          if (!tex) continue
+          const mat = new THREE.MeshLambertMaterial({ map: tex, side: THREE.DoubleSide, flatShading: true })
+          group.add(new THREE.Mesh(POT_SIDE_GEO[i], mat))
+        }
+        group.position.set(pot.x + 0.5, pot.y + 0.5, pot.z + 0.5)
+        markBlockObject(group, pot.x, pot.y, pot.z)
+        group.rotation.y = ((BANNER_FACING_Y[pot.facing] ?? 0) * Math.PI) / 180
+        this._addLayerObject(this.potsGroup, group, pot.y, true)
+      } catch (error) {
+        // Side geometry and source textures are shared; only these unfinished
+        // per-pot materials belong to the interrupted operation.
+        group.traverse(object => { for (const material of [object.material].flat()) material?.dispose() })
+        throw error
       }
-      group.position.set(pot.x + 0.5, pot.y + 0.5, pot.z + 0.5)
-      markBlockObject(group, pot.x, pot.y, pot.z)
-      group.rotation.y = ((BANNER_FACING_Y[pot.facing] ?? 0) * Math.PI) / 180
-      this._addLayerObject(this.potsGroup, group, pot.y, true)
     }
   }
 
   // 把旗帜底色 + 图案合成到一张 64×64 贴图（底色/图案都用 DyeColor 染色）
-  async _makeBannerTexture(baseColor, patterns, assets) {
-    const baseTex = await assets.getTexture('entity/banner/base')
+  async _makeBannerTexture(baseColor, patterns, assets, signal) {
+    throwIfAborted(signal)
+    const baseTex = await withAbort(assets.getTexture('entity/banner/base'), signal)
+    throwIfAborted(signal)
     if (!baseTex || !baseTex.image) return null
     const canvas = document.createElement('canvas')
     canvas.width = 64
@@ -1114,8 +1201,10 @@ export class Renderer {
 
     drawTinted(baseTex.image, DYE_COLORS[baseColor] || '#ffffff')
     for (const p of patterns || []) {
+      throwIfAborted(signal)
       const name = (p.pattern || '').replace(/^minecraft:/, '')
-      const tex = await assets.getTexture('entity/banner/' + name)
+      const tex = await withAbort(assets.getTexture('entity/banner/' + name), signal)
+      throwIfAborted(signal)
       if (!tex || !tex.image) continue
       drawTinted(tex.image, DYE_COLORS[p.color] || '#ffffff')
     }
@@ -1258,7 +1347,9 @@ export class Renderer {
   // 渲染告示牌文字：告示牌本身（柱/板）已由方块模型渲染，这里只在板面上加文字。
   // signs: [{x, y, z, rotation?, facing?, lines: [4 行文字]}]
   //   - 立地告示牌用 rotation(0-15)，墙上告示牌用 facing(north/south/east/west)
-  async renderSigns(signs, assets) {
+  async renderSigns(signs, assets, options = {}) {
+    const signal = options.signal
+    throwIfAborted(signal)
     this.clearSigns()
     if (!signs.length) return
     // Storage schematics can contain tens of thousands of identical labels.
@@ -1268,6 +1359,7 @@ export class Renderer {
     const geometry = new THREE.PlaneGeometry(0.85, 0.4)
     let yieldAt = performance.now() + 8
     for (const sign of signs) {
+      throwIfAborted(signal)
       let front, boardCenter
       if (sign.facing) {
         // 墙上告示牌：板贴在 facing 反方向的墙上，文字朝 facing
@@ -1304,7 +1396,8 @@ export class Renderer {
       markBlockObject(textPlane, sign.x, sign.y, sign.z)
       this._addLayerObject(this.signsGroup, textPlane, sign.y, true)
       if (performance.now() >= yieldAt) {
-        await new Promise(resolve => setTimeout(resolve, 0))
+        await withAbort(new Promise(resolve => setTimeout(resolve, 0)), signal)
+        throwIfAborted(signal)
         yieldAt = performance.now() + 8
       }
     }
@@ -1333,12 +1426,13 @@ export class Renderer {
   // data: { palette: [{name, faces}], blocks: Map<"x,y,z" -> paletteIndex>, bounds }
   // fit=true 时把相机对准结构中心（首次载入）；fit=false 时保持相机不动（切换资源包重渲染）。
   // 返回 { faces, textures }
-  async render(data, assets, onProgress, filter, fit = true) {
+  async render(data, assets, onProgress, filter, fit = true, options = {}) {
+    throwIfAborted(options.signal)
     this.clear()
     const { bounds } = data
     this._bounds = bounds
     this._computeWaterSurface(data)
-    const stats = await this._buildBlockMeshes(data, assets, onProgress, filter)
+    const stats = await this._buildBlockMeshes(data, assets, onProgress, filter, options)
     if (fit) this.fitToBounds(bounds)
     this._updateOverlay(bounds)
     this._updateRegionWireframes(data)
@@ -1390,11 +1484,13 @@ export class Renderer {
   }
 
   // 只重建方块网格（层级/区域变化时调用，不动相机、告示牌、头颅、实体）。
-  async renderBlocks(data, assets, filter) {
-    return this._buildBlockMeshes(data, assets, null, filter)
+  async renderBlocks(data, assets, filter, options = {}) {
+    return this._buildBlockMeshes(data, assets, null, filter, options)
   }
 
-  async _buildBlockMeshes(data, assets, onProgress, filter) {
+  async _buildBlockMeshes(data, assets, onProgress, filter, options = {}) {
+    const { signal, onStage, maxGeometryBytes } = options
+    throwIfAborted(signal)
     this._assets = assets
     let state = this._blockState
     if (!state || state.data !== data || state.assets !== assets || state.revision !== assets.cacheRevision ||
@@ -1412,14 +1508,17 @@ export class Renderer {
     state.descriptor = undefined
     if (plan.dirty.length || plan.fullRebuild) {
       disposeBlockObjects(state.effects, true)
-      await addBlockEffects(state.effects, data, assets, filter)
-      await addMovingPistons(state.effects, data, assets, filter, Renderer.buildBlockPreview)
+      await addBlockEffects(state.effects, data, assets, filter, { signal })
+      throwIfAborted(signal)
+      await addMovingPistons(state.effects, data, assets, filter, Renderer.buildBlockPreview, { signal })
+      throwIfAborted(signal)
       if (state.effects.children.length) this.group.add(state.effects)
       else state.effects.removeFromParent()
     }
     const usedKeys = new Set()
     let completedBlocks = 0
     for (let partIndex = 0; partIndex < plan.dirty.length; partIndex++) {
+      throwIfAborted(signal)
       const id = plan.dirty[partIndex]
       const blockCount = id === null ? state.index.globalKeys.length : state.index.chunks.get(id).keys.length
       // The global group can contain most of a large schematic's work. Equal
@@ -1433,11 +1532,37 @@ export class Renderer {
       // Materials belong to the whole block scene and are shared across chunks.
       part.complete = false
       disposeBlockObjects(part.root, false, false)
-      const { groups, emitted } = await buildBlockChunk(state.index, id, filter,
-        f => progress(f * .45), this.selectable)
-      await this._loadBlockMaterials(groups, assets, state.materials,
-        f => progress(.45 + f * .5))
-      await this._appendBlockMeshes(groups, state.materials, part.root)
+      const stage = detail => {
+        detail = detail.detail || detail
+        throwIfAborted(signal)
+        if (detail.phase === 'allocate') {
+          // Fetch while the worker fills geometry, then create materials in the
+          // original group order. Completion timing must not reorder overlays.
+          for (const { key } of detail.groups || []) if (!key.startsWith('special/')) {
+            assets.getTexture(key.split('|')[0]).catch(() => {})
+          }
+        } else onStage?.(detail)
+      }
+      const useWorker = state.index.compact && this.workerClient?.canBuild(data) && (!filter || filter.descriptor)
+      const result = useWorker
+        ? await this.workerClient.build(data, {
+          palette: data.palette, descriptor: descriptor || null, trackBlocks: this.selectable,
+          compactFaces: true,
+        }, (fraction, detail) => {
+          progress(fraction * .9)
+          if (detail) stage(detail)
+        }, { signal, maxGeometryBytes })
+        : await buildBlockChunk(state.index, id, filter, f => progress(f * .9), this.selectable,
+          { signal, maxGeometryBytes, onStage: stage })
+      const { groups, emitted } = result
+      throwIfAborted(signal)
+      await this._loadBlockMaterials(groups, assets, state.materials, f => {
+        progress(.9 + f * .06); onStage?.({ phase: 'textures', stageFraction: f })
+      }, signal)
+      await this._appendBlockMeshes(groups, state.materials, part.root, f => {
+        progress(.96 + f * .04); onStage?.({ phase: 'assemble', stageFraction: f })
+      }, signal)
+      throwIfAborted(signal)
       if (part.root.children.length) this.group.add(part.root)
       else part.root.removeFromParent()
       part.faces = emitted
@@ -1465,23 +1590,32 @@ export class Renderer {
     return { faces, textures: state.materials.size }
   }
 
-  async _loadBlockMaterials(groups, assets, materials, onProgress) {
+  async _loadBlockMaterials(groups, assets, materials, onProgress, signal) {
+    throwIfAborted(signal)
     const texKeys = [...groups.keys()].filter(key => !materials.has(key))
     let loaded = 0
     // Fetch concurrently, then create materials in model/group order. Three sorts
     // opaque meshes by material id: decode timing must not place grass overlays
     // or a resource pack's redstone numbers underneath their coplanar base faces.
-    const textures = await Promise.all(texKeys.map(async key => {
+    const textures = await withAbort(Promise.all(texKeys.map(async key => {
       const texture = key.startsWith('special/end_')
         ? await Promise.all(['environment/end_sky', 'entity/end_portal/end_portal'].map(key => assets.getTexture(key)))
         : await assets.getTexture(key.split('|')[0])
+      throwIfAborted(signal)
       onProgress?.(++loaded / Math.max(1, texKeys.length))
       return texture
-    }))
+    })), signal)
+    throwIfAborted(signal)
     for (let index = 0; index < texKeys.length; index++) {
+      throwIfAborted(signal)
       const gKey = texKeys[index]
       if (gKey.startsWith('special/end_')) {
-        materials.set(gKey, await portalMaterial(assets, gKey === 'special/end_gateway'))
+        const material = await withAbort(portalMaterial(assets, gKey === 'special/end_gateway', { signal }).then(value => {
+          if (signal?.aborted) { value?.dispose(); throwIfAborted(signal) }
+          return value
+        }), signal)
+        if (signal?.aborted) { material?.dispose(); throwIfAborted(signal) }
+        materials.set(gKey, material)
         continue
       }
       // 组键可能带强度后缀（如 redstone_dust_dot|p15）
@@ -1535,10 +1669,13 @@ export class Renderer {
     }
   }
 
-  async _appendBlockMeshes(groups, materials, target) {
+  async _appendBlockMeshes(groups, materials, target, onProgress, signal) {
     let yieldAt = performance.now() + 8
     const translucent = []
+    let assembled = 0
     for (const [texKey, g] of groups) {
+      throwIfAborted(signal)
+      onProgress?.(assembled++ / Math.max(1, groups.size))
       const mat = materials.get(texKey)
       if (!mat) continue
       if (g.isCompactFaceData) {
@@ -1588,6 +1725,8 @@ export class Renderer {
       target.add(mesh)
       if (this._freezeStatic !== false) freezeStaticObject(mesh)
     }
+    throwIfAborted(signal)
+    onProgress?.(1)
   }
 
   // 调试：读取当前画面像素，统计有多少种颜色（判断画面是否有内容）

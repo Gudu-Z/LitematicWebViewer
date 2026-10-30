@@ -111,12 +111,24 @@ async function visitGzipChunks(data, onChunk, onProgress) {
 
 // A fresh sink is required for each attempt: native gzip may have emitted valid
 // prefix bytes before rejecting a second member. Never reuse that partial NBT.
-export async function consumeDecompressed(data, createSink, { onProgress, maxExpandedBytes = 16 * 1024 ** 3 } = {}) {
+export async function consumeDecompressed(data, createSink, { onProgress, onStage, maxExpandedBytes = 16 * 1024 ** 3 } = {}) {
   if (!Number.isSafeInteger(maxExpandedBytes) || maxExpandedBytes < 0 || maxExpandedBytes > 16 * 1024 ** 3) throw new RangeError('Invalid scan limit')
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
   const format = bytes[0] === 31 && bytes[1] === 139 ? 'gzip' : bytes[0] === 0x78 ? 'deflate' : null
   let lastError, progress = 0
   const report = value => { progress = Math.max(progress, value); onProgress?.(progress) }
+  let processedBytes = 0, stageReportAt = 0
+  const reportBytes = (expanded, force = false) => {
+    // Native gzip exposes output chunks, not a reliable total output size.
+    // Preserve the high-water mark when validation retries a native prefix;
+    // adding retry bytes would count the same NBT data more than once.
+    processedBytes = Math.max(processedBytes, expanded)
+    const now = performance.now()
+    if (force || now >= stageReportAt) {
+      onStage?.({ phase: 'decompress', processedBytes })
+      stageReportAt = now + 16
+    }
+  }
   for (let attempt = 0; attempt < (format === 'gzip' ? 3 : 1); attempt++) {
     const sink = createSink()
     let expanded = 0
@@ -124,6 +136,7 @@ export async function consumeDecompressed(data, createSink, { onProgress, maxExp
       expanded += chunk.length
       if (expanded > maxExpandedBytes) throw Object.assign(new Error('NBT scan limit exceeded'), { code: 'FILE_TOO_LARGE', reason: 'scan' })
       sink.push(chunk)
+      if (onStage) reportBytes(expanded)
     }
     try {
       if (!format) {
@@ -148,6 +161,7 @@ export async function consumeDecompressed(data, createSink, { onProgress, maxExp
         }
       } else await visitGzipChunks(bytes, push, report)
       const result = sink.finish()
+      if (onStage) reportBytes(expanded, true)
       report(1)
       return result
     } catch (error) {

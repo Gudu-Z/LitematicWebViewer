@@ -258,6 +258,8 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
 }
 
 export async function parseLitematica(buffer, onProgress, options) {
+  // options.onStage reports real first-pass expanded bytes independently of
+  // the existing numeric fractions for NBT extraction and block decoding.
   const { root, stats } = await readSchematicNBT(buffer, { ...options, compactBlocks: options?.compactBlocks !== false, onProgress: value => onProgress?.(value * .5) })
   return parseLitematicaRoot(root, value => onProgress?.(.5 + value * .5), options?.renderOnly ?? false, stats, options?.compactBlocks)
 }

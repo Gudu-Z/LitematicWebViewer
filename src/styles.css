@@ -46,6 +46,9 @@ body:not(.has-model) #sidebar, body:not(.has-model) #right-panel { display: none
 #progressBar { height: 4px; border-radius: var(--ui-control-radius, 8px); background: var(--ui-control, #2a3b52); overflow: hidden; margin-bottom: 10px; }
 #progressFill { height: 100%; width: 0%; background: var(--ui-accent, #83baff); transition: width .15s ease; }
 #status { font-size: 12px; color: var(--ui-muted, #b5c9e2); line-height: 1.7; overflow-wrap: anywhere; }
+#loadingControls { position: absolute; bottom: calc(80px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); width: max-content; max-width: min(620px, calc(100% - 32px)); display: flex; align-items: center; gap: 16px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--ui-radius, 12px); background: var(--panel); box-shadow: 0 6px 22px #0003; z-index: 28; }
+#loadingStatus { min-width: 0; font-size: 12px; line-height: 1.7; overflow-wrap: anywhere; color: var(--ui-muted, #b5c9e2); }
+#cancelLoadingBtn { flex: 0 0 auto; }
 #controlPanel { display: none; }
 #controlPanel.loaded { display: block; }
 .control-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }

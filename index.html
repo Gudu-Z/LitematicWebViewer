@@ -48,6 +48,11 @@
         <p id="welcomeStatus" role="status"></p>
       </section>
 
+      <div id="loadingControls" role="group" aria-label="加载进度" data-i18n-aria-label="loadProgress" hidden>
+        <span id="loadingStatus" role="status"></span>
+        <button id="cancelLoadingBtn" type="button" data-i18n="cancelLoading" hidden disabled>取消加载</button>
+      </div>
+
       <aside id="sidebar">
         <div class="panel file-panel" id="filePanel">
           <h2 data-i18n="currentFile">当前文件</h2>

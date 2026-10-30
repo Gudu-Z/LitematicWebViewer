@@ -9,7 +9,7 @@ import { BlockStatePageWriter, createBlockPageBudget } from './pagedBlocks.js'
 // remaining data is still being decompressed, regardless of the compressed size.
 const FAST_BUFFER_BYTES = 32 * 1024 * 1024
 
-export async function readSchematicNBT(data, { renderOnly = false, onProgress, maxBytes = MAX_NBT_BYTES, maxExpandedBytes, streamThreshold = FAST_BUFFER_BYTES, compactBlocks = false } = {}) {
+export async function readSchematicNBT(data, { renderOnly = false, onProgress, onStage, maxBytes = MAX_NBT_BYTES, maxExpandedBytes, streamThreshold = FAST_BUFFER_BYTES, compactBlocks = false } = {}) {
   validateNbtLimit(maxBytes)
   // Large storage builds legitimately contain millions of small block-entity
   // fields. Compact callers retain the same byte/depth limits and a bounded,
@@ -66,7 +66,7 @@ export async function readSchematicNBT(data, { renderOnly = false, onProgress, m
       },
       abort() { chunks = []; filter?.abort() },
     }
-  }, { onProgress: compactBlocks ? value => reportProgress(value * .5) : onProgress, maxExpandedBytes })
+  }, { onProgress: compactBlocks ? value => reportProgress(value * .5) : onProgress, onStage, maxExpandedBytes })
   const { root, stats, extracted } = result
   if (extracted.size) {
     const totalBlockBytes = [...extracted.values()].reduce((sum, record) => sum + record.length * 8, 0)

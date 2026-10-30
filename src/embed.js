@@ -2,7 +2,8 @@ import './embed.css'
 import { Renderer } from './renderer.js'
 import { AssetProvider } from './assets.js'
 import { BlockModelResolver } from './blocks.js'
-import { parseLitematica } from './litematica.js'
+import { SchematicWorkerClient } from './workerClient.js'
+import { throwIfAborted, withAbort } from './loadingTask.js'
 import { ViewerPacks } from './viewerPacks.js'
 import { extractSigns, extractPlayerHeads, extractBanners, extractStatues, extractDecoratedPots } from './schematicDetails.js'
 import { PROTOCOL, validFile, fileURL, fetchSchematic, openFullViewer, applyCamera } from './embedProtocol.js'
@@ -18,6 +19,16 @@ const words = {
   waiting: ['等待投影文件…', 'Waiting for a schematic…'],
   loading: ['正在加载投影…', 'Loading schematic…'],
   rendering: ['正在生成模型…', 'Building model…'],
+  decompress: ['正在解压文件…', 'Decompressing file…'],
+  decompressBytes: ['正在解压文件（已处理 {size}）…', 'Decompressing file ({size} processed)…'],
+  parse: ['正在解析方块…', 'Reading blocks…'],
+  models: ['正在准备方块模型…', 'Preparing block models…'],
+  count: ['正在统计可见面…', 'Counting visible faces…'],
+  fill: ['正在生成模型…', 'Building model…'],
+  textures: ['正在准备贴图…', 'Preparing textures…'],
+  assemble: ['正在显示模型…', 'Displaying model…'],
+  details: ['正在生成告示牌、头颅等…', 'Building signs, heads and other details…'],
+  entities: ['正在加载展示框等实体…', 'Loading item frames and other entities…'],
   ready: ['左键旋转 · 右键平移 · 滚轮缩放', 'Left-drag orbit · Right-drag pan · Scroll to zoom'],
   touch: ['单指旋转 · 双指平移与缩放', 'One finger to orbit · Two fingers to pan and zoom'],
   fit: ['复位视角', 'Reset view'], full: ['完整预览 ↗', 'Full viewer ↗'],
@@ -25,6 +36,7 @@ const words = {
   invalidURL: ['请使用 HTTPS 投影文件直链。', 'Use a direct HTTPS schematic URL.'],
   fileLimit: ['文件必须非空且不超过 64 MiB。', 'File must be nonempty and no larger than 64 MiB.'],
   fileTooLarge: ['投影过大，无法在浏览器中完整预览。', 'The schematic is too large to preview in the browser.'],
+  geometryTooLarge: ['可见模型数据超出内存预算，无法完整预览。请拆分投影后重试。', 'The visible model exceeds the memory budget for a complete preview. Split the schematic and try again.'],
   decompressedTooLarge: ['投影解压后超过 512 MiB，请减少物品 NBT 数据或拆分投影后重试。', 'The decompressed schematic exceeds 512 MiB. Reduce item NBT data or split the schematic before retrying.'],
   retainedNbtTooLarge: ['跳过非渲染内容后，需要保留的 NBT 仍超过 512 MiB，请拆分投影后重试。', 'The retained NBT still exceeds 512 MiB after skipping non-rendered content. Split the schematic before retrying.'],
   nbtScanTooLarge: ['投影数据超过 16 GiB 的扫描上限，请减少无关 NBT 或拆分投影后重试。', 'The schematic exceeds the 16 GiB scan limit. Reduce unused NBT or split the schematic before retrying.'],
@@ -48,8 +60,29 @@ const notify = (type, detail = {}) => {
   if (parentOrigin && channel && parent !== window) parent.postMessage({ protocol: PROTOCOL, channel, type, ...detail }, parentOrigin)
 }
 let renderer, initialized, current, requested, lastRequest, pumping = false, active = true, controller
+let inFlight, suspended = false, disposed = false
+let loadingStage = 'loading', loadingDetails = {}, loadingFraction
 let cameraTimer, viewRevision = 0
 const assets = new AssetProvider(), resolver = new BlockModelResolver(assets)
+const workerClient = new SchematicWorkerClient()
+
+function loadingText() {
+  if (loadingStage === 'decompress' && Number.isFinite(loadingDetails.processedBytes) && loadingDetails.processedBytes > 0) {
+    const bytes = loadingDetails.processedBytes, gib = bytes >= 1024 ** 3
+    const size = `${(bytes / 1024 ** (gib ? 3 : 2)).toFixed(1)} ${gib ? 'GiB' : 'MiB'}`
+    return t('decompressBytes').replace('{size}', size)
+  }
+  const fraction = loadingDetails.stageFraction ?? loadingDetails.fraction
+  return t(words[loadingStage] ? loadingStage : 'loading') + (Number.isFinite(fraction) ? ` ${Math.round(Math.min(1, Math.max(0, fraction)) * 100)}%` : '')
+}
+function loadingProgress(fraction, phase, details = {}) {
+  loadingFraction = fraction
+  if (phase) {
+    loadingDetails = typeof details === 'number' ? { stageFraction: details } : details.detail || details
+    loadingStage = loadingDetails.phase || phase
+  }
+  state('loading', loadingText(), fraction)
+}
 
 function refreshUI() {
   const values = applyTheme(document.documentElement, options, themeMedia.matches)
@@ -62,7 +95,7 @@ function refreshUI() {
   open.title = open.ariaLabel = t('full'); retry.textContent = t('retry')
   open.textContent = t('full'); fit.textContent = t('fit')
   if (root.dataset.state === 'waiting') status.textContent = t('waiting')
-  if (root.dataset.state === 'loading') status.textContent = t('loading')
+  if (root.dataset.state === 'loading') status.textContent = loadingText()
   fit.hidden = !options.controls.reset; open.hidden = !options.controls.open
   message.hidden = root.dataset.state === 'loaded' || !options.controls.status
   const hint = document.getElementById('hint')
@@ -114,12 +147,13 @@ function state(type, text, fraction) {
   if (fraction === undefined) progress.removeAttribute('value'); else progress.value = fraction
   notify(type, { message: text, progress: fraction })
 }
-function updateActive() { renderer?.setActive(active && !document.hidden) }
+function updateActive() { renderer?.setActive(!suspended && !disposed && active && !document.hidden) }
 async function initialize() {
   if (initialized) return initialized
   initialized = (async () => {
     try { renderer = new Renderer(document.getElementById('canvas'), { orbitOnly: true, pixelRatio: 1.5, alpha: true }) }
     catch { throw Error('webgl') }
+    renderer.workerClient = workerClient
     refreshUI()
     renderer.controls.addEventListener('change', cameraChanged)
     renderer.setWireframesVisible(false); renderer.setDimensionsVisible(false)
@@ -138,44 +172,69 @@ async function initialize() {
 }
 
 function load(source, resumeCamera) {
+  if (disposed) return
   requested = { source, resumeCamera, viewRevision }; lastRequest = source
   controller?.abort()
   pump()
 }
 async function pump() {
-  if (pumping) return
+  if (pumping || suspended || disposed) return
   pumping = true
-  while (requested) {
+  while (requested && !suspended && !disposed) {
     const request = requested; requested = null; current = null
-    controller = new AbortController()
-    state('loading', t('loading'))
+    inFlight = request
+    const jobController = new AbortController(), { signal } = jobController
+    controller = jobController
+    const checkRequest = () => throwIfAborted(signal)
+    loadingProgress(undefined, 'loading')
     const endTextureLoad = assets.beginTextureLoad()
-    let endSceneUpdate
+    let endSceneUpdate, data
     try {
       let file, url
       if (typeof request.source === 'string') {
         url = fileURL(request.source, location.href)
-        file = await fetchSchematic(url, location.href, controller.signal)
+        file = await fetchSchematic(url, location.href, signal)
       } else {
         if (!validFile(request.source)) throw Error('fileLimit')
         file = new File([request.source], request.source.name || 'schematic.litematic')
       }
-      if (requested) continue
-      await initialize()
+      checkRequest()
+      await withAbort(initialize(), signal)
+      checkRequest()
       endSceneUpdate = renderer.beginSceneUpdate()
-      const data = await parseLitematica(await file.arrayBuffer(), value => state('loading', t('loading'), value * .2), { renderOnly: true })
-      if (requested) continue
-      const baked = await Promise.all(data.palette.map(entry => resolver.resolve(entry.name, entry.properties)))
+      const bytes = await withAbort(file.arrayBuffer(), signal)
+      checkRequest()
+      data = await workerClient.parse(bytes, (value, detail) => {
+        const stage = detail || { phase: value < .5 ? 'decompress' : 'parse', stageFraction: value < .5 ? value * 2 : value * 2 - 1 }
+        if (!signal.aborted) loadingProgress(value * .2, stage.phase, stage)
+      }, { renderOnly: true, signal })
+      checkRequest()
+      loadingProgress(.2, 'models')
+      const baked = await withAbort(Promise.all(data.palette.map(entry => resolver.resolve(entry.name, entry.properties))), signal)
+      checkRequest()
       data.palette.forEach((entry, i) => { entry.baked = baked[i] })
-      await renderer.render(data, assets, value => state('loading', t('rendering'), .2 + value * .65))
+      await renderer.render(data, assets, value => {
+        if (!signal.aborted) loadingProgress(.2 + value * .65)
+      }, undefined, true, { signal, onStage: detail => {
+        if (!signal.aborted) loadingProgress(loadingFraction, detail.phase, detail)
+      } })
+      checkRequest()
+      loadingProgress(.85, 'details')
       const tiles = data.tileEntities || []
-      await renderer.renderSigns(extractSigns(tiles, data), assets)
-      await renderer.renderPlayerHeads(extractPlayerHeads(tiles, data), assets)
-      await renderer.renderBanners(extractBanners(tiles, data), assets)
-      await renderer.renderStatues(extractStatues(data), assets)
-      await renderer.renderDecoratedPots(extractDecoratedPots(tiles, data), assets)
-      await renderer.renderEntities(data.entities, assets, data)
-      if (requested) continue
+      await renderer.renderSigns(extractSigns(tiles, data), assets, { signal })
+      checkRequest()
+      await renderer.renderPlayerHeads(extractPlayerHeads(tiles, data), assets, { signal })
+      checkRequest()
+      await renderer.renderBanners(extractBanners(tiles, data), assets, { signal })
+      checkRequest()
+      await renderer.renderStatues(extractStatues(data), assets, { signal })
+      checkRequest()
+      await renderer.renderDecoratedPots(extractDecoratedPots(tiles, data), assets, { signal })
+      checkRequest()
+      await renderer.renderEntities(data.entities, assets, data, value => {
+        if (!signal.aborted) loadingProgress(.85 + value * .15, 'entities', { stageFraction: value })
+      }, { signal })
+      checkRequest()
       current = { file, url, bounds: data.bounds }
       configureCamera(true)
       if (request.resumeCamera && request.viewRevision === viewRevision) applyCamera(renderer, request.resumeCamera)
@@ -183,12 +242,17 @@ async function pump() {
       notify('camera', { camera: cameraSnapshot() })
       updateActive()
     } catch (error) {
-      if (!requested) {
+      if (!requested && !signal.aborted && !disposed) {
         const key = error.code === 'FILE_TOO_LARGE'
-          ? { decompressed: 'decompressedTooLarge', retained: 'retainedNbtTooLarge', scan: 'nbtScanTooLarge', complexity: 'nbtComplexityTooLarge' }[error.reason] || 'fileTooLarge' : error.message
+          ? { decompressed: 'decompressedTooLarge', retained: 'retainedNbtTooLarge', scan: 'nbtScanTooLarge', complexity: 'nbtComplexityTooLarge', geometry: 'geometryTooLarge' }[error.reason] || 'fileTooLarge' : error.message
         state('error', words[key] ? t(key) : `${t('failed')} ${error.message}`)
       }
     } finally {
+      // Cards never rebuild layers, so do not retain a second block store after loading.
+      if (data) workerClient.release(data)
+      else workerClient.cancel()
+      if (controller === jobController) controller = null
+      inFlight = null
       try {
         endTextureLoad()
         assets.trimTextures()
@@ -214,11 +278,14 @@ retry.onclick = () => load(lastRequest)
 document.addEventListener('visibilitychange', updateActive)
 new IntersectionObserver(entries => { active = entries[0].isIntersecting; updateActive() }).observe(root)
 window.addEventListener('pagehide', event => {
+  suspended = true
+  if (event.persisted && inFlight && !requested) requested = inFlight
   controller?.abort()
+  workerClient.cancel()
   if (event.persisted) renderer?.setActive(false)
-  else renderer?.dispose()
+  else { disposed = true; requested = null; workerClient.dispose(); renderer?.dispose(); clearTimeout(cameraTimer) }
 })
-window.addEventListener('pageshow', updateActive)
+window.addEventListener('pageshow', () => { suspended = false; updateActive(); pump() })
 window.addEventListener('message', event => {
   const data = event.data
   if (!parentOrigin || event.source !== parent || event.origin !== parentOrigin || data?.protocol !== PROTOCOL || data.channel !== channel) return
