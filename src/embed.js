@@ -27,6 +27,8 @@ const words = {
   fill: ['正在生成模型…', 'Building model…'],
   textures: ['正在准备贴图…', 'Preparing textures…'],
   assemble: ['正在显示模型…', 'Displaying model…'],
+  upload: ['正在上传模型…', 'Uploading model…'],
+  gpuRestoreFailed: ['显卡资源恢复失败，请重新打开投影。', 'Graphics resources could not be restored. Please reopen the schematic.'],
   details: ['正在生成告示牌、头颅等…', 'Building signs, heads and other details…'],
   entities: ['正在加载展示框等实体…', 'Loading item frames and other entities…'],
   ready: ['左键旋转 · 右键平移 · 滚轮缩放', 'Left-drag orbit · Right-drag pan · Scroll to zoom'],
@@ -154,6 +156,7 @@ async function initialize() {
     try { renderer = new Renderer(document.getElementById('canvas'), { orbitOnly: true, pixelRatio: 1.5, alpha: true }) }
     catch { throw Error('webgl') }
     renderer.workerClient = workerClient
+    renderer.onRenderError = () => state('error', t('gpuRestoreFailed'))
     refreshUI()
     renderer.controls.addEventListener('change', cameraChanged)
     renderer.setWireframesVisible(false); renderer.setDimensionsVisible(false)

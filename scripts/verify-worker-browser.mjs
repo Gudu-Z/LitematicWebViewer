@@ -106,10 +106,16 @@ try {
       for (let i = 0; i < 300 && !ready; i++) { ready = await evaluate('!!window.runWorkerBrowser'); if (!ready) await delay(50) }
       assert.ok(ready, 'Test page initialization')
       const result = await evaluate(`runWorkerBrowser({ csp: ${csp} })`)
+      if (!csp) {
+        assert.equal(result.streamedGeometries, result.geometries, 'Every old-build case also exercises streamed reconstruction')
+        assert.ok(result.streamBatches > result.streamedGeometries, 'Multiple real transferable slabs cross Worker boundaries')
+        assert.equal(result.streamCancels.length, 4, 'Both ACK waits cover terminate and cooperative cancellation')
+      }
       results.push({ mode, csp, ...result })
       assert.equal(errors.length, 0, 'No uncaught browser errors')
       console.log(`PASS ${mode} ${csp ? 'CSP startup fallback' : 'real Worker parse/build/cancel'}`, csp ? result : {
-        geometries: result.geometries, blocks: result.blocks, heartbeatTicks: result.heartbeatTicks,
+        geometries: result.geometries, streamedGeometries: result.streamedGeometries, streamBatches: result.streamBatches,
+        streamCancels: result.streamCancels, blocks: result.blocks, heartbeatTicks: result.heartbeatTicks,
         maxGap: Number(result.maxGap.toFixed(1)), parseCancelMs: Number(result.parseCancelMs.toFixed(1)), buildCancelMs: Number(result.buildCancelMs.toFixed(1)),
         cooperativeCancelMs: Number(result.cooperativeCancelMs.toFixed(1)),
       })

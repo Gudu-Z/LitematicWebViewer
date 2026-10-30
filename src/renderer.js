@@ -17,6 +17,8 @@ import { createBlockChunkIndex, buildBlockChunk, planBlockChunkUpdate } from './
 import { CompactFaceMesh } from './compactFaceMesh.js'
 import { enableSpatialFaces } from './spatialFaces.js'
 import { throwIfAborted, withAbort } from './loadingTask.js'
+import { GeometryReceiver } from './geometryReceiver.js'
+import { GPUUpload } from './gpuUpload.js'
 import { mergeTranslucentBlocks } from './translucentBlocks.js'
 import { markBlockObject, setBlockFaceKeys } from './selectionSources.js'
 
@@ -307,6 +309,10 @@ export class Renderer {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true, alpha })
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatio))
     this.renderer.outputColorSpace = THREE.SRGBColorSpace
+    this._gpuUpload = new GPUUpload(this.renderer, {
+      onReady: () => this.requestRender(),
+      onError: error => this.onRenderError ? this.onRenderError(error) : console.error(error),
+    })
     container.appendChild(this.renderer.domElement)
 
     this.controls = new OrbitControls(this.camera, this.renderer.domElement)
@@ -663,6 +669,7 @@ export class Renderer {
     this.clear(true)
     this._resourceAssets?.releaseTextureUsage?.(this)
     this._resourceAssets?.trimTextures?.()
+    this._gpuUpload?.dispose()
     this.renderer.dispose()
     this.renderer.forceContextLoss()
     this.renderer.domElement.remove()
@@ -788,6 +795,7 @@ export class Renderer {
       if (!disposed.has(material)) material.dispose()
     }
     this._blockState = null
+    this._gpuUpload?.clear()
     // Render lists retain the last drawn meshes until another draw. A rebuild
     // now defers that draw, so release these references before allocating the
     // replacement buffers (multi-gigabyte schematics otherwise coexist twice).
@@ -1516,6 +1524,10 @@ export class Renderer {
       else state.effects.removeFromParent()
     }
     const usedKeys = new Set()
+    // Layer/region rebuilds can run while drawing is paused. Drop the last
+    // frame's mesh references now, before replacing buffers, just as clearBlocks
+    // does for a new file; an inactive viewer may not draw again for some time.
+    if (plan.dirty.length) this.renderer?.renderLists?.dispose()
     let completedBlocks = 0
     for (let partIndex = 0; partIndex < plan.dirty.length; partIndex++) {
       throwIfAborted(signal)
@@ -1544,25 +1556,70 @@ export class Renderer {
         } else onStage?.(detail)
       }
       const useWorker = state.index.compact && this.workerClient?.canBuild(data) && (!filter || filter.descriptor)
-      const result = useWorker
-        ? await this.workerClient.build(data, {
-          palette: data.palette, descriptor: descriptor || null, trackBlocks: this.selectable,
-          compactFaces: true,
-        }, (fraction, detail) => {
-          progress(fraction * .9)
+      let groups, emitted
+      try {
+        const buildOptions = { palette: data.palette, descriptor: descriptor || null,
+          trackBlocks: this.selectable, compactFaces: true }
+        const buildProgress = (fraction, detail) => {
+          progress(fraction * .85)
           if (detail) stage(detail)
-        }, { signal, maxGeometryBytes })
-        : await buildBlockChunk(state.index, id, filter, f => progress(f * .9), this.selectable,
-          { signal, maxGeometryBytes, onStage: stage })
-      const { groups, emitted } = result
-      throwIfAborted(signal)
-      await this._loadBlockMaterials(groups, assets, state.materials, f => {
-        progress(.9 + f * .06); onStage?.({ phase: 'textures', stageFraction: f })
-      }, signal)
-      await this._appendBlockMeshes(groups, state.materials, part.root, f => {
-        progress(.96 + f * .04); onStage?.({ phase: 'assemble', stageFraction: f })
-      }, signal)
-      throwIfAborted(signal)
+        }
+        let result
+        if (useWorker && this.workerClient.canStream?.(data)) {
+          const receiver = new GeometryReceiver({ signal, maxGeometryBytes,
+            onRange: (array, offset, count, spec, name, batchSignal) => {
+              // Translucent groups are merged into different final arrays below;
+              // selection keys only live on the CPU. Upload neither here.
+              if (name !== 'blockKeys' && !spec.key.endsWith('|translucent')) {
+                return this._gpuUpload?.uploadRange(array, offset, count, { signal: batchSignal, index: name === 'indices' })
+              }
+            },
+          })
+          const tail = await this.workerClient.buildStream(data, buildOptions, {
+            onProgress: buildProgress,
+            onLayout: (layout, context) => receiver.acceptLayout(layout, context.signal),
+            onBatch: (batch, context) => receiver.acceptBatch(batch, context.signal),
+          }, { signal, maxGeometryBytes })
+          result = receiver.finish(tail)
+        } else result = useWorker
+          ? await this.workerClient.build(data, buildOptions, buildProgress, { signal, maxGeometryBytes })
+          : await buildBlockChunk(state.index, id, filter, f => progress(f * .85), this.selectable,
+            { signal, maxGeometryBytes, onStage: stage })
+        groups = result.groups; emitted = result.emitted
+        throwIfAborted(signal)
+        await this._loadBlockMaterials(groups, assets, state.materials, f => {
+          progress(.85 + f * .05); onStage?.({ phase: 'textures', stageFraction: f })
+        }, signal)
+        await this._appendBlockMeshes(groups, state.materials, part.root, f => {
+          progress(.9 + f * .04); onStage?.({ phase: 'assemble', stageFraction: f })
+        }, signal)
+        await this._gpuUpload?.prepareObject(part.root, { signal,
+          skipIndex: object => !!object.material?.translucentMaps,
+          onProgress: f => { progress(.94 + f * .06); onStage?.({ phase: 'upload', stageFraction: f }) },
+        })
+        throwIfAborted(signal)
+      } catch (error) {
+        // Incremental parts may already belong to the scene. Failed preparation
+        // must release attached as well as provisional buffers before drawing
+        // resumes; a later retry rebuilds this incomplete state in full.
+        disposeBlockObjects(part.root, false, false)
+        part.root.removeFromParent()
+        part.faces = 0; part.keys = []; part.complete = false
+        // Compact shader callbacks capture their full CPU face data. Release
+        // failed-only materials too; other completed chunks keep shared ones.
+        const retainedKeys = new Set()
+        for (const remaining of state.parts.values()) if (remaining.complete) {
+          remaining.keys.forEach(key => retainedKeys.add(key))
+        }
+        for (const [key, material] of state.materials) if (!retainedKeys.has(key)) {
+          material.dispose(); state.materials.delete(key)
+        }
+        throw error
+      } finally {
+        // Texture failures and aborted layouts may never create a geometry to
+        // own these preallocated VBOs. Do not retain them until the next load.
+        this._gpuUpload?.releaseUnused()
+      }
       if (part.root.children.length) this.group.add(part.root)
       else part.root.removeFromParent()
       part.faces = emitted

@@ -194,14 +194,17 @@ view._syncSceneResources(assets)
 
 // First-build failure after appending meshes but before attaching its root must
 // release those orphaned geometries as well as the already loaded materials.
+let orphans
 view._appendBlockMeshes = async function (...args) {
   await appendMeshes.apply(this, args)
   capture()
+  orphans = [...view._blockState.parts.values()].flatMap(part => part.root.children)
   throw new Error('injected unattached part failure')
 }
 await assert.rejects(view.renderBlocks(data, assets, null), /injected unattached part failure/)
-const orphans = [...view._blockState.parts.values()].flatMap(part => part.root.children)
 assert.ok(orphans.length > 0)
+assert.ok([...view._blockState.parts.values()].every(part => part.root.children.length === 0))
+for (const mesh of orphans) assert.equal(disposal.get(mesh.geometry), 1, 'Unattached geometry is disposed immediately after failure')
 assert.equal(view.group.children.length, 0)
 const unattachedMaterials = [...view._blockState.materials.values()]
 view.clearBlocks(true)
@@ -294,6 +297,13 @@ const oldList = renderLists.get(view.scene, 0)
 for (const mesh of recoveredMeshes) oldList.push(mesh, mesh.geometry, mesh.material, 0, 0, null, { reversedDepth: false })
 assert.equal(oldList.opaque.length, recoveredMeshes.length)
 view.renderer = { renderLists }
+const beforeIncremental = view._blockState
+const forceRebuild = () => true
+forceRebuild.descriptor = { mode: 'all', regionKey: 'paused-region-update', hiddenRegions: [] }
+await view._buildBlockMeshes(grassData, assets, null, forceRebuild)
+capture()
+assert.equal(view._blockState, beforeIncremental, 'Exercise an incremental state, without clearBlocks')
+assert.notEqual(renderLists.get(view.scene, 0), oldList, 'A paused layer/region rebuild releases the last frame references immediately')
 view.clearBlocks(true)
 view.renderer = null
 assert.notEqual(renderLists.get(view.scene, 0), oldList, 'Clearing blocks releases the previous draw list without another render')

@@ -36,6 +36,8 @@ const STRINGS = {
   loadingGeometry: ['正在生成模型{progress}…', 'Building model{progress}…'],
   loadingTextures: ['正在准备贴图{progress}…', 'Preparing textures{progress}…'],
   loadingDisplay: ['正在显示模型{progress}…', 'Displaying model{progress}…'],
+  loadingUpload: ['正在上传模型{progress}…', 'Uploading model{progress}…'],
+  gpuRestoreFailed: ['显卡资源恢复失败，请重新打开投影。', 'Graphics resources could not be restored. Please reopen the schematic.'],
   loadingModels: ['正在准备方块模型{progress}…', 'Preparing block models{progress}…'],
   loadingDetails: ['正在生成方块实体{progress}…', 'Building block entities{progress}…'],
   loadingEntities: ['正在生成实体{progress}…', 'Building entities{progress}…'],

@@ -40,6 +40,7 @@ let renderer = null
 try {
   renderer = new Renderer(container, { alpha: integration.themed, selectable: true })
   renderer.workerClient = workerClient
+  renderer.onRenderError = () => ui.showError(t('gpuRestoreFailed'))
   const background = /^#[0-9a-f]{6}$/i.test(startupParams.get('background')) ? startupParams.get('background') : '#172332'
   renderer.setBackgroundColor(background)
   document.getElementById('bgColor').value = background

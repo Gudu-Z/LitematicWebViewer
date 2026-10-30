@@ -19,12 +19,12 @@ export function canCompactFaces(bounds, key) {
 }
 
 export class CompactFaceData {
-  constructor(count, bounds) {
+  constructor(count, bounds, { recordCapacity = count } = {}) {
     this.isCompactFaceData = true; this.count = count; this.bounds = bounds; this.cursor = 0
-    this.cells = new Uint32Array(count); this.templateIds = new Uint32Array(count)
+    this.cells = new Uint32Array(recordCapacity); this.templateIds = new Uint32Array(recordCapacity)
     // Large sparse schematics can span more than 2^32 cells while their XZ
     // plane still fits uint. Keep that plane and Y separate only when needed.
-    this.cellYs = bounds.width * bounds.height * bounds.depth > 2 ** 32 ? new Uint32Array(count) : null
+    this.cellYs = bounds.width * bounds.height * bounds.depth > 2 ** 32 ? new Uint32Array(recordCapacity) : null
     this.templates = []; this.lookup = new Map(); this.quads = new WeakMap()
     this.cellBounds = new Float64Array(Math.ceil(count / FACE_BATCH_SIZE) * 6)
     this.faceBounds = new Float32Array(this.cellBounds.length)
@@ -95,11 +95,14 @@ export class CompactFaceData {
       id = (this.intern(values) | 0x80000000) >>> 0; this.absolute++
     } else if (changed) { id = this.intern(values); this.variants++ }
     const cursor = this.cursor++, batch = Math.floor(cursor / FACE_BATCH_SIZE) * 6
+    // Streaming replaces only these record views. Template IDs and spatial
+    // batches use the unchanged global cursor across every transmitted segment.
+    const recordIndex = cursor - (this.recordBase || 0)
     if (this.cellYs) {
-      this.cells[cursor] = key % (this.bounds.width * this.bounds.depth)
-      this.cellYs[cursor] = y - this.bounds.minY
-    } else this.cells[cursor] = key
-    this.templateIds[cursor] = id
+      this.cells[recordIndex] = key % (this.bounds.width * this.bounds.depth)
+      this.cellYs[recordIndex] = y - this.bounds.minY
+    } else this.cells[recordIndex] = key
+    this.templateIds[recordIndex] = id
     for (let a = 0; a < 3; a++) {
       this.cellBounds[batch + a] = Math.min(this.cellBounds[batch + a], offset[a])
       this.cellBounds[batch + 3 + a] = Math.max(this.cellBounds[batch + 3 + a], offset[a])

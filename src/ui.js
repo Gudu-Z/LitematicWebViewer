@@ -5,7 +5,7 @@ import { materialStorage } from './materialStorage.js'
 
 const LOADING_STAGE_KEYS = {
   decompress: 'loadingDecompress', parse: 'loadingBlocks', count: 'loadingCount',
-  fill: 'loadingGeometry', textures: 'loadingTextures', assemble: 'loadingDisplay',
+  fill: 'loadingGeometry', textures: 'loadingTextures', assemble: 'loadingDisplay', upload: 'loadingUpload',
   models: 'loadingModels', details: 'loadingDetails', entities: 'loadingEntities',
 }
 

@@ -14,6 +14,7 @@ import { FLUID_FLOW_BLOCKS } from './fluidFlowBlocks.js'
 import { CompactFaceData, canCompactFaces } from './compactFaceData.js'
 import { estimateGeometryBytes, geometryLimit } from './geometryBudget.js'
 import { throwIfAborted } from './loadingTask.js'
+import { GeometryStream, validateGeometryStream } from './geometryStream.js'
 
 const SKIP_BLOCKS = new Set([
   'air', 'cave_air', 'void_air',
@@ -398,12 +399,13 @@ function writeFace(g, verts, uvs, ox, oy, oz, blockKey) {
     u[(v + k) * 2] = uvs[k][0]
     u[(v + k) * 2 + 1] = uvs[k][1]
   }
-  ix[f] = v
-  ix[f + 1] = v + 1
-  ix[f + 2] = v + 2
-  ix[f + 3] = v + 2
-  ix[f + 4] = v + 1
-  ix[f + 5] = v + 3
+  const base = v + (g.vertexBase || 0)
+  ix[f] = base
+  ix[f + 1] = base + 1
+  ix[f + 2] = base + 2
+  ix[f + 3] = base + 2
+  ix[f + 4] = base + 1
+  ix[f + 5] = base + 3
   g.v = v + 4
   g.f = f + 6
 }
@@ -421,6 +423,15 @@ function writeFace(g, verts, uvs, ox, oy, oz, blockKey) {
 // options.keys 只限制生成候选，遮挡/流体邻居仍查完整 blocks；候选需可重复迭代。
 // includeGroup 可把少量保守可分块贴图与保持原顺序的全局贴图分开。
 export async function buildFaceGroups(palette, blocks, bounds, onProgress, filter, options) {
+  return buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filter, options, false)
+}
+
+export async function buildFaceGroupsStream(palette, blocks, bounds, onProgress, filter, options = {}) {
+  validateGeometryStream(options)
+  return buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filter, options, true)
+}
+
+async function buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filter, options, streaming) {
   throwIfAborted(options?.signal)
   const yieldWork = options?.yieldTask || yieldThread
   const grid = {
@@ -545,81 +556,106 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
   options?.onStage?.({ phase: 'allocate', fraction: .5, bytes: geometryBytes,
     groups: [...counts].map(([key, count]) => ({ key, count, compact: !!options?.compactFaces && canCompactFaces(bounds, key) })) })
   throwIfAborted(options?.signal)
-  const groups = new Map()
-  for (const [gKey, count] of counts) {
-    if (options?.compactFaces && canCompactFaces(bounds, gKey)) {
-      groups.set(gKey, new CompactFaceData(count, bounds))
-      continue
+  const stream = streaming ? new GeometryStream(counts, bounds, options, emitted, geometryBytes) : null
+  const groups = stream ? stream.groups : new Map()
+  try {
+    if (stream) await stream.start()
+    else for (const [gKey, count] of counts) {
+      if (options?.compactFaces && canCompactFaces(bounds, gKey)) {
+        groups.set(gKey, new CompactFaceData(count, bounds))
+        continue
+      }
+      groups.set(gKey, gKey === 'particle/bubble'
+        ? { positions: new Float32Array(count * 3), v: 0 }
+        : {
+            positions: new Float32Array(count * 12),
+            uvs: new Float32Array(count * 8),
+            // 65535 是 WebGL2 的固定重启索引；满 65536 个顶点时仍使用 Uint32。
+            indices: count * 4 < 65536 ? new Uint16Array(count * 6) : new Uint32Array(count * 6),
+            // One source cell per quad (CPU only), not per vertex. Large sparse
+            // schematics can have grid keys beyond Uint32 despite few blocks.
+            ...(options?.trackBlocks ? { blockKeys: bounds.width * bounds.height * bounds.depth <= 2 ** 32
+              ? new Uint32Array(count) : new Float64Array(count) } : {}),
+            v: 0,
+            f: 0,
+          })
     }
-    groups.set(gKey, gKey === 'particle/bubble'
-      ? { positions: new Float32Array(count * 3), v: 0 }
-      : {
-          positions: new Float32Array(count * 12),
-          uvs: new Float32Array(count * 8),
-          // 65535 是 WebGL2 的固定重启索引；满 65536 个顶点时仍使用 Uint32。
-          indices: count * 4 < 65536 ? new Uint16Array(count * 6) : new Uint32Array(count * 6),
-          // One source cell per quad (CPU only), not per vertex. Large sparse
-          // schematics can have grid keys beyond Uint32 despite few blocks.
-          ...(options?.trackBlocks ? { blockKeys: bounds.width * bounds.height * bounds.depth <= 2 ** 32
-            ? new Uint32Array(count) : new Float64Array(count) } : {}),
-          v: 0,
-          f: 0,
+
+    // 调色板只保存本次构建的组引用，避免逐面查找字符串 Map，不修改共享的烘焙模型。
+    const groupsByPalette = groupKeysByPalette.map(keys => keys?.map(key => groups.get(key)))
+
+    // —— 第二遍：填充几何数据 ——
+    n = 0
+    report('fill', 0)
+    for (const [key, gi] of entries()) {
+      if ((++n & 0xffff) === 0) {
+        report('fill', n)
+        await yieldWork()
+        throwIfAborted(options?.signal)
+      }
+      const lx = key % grid.W
+      const lz = Math.floor(key / grid.W) % grid.D
+      const ly = Math.floor(key / grid.strideY)
+      const x = lx + minX
+      const y = ly + minY
+      const z = lz + minZ
+      if (filter && !filter(x, y, z, ly)) continue
+      const finfo = fluidOf[gi]
+      if (finfo) {
+        // Fluid emission is synchronous and emits only this cell's few faces or
+        // particles. Queue those records in streaming mode so pool pressure can
+        // be awaited between them without changing fluid math or face order.
+        const pendingFluid = stream ? [] : null
+        emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], visible, (texKey, pos, uvs) => {
+          const g = groups.get(texKey)
+          if (!g) return
+          if (pendingFluid) { pendingFluid.push({ g, texKey, pos, uvs }); return }
+          if (texKey === 'particle/bubble') {
+            g.positions[g.v] = pos[0]
+            g.positions[g.v + 1] = pos[1]
+            g.positions[g.v + 2] = pos[2]
+            g.v += 3
+          } else {
+            writeFace(g, pos, uvs, 0, 0, 0, key)
+          }
         })
-  }
-
-  // 调色板只保存本次构建的组引用，避免逐面查找字符串 Map，不修改共享的烘焙模型。
-  const groupsByPalette = groupKeysByPalette.map(keys => keys?.map(key => groups.get(key)))
-
-  // —— 第二遍：填充几何数据 ——
-  n = 0
-  report('fill', 0)
-  for (const [key, gi] of entries()) {
-    if ((++n & 0xffff) === 0) {
-      report('fill', n)
-      await yieldWork()
-      throwIfAborted(options?.signal)
-    }
-    const lx = key % grid.W
-    const lz = Math.floor(key / grid.W) % grid.D
-    const ly = Math.floor(key / grid.strideY)
-    const x = lx + minX
-    const y = ly + minY
-    const z = lz + minZ
-    if (filter && !filter(x, y, z, ly)) continue
-    const finfo = fluidOf[gi]
-    if (finfo) {
-      emitFluidFaces(palette, blocks, fluidOf, lx, lz, ly, x, y, z, gi, grid, selfMasks[gi], visible, (texKey, pos, uvs) => {
-        const g = groups.get(texKey)
-        if (!g) return
-        if (texKey === 'particle/bubble') {
-          g.positions[g.v] = pos[0]
-          g.positions[g.v + 1] = pos[1]
-          g.positions[g.v + 2] = pos[2]
-          g.v += 3
-        } else {
-          writeFace(g, pos, uvs, 0, 0, 0, key)
+        if (pendingFluid) for (const { g, texKey, pos, uvs } of pendingFluid) {
+          if (g.v >= g.recordLimit && !stream.prepare(g)) await stream.flushFor(g)
+          if (texKey === 'particle/bubble') {
+            g.positions[g.v] = pos[0]; g.positions[g.v + 1] = pos[1]; g.positions[g.v + 2] = pos[2]; g.v += 3
+          } else writeFace(g, pos, uvs, 0, 0, 0, key)
         }
-      })
-      if (!finfo.waterlogged) continue
+        if (!finfo.waterlogged) continue
+      }
+      if (!renderable[gi]) continue
+      const quads = quadsByPalette[gi]
+      const faceGroups = groupsByPalette[gi]
+      for (let qi = 0; qi < quads.length; qi++) {
+        const q = quads[qi]
+        if (!faceGroups[qi]) continue
+        if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
+        const group = faceGroups[qi]
+        if (group.isCompactFaceData) {
+          if (stream && group.cursor >= group.recordLimit && !stream.prepare(group)) await stream.flushFor(group)
+          group.write(q, x, y, z, key)
+        } else {
+          if (stream && group.v >= group.recordLimit && !stream.prepare(group)) await stream.flushFor(group)
+          writeFace(group, q.verts, q.uvs, x, y, z, key)
+        }
+      }
     }
-    if (!renderable[gi]) continue
-    const quads = quadsByPalette[gi]
-    const faceGroups = groupsByPalette[gi]
-    for (let qi = 0; qi < quads.length; qi++) {
-      const q = quads[qi]
-      if (!faceGroups[qi]) continue
-      if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
-      const group = faceGroups[qi]
-      if (group.isCompactFaceData) group.write(q, x, y, z, key)
-      else writeFace(group, q.verts, q.uvs, x, y, z, key)
-    }
-  }
 
-  for (const group of groups.values()) if (group.isCompactFaceData) {
-    throwIfAborted(options?.signal)
-    group.finish()
-    geometryBytes = geometryLimit(geometryBytes + group.templateData.byteLength, options?.maxGeometryBytes)
-  }
-  report('fill', total)
-  return { groups, emitted, geometryBytes }
+    if (stream) {
+      const result = await stream.finish()
+      report('fill', total)
+      return result
+    }
+    for (const group of groups.values()) if (group.isCompactFaceData) {
+      throwIfAborted(options?.signal)
+      group.finish()
+      geometryBytes = geometryLimit(geometryBytes + group.templateData.byteLength, options?.maxGeometryBytes)
+    }
+    report('fill', total)
+    return { groups, emitted, geometryBytes }
+  } finally { stream?.dispose() }
 }

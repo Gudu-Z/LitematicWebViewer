@@ -2,6 +2,7 @@ import { SchematicWorkerClient } from '../src/workerClient.js'
 import { parseLitematica } from '../src/litematica.js'
 import { bakeModel } from '../src/modelBaker.js'
 import { buildFaceGroups } from '../src/geometry.js'
+import { GeometryReceiver } from '../src/geometryReceiver.js'
 import { serializeSchematic, filterFromDescriptor } from '../src/workerProtocol.js'
 
 function assert(value, message) { if (!value) throw Error(message) }
@@ -39,6 +40,19 @@ function cube(texture) {
     faces: Object.fromEntries(['up', 'down', 'east', 'west', 'north', 'south'].map(face => [face, { texture: '#all', cullface: face }])),
   }] })
 }
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms))
+// Reassembling object fields changes their property insertion order; texture
+// groups, face records, array types and all bytes must retain their old order.
+function equalGeometry(actual, expected, path) {
+  equal(actual.emitted, expected.emitted, path + '.emitted')
+  equal(actual.geometryBytes, expected.geometryBytes, path + '.geometryBytes')
+  equal([...actual.groups.keys()], [...expected.groups.keys()], path + '.groupOrder')
+  for (const [key, group] of actual.groups) {
+    const other = expected.groups.get(key)
+    equal(Object.keys(group).sort(), Object.keys(other).sort(), path + '.' + key + '.fields')
+    for (const field of Object.keys(group)) equal(group[field], other[field], path + '.' + key + '.' + field)
+  }
+}
 
 window.runWorkerBrowser = async ({ csp = false } = {}) => {
   const small = await fetchFixture('small'), large = csp ? null : await fetchFixture('paged')
@@ -66,13 +80,14 @@ window.runWorkerBrowser = async ({ csp = false } = {}) => {
       assert(fallbackCalls === 1 && !client.canBuild(data), 'Real worker-src CSP failure falls back before parsing')
       return { cspFallback: true, blocks: data.blocks.size }
     }
-    let geometries = 0, data, main
+    let geometries = 0, streamedGeometries = 0, streamBatches = 0, data, main
     for (const [name, bytes, options] of [['small', small, { renderOnly: true, compactBlocks: false }], ['paged', large, { renderOnly: true }]]) {
       main = await parseLitematica(bytes, null, options)
       data = await measure(name + '-worker-parse', () => client.parse(bytes, progress, options))
       equal(serializeSchematic(data), serializeSchematic(main), name + ' parse fields/pages')
       equal([...data.blocks], [...main.blocks], name + ' page iteration')
       assert(bytes.byteLength > 0 && client.canBuild(data), name + ' input/session remain usable')
+      assert(client.canStream(data), 'Bundled worker negotiates streaming version 1')
       assert(!!data.blocks.isPagedBlockStore === (name === 'paged'), name + ' chooses expected block representation')
       if (name === 'paged') assert(data.blocks.size === 131072, 'The permanent regression crosses the 65536-block scheduler yield boundary')
       const palette = data.palette.map(entry => ({ ...entry, baked: cube(entry.name.endsWith('glass') ? 'block/glass' : 'block/stone') }))
@@ -86,9 +101,47 @@ window.runWorkerBrowser = async ({ csp = false } = {}) => {
           () => client.build(data, { palette, descriptor, ...options }, progress))
         equal(background, structuredClone(baseline), `${name} exact geometry ${compactFaces}/${descriptor?.mode}`)
         geometries++
+        const receiver = new GeometryReceiver(), borrowed = []
+        let packets = 0, callbacks = 0
+        const observe = event => { if (event.data.type === 'batch') packets++ }
+        const worker = client.worker
+        worker.addEventListener('message', observe)
+        try {
+          const result = await measure(`${name}-worker-stream-${compactFaces}-${descriptor?.mode ?? 'all'}`, () => client.buildStream(data,
+            { palette, descriptor, ...options }, {
+              onProgress: progress,
+              async onLayout(layout, ctx) {
+                assert(ctx.signal instanceof AbortSignal, 'Every sink receives a request-local abort signal')
+                await receiver.acceptLayout(layout, ctx.signal)
+                await pause(2)
+                assert(packets === 0, 'Worker does not fill/send before layout ACK')
+              },
+              async onBatch(batch, ctx) {
+                callbacks++
+                const buffers = batch.slabs.map(slab => slab.buffer)
+                borrowed.push(...buffers)
+                await receiver.acceptBatch(batch, ctx.signal)
+                if (callbacks === 1) {
+                  const before = callbacks
+                  await pause(3)
+                  assert(packets === before && callbacks === 1, 'One unacknowledged packet bounds staging and preserves async backpressure')
+                  assert(buffers.every(buffer => buffer.byteLength), 'Borrowed bytes remain live until async callback resolves')
+                  // Protocol must snapshot slab ownership before consumer code.
+                  batch.slabs[0].buffer = Object.values([...receiver.groups.values()][0]).find(ArrayBuffer.isView).buffer
+                }
+              },
+            }, { batchBytes: 32768 }))
+          assert(!Object.hasOwn(result, 'groups') && result.batchCount === callbacks, 'Final response is metadata only')
+          assert(borrowed.every(buffer => buffer.byteLength === 0), 'Real ACK transfer detaches all borrowed views')
+          equalGeometry(receiver.finish(result), baseline, `${name} exact streamed geometry ${compactFaces}/${descriptor?.mode}`)
+          streamedGeometries++; streamBatches += callbacks
+        } finally { worker.removeEventListener('message', observe) }
       }
       const error = await rejects(client.build(data, { palette, compactFaces: true }, progress, { maxGeometryBytes: 1 }), { code: 'FILE_TOO_LARGE', reason: 'geometry' })
       assert(error.bytes > error.maxBytes && error.maxBytes === 1, 'Budget diagnostics retain byte counts')
+      await rejects(client.buildStream(data, { palette, compactFaces: true }, {
+        onLayout() { throw Error('Over-budget stream reached layout sink') }, onBatch() {},
+      }, { maxGeometryBytes: 1 }), { code: 'FILE_TOO_LARGE', reason: 'geometry' })
       equal(serializeSchematic(data), serializeSchematic(main), name + ' main pages after all builds')
     }
     // Exercise a queued Worker message at an actual geometry checkpoint, as well
@@ -106,6 +159,27 @@ window.runWorkerBrowser = async ({ csp = false } = {}) => {
     assert(cooperativeStarted && client.canBuild(data), 'Queued cancellation reaches the worker without terminating the retained session')
     const resumed = await client.build(data, { palette: cooperativePalette, compactFaces: true })
     assert(resumed.emitted > 0, 'The same worker session builds again after cooperative cancellation')
+    const streamCancels = []
+    for (const where of ['layout', 'batch']) for (const terminate of [false, true]) {
+      let resumeSink, started = 0, context
+      const gate = new Promise(resolve => { resumeSink = resolve }), abort = new AbortController()
+      const waitThenCancel = (_value, ctx) => {
+        context = ctx; started = performance.now()
+        if (terminate) abort.abort()
+        else client.worker.postMessage({ type: 'cancel', id: ctx.id, session: ctx.session })
+        return gate
+      }
+      await rejects(client.buildStream(data, { palette: cooperativePalette, compactFaces: true }, {
+        onLayout: where === 'layout' ? waitThenCancel : () => {}, onBatch: where === 'batch' ? waitThenCancel : () => {},
+      }, { signal: abort.signal, batchBytes: 32768 }), { name: 'AbortError' })
+      streamCancels.push({ where, terminate, ms: performance.now() - started })
+      assert(context.signal.aborted && !client.pending.size, 'Cancellation aborts the sink and settles without waiting for its promise')
+      assert(!!client.worker === !terminate, 'Signal cancellation terminates; queued cancel retains the worker')
+      resumeSink(); await pause(0)
+      if (terminate) data = await client.parse(large)
+      const next = await client.buildStream(data, { palette: cooperativePalette, compactFaces: true }, { onLayout() {}, onBatch() {} })
+      assert(next.emitted > 0, 'A cancelled stream can reopen/build successfully without stale ACK contamination')
+    }
     const parseAbort = new AbortController(); let abortedAt = 0
     await rejects(client.parse(large, () => { abortedAt ||= performance.now(); parseAbort.abort() }, { signal: parseAbort.signal }), { name: 'AbortError' })
     const parseCancelMs = performance.now() - abortedAt
@@ -125,7 +199,7 @@ window.runWorkerBrowser = async ({ csp = false } = {}) => {
     assert(fallbackCalls === 0, 'Healthy Worker never executes main-thread fallback')
     assert(stages.has('decompress') && stages.has('parse') && stages.has('count') && stages.has('allocate') && stages.has('fill'), 'All real stages reached the client')
     assert(samples.some(sample => sample.ticks > 0), 'Main-thread heartbeat continues during background work')
-    return { geometries, blocks: main.blocks.size, stages: [...stages], samples, cooperativeCancelMs, parseCancelMs, buildCancelMs,
+    return { geometries, streamedGeometries, streamBatches, streamCancels, blocks: main.blocks.size, stages: [...stages], samples, cooperativeCancelMs, parseCancelMs, buildCancelMs,
       heartbeatTicks: samples.reduce((sum, sample) => sum + sample.ticks, 0), maxGap: Math.max(...samples.map(sample => sample.maxGap)) }
   } finally { client.dispose() }
 }
