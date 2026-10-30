@@ -8,6 +8,7 @@ const GROUPS = ['group', 'signsGroup', 'headsGroup', 'bannersGroup', 'statuesGro
 // A triangle's vertex still identifies its original quad after translucent faces
 // are sorted. faceIndex does not. This also handles pack models outside the cell.
 export function sourceForIntersection(hit, data) {
+  if (hit.compactBlockKey !== undefined && data) return { kind: 'block', key: hit.compactBlockKey, position: blockPosition(hit.compactBlockKey, data.bounds) }
   const object = frameInstanceRoot(hit.object, hit.instanceId) || hit.object
   let block = null
   for (let node = object; node; node = node.parent) {

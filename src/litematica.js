@@ -10,6 +10,7 @@
 import { LITTLE_ENDIAN } from './nbt.js'
 import { renderedBlockEntities } from './renderNbt.js'
 import { readSchematicNBT } from './schematicNbt.js'
+import { BlockStatePageWriter, PagedBlockStore, createBlockPageBudget } from './pagedBlocks.js'
 
 // 空气类方块：解析时直接跳过、不存入 blocks Map，避免超大型投影占用过多内存。
 const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
@@ -55,12 +56,12 @@ function vec(v) {
 // （lx = wx-minX，W=宽，D=深，strideY = W*D）。相比 "x,y,z" 字符串 key，
 // 整数 key 的邻居查找是纯整数算术、速度快数倍，内存也更小，超大投影收益显著。
 // onProgress(fraction) 在解析过程中回调进度（0~1），用于超大文件显示进度。
-export async function parseLitematicaRaw(rawBytes, onProgress, { renderOnly = false } = {}) {
-  const { root, stats } = await readSchematicNBT(rawBytes, { renderOnly })
-  return parseLitematicaRoot(root, onProgress, renderOnly, stats)
+export async function parseLitematicaRaw(rawBytes, onProgress, { renderOnly = false, compactBlocks } = {}) {
+  const { root, stats } = await readSchematicNBT(rawBytes, { renderOnly, compactBlocks: compactBlocks !== false })
+  return parseLitematicaRoot(root, onProgress, renderOnly, stats, compactBlocks)
 }
 
-async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo) {
+async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compactBlocks) {
 
   const meta = root.Metadata || {}
   const metadata = {
@@ -80,16 +81,6 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo) {
     throw new Error('文件中没有 Regions 数据')
   }
 
-  // 方块数量过大时直接拒绝：后续要把所有非空气方块存入 Map 并合并成几何体，
-  // 几十万方块的投影浏览器能承受，上千万方块会撑爆内存/几何体数组（本次报错的
-  // 两个投影分别是 9449 万与 1.99 亿方块）。
-  const MAX_BLOCKS = 20_000_000
-  if (metadata.totalBlocks > MAX_BLOCKS) {
-    const err = new Error(`方块数量过大（${metadata.totalBlocks.toLocaleString()}，上限 ${MAX_BLOCKS.toLocaleString()}）`)
-    err.code = 'FILE_TOO_LARGE'
-    throw err
-  }
-
   // 第一遍：统计总方块数 + 全局边界 + 收集每个区域的名称与边界（区域名是 Regions 对象的键）
   let totalBlocks = 0
   let minX = Infinity, minY = Infinity, minZ = Infinity
@@ -101,6 +92,7 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo) {
     const dx = Math.abs(size.x)
     const dy = Math.abs(size.y)
     const dz = Math.abs(size.z)
+    if (![pos.x, pos.y, pos.z, size.x, size.y, size.z, dx * dy * dz].every(Number.isSafeInteger)) throw new RangeError('Invalid region dimensions')
     if (dx === 0 || dy === 0 || dz === 0) continue
     totalBlocks += dx * dy * dz
     const wx0 = Math.min(pos.x, pos.x + size.x + 1)
@@ -122,6 +114,9 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo) {
   const W = maxX - minX + 1
   const D = maxZ - minZ + 1
   const strideY = W * D // 每升高一层（y+1）整数 key 增加的步长
+  if (!Number.isSafeInteger(strideY * (maxY - minY + 1))) throw new RangeError('Schematic coordinates exceed exact integer range')
+  const paged = compactBlocks === true || Object.values(regions).some(r => r.BlockStates?.isPagedBlockStates)
+    || compactBlocks !== false && totalBlocks > 2_000_000
 
   const palette = []
   const paletteIndexByKey = new Map()
@@ -138,7 +133,8 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo) {
     return idx
   }
 
-  const blocks = new Map()
+  let blocks = new Map()
+  const packedRegions = [], pageBudget = createBlockPageBudget()
   const tileEntities = [] // 方块实体（如告示牌）
   const entities = [] // 实体（如矿车、物品展示框）
   let doneBlocks = 0
@@ -192,6 +188,27 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo) {
       }
     }
 
+    if (paged) {
+      let states = region.BlockStates
+      if (!states?.isPagedBlockStates) {
+        const writer = new BlockStatePageWriter(paletteList, dx * dy * dz, states.length, pageBudget)
+        const words = new Uint32Array(states.buffer, states.byteOffset, states.length * 2), low = LITTLE_ENDIAN ? 0 : 1
+        for (let i = 0; i < states.length; i++) {
+          writer.word(words[i * 2 + low]); writer.word(words[i * 2 + (low ^ 1)])
+          if ((i & 0x3fff) === 0 && performance.now() - lastYield >= 12) {
+            onProgress?.((doneBlocks + Math.min(dx * dy * dz, (i + 1) * 64 / writer.bits)) / totalBlocks)
+            await new Promise(resolve => setTimeout(resolve, 0)); lastYield = performance.now()
+          }
+        }
+        writer.inputBytes = states.length * 8
+        states = writer.finish()
+      } else pageBudget.add(states.bytes)
+      packedRegions.push({ ...regionList.find(r => r.name === name), states, localToGlobal })
+      doneBlocks += dx * dy * dz; region.BlockStates = null
+      onProgress?.(doneBlocks / totalBlocks)
+      continue
+    }
+
     const bits = Math.max(2, Math.ceil(Math.log2(paletteList.length)))
     const rowSize = dz * dx // 每层（y 固定）的方块数
     const lx0 = wx0 - minX
@@ -234,12 +251,13 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo) {
     height: maxY - minY + 1,
     depth: D,
   }
+  if (paged) blocks = new PagedBlockStore(packedRegions, bounds, palette.length)
 
   onProgress?.(1)
   return { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList, nbtInfo }
 }
 
 export async function parseLitematica(buffer, onProgress, options) {
-  const { root, stats } = await readSchematicNBT(buffer, { ...options, onProgress: value => onProgress?.(value * .5) })
-  return parseLitematicaRoot(root, value => onProgress?.(.5 + value * .5), options?.renderOnly ?? false, stats)
+  const { root, stats } = await readSchematicNBT(buffer, { ...options, compactBlocks: options?.compactBlocks !== false, onProgress: value => onProgress?.(value * .5) })
+  return parseLitematicaRoot(root, value => onProgress?.(.5 + value * .5), options?.renderOnly ?? false, stats, options?.compactBlocks)
 }

@@ -730,10 +730,15 @@ function updateMaterialList() {
     return
   }
   const counts = new Map()
-  for (const gi of currentData.blocks.values()) {
+  const usage = currentData.blocks.paletteCounts
+  const entries = usage ? Array.from(usage, (count, gi) => [gi, count]) : (function* () {
+    for (const gi of currentData.blocks.values()) yield [gi, 1]
+  })()
+  for (const [gi, count] of entries) {
+    if (!count) continue
     const p = currentData.palette[gi]
     const name = (p.name || '').replace(/^minecraft:/, '')
-    counts.set(name, (counts.get(name) || 0) + 1)
+    counts.set(name, (counts.get(name) || 0) + count)
   }
   const list = [...counts.entries()].map(([name, count]) => ({
     name: blockName(name), // 当前语言的译名，缺失回退英文 ID

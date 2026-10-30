@@ -19,9 +19,10 @@ export function isBookPages(path, name) {
 }
 
 export class NbtStreamFilter {
-  constructor(selectField, { maxBytes = MAX_NBT_BYTES, maxDepth = MAX_NBT_DEPTH, maxNodes = MAX_NBT_NODES } = {}) {
+  constructor(selectField, { maxBytes = MAX_NBT_BYTES, maxDepth = MAX_NBT_DEPTH, maxNodes = MAX_NBT_NODES, arraySink } = {}) {
     validateNbtLimit(maxBytes)
     this.selectField = selectField
+    this.arraySink = arraySink
     this.maxBytes = maxBytes; this.maxDepth = maxDepth; this.maxNodes = maxNodes
     this.stats = { readBytes: 0, retainedBytes: 0, omittedFields: 0, bookPageFields: 0 }
     this.chunks = []; this.buffer = null; this.used = 0; this.nodes = 0
@@ -57,6 +58,7 @@ export class NbtStreamFilter {
       if (this.done) throw new Error('Unexpected data after root NBT compound')
       const request = this.request, count = Math.min(request.length - this.filled, bytes.length - pos)
       if (request.keep && count) this.append(bytes.subarray(pos, pos + count))
+      if (request.write && count) request.write(bytes.subarray(pos, pos + count))
       let value
       if (request.read) {
         if (!this.filled && count === request.length) value = bytes.subarray(pos, pos + count)
@@ -87,10 +89,10 @@ export class NbtStreamFilter {
     return size === 1 ? bytes[0] : new DataView(bytes.buffer, bytes.byteOffset, size)[size === 2 ? 'getUint16' : 'getInt32'](0, false)
   }
 
-  *bulk(length, keep) {
+  *bulk(length, keep, write) {
     if (!Number.isSafeInteger(length) || length < 0) throw new RangeError('Invalid NBT length')
     if (keep && this.stats.retainedBytes + length > this.maxBytes) throw limitError()
-    yield { length, keep }
+    yield { length, keep, write }
   }
 
   *root() {
@@ -106,8 +108,15 @@ export class NbtStreamFilter {
     if (type >= 1 && type <= 6) { yield* this.bulk(widths[type], keep); return }
     if (type === 8) { const length = yield* this.number(2, keep); yield* this.bulk(length, keep); return }
     if (type === 7 || type === 11 || type === 12) {
-      const length = yield* this.number(4, keep)
-      yield* this.bulk(length * (type === 7 ? 1 : type === 11 ? 4 : 8), keep)
+      const length = yield* this.number(4)
+      if (length < 0) throw new RangeError('Invalid NBT length')
+      const sink = keep ? this.arraySink?.(path, type, length) : null
+      if (keep) {
+        const retained = sink ? 0 : length
+        this.append(Uint8Array.of(retained >>> 24, retained >>> 16 & 255, retained >>> 8 & 255, retained & 255))
+      }
+      yield* this.bulk(length * (type === 7 ? 1 : type === 11 ? 4 : 8), keep && !sink, sink && (bytes => sink.push(bytes)))
+      sink?.finish?.()
       return
     }
     if (type === 9) {

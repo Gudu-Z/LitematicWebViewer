@@ -148,6 +148,19 @@ for (const bytes of [gzipSync(raw), deflateSync(raw), raw]) {
 }
 console.log('PASS chunk boundaries, wide/tall regions, negative sizes, overlaps, skipped states, entities and progress')
 
+const compact = await parseLitematicaRaw(raw, null, { compactBlocks: true })
+assert.ok(compact.blocks.isPagedBlockStore)
+assert.deepEqual([...compact.blocks], [...data.blocks], 'Paged storage preserves Map insertion and overlapping-region overwrite order')
+assert.equal(compact.blocks.size, data.blocks.size)
+for (const [key, gi] of data.blocks) assert.equal(compact.blocks.get(key), gi)
+for (const key of ['metadata', 'palette', 'bounds', 'regions', 'tileEntities', 'entities']) assert.deepEqual(compact[key], data[key])
+for (let gi = 0; gi < data.palette.length; gi++) {
+  const wanted = data.palette.map((_p, i) => i === gi)
+  assert.deepEqual([...compact.blocks.entriesForPalette(wanted)], [...data.blocks].filter(([, value]) => value === gi))
+  assert.equal(compact.blocks.paletteCounts[gi], [...data.blocks.values()].filter(value => value === gi).length)
+}
+console.log('PASS compact pages preserve complete states, negative sizes, overlapping regions, large keys and palette-filtered queries')
+
 const quad = { texKey: 'block/redstone_dust_dot', cullface: null, normal: [0, 1, 0],
   verts: [[0, 0, 0], [1, 0, 0], [0, 0, 1], [1, 0, 1]], uvs: [[0, 0], [1, 0], [0, 1], [1, 1]] }
 const baked = { fullCube: false, quads: [quad] }

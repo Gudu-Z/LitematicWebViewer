@@ -96,7 +96,8 @@ export function extractStatues(data) {
   const b = data.bounds
   const W = b.width
   const strideY = W * b.depth
-  for (const [key, gi] of data.blocks) {
+  const wanted = data.palette.map(p => p.name?.endsWith('copper_golem_statue'))
+  for (const [key, gi] of data.blocks.entriesForPalette?.(wanted) || data.blocks) {
     const p = data.palette[gi]
     const name = (p.name || '').replace(/^minecraft:/, '')
     if (!name.endsWith('copper_golem_statue')) continue

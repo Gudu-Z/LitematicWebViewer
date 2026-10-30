@@ -14,6 +14,7 @@ import { isAssetTexture } from './assets.js'
 import { batchItemFrames, updateFrameBatches, freezeStaticObject } from './frameBatches.js'
 import { collectSceneResources } from './sceneResources.js'
 import { createBlockChunkIndex, buildBlockChunk, planBlockChunkUpdate } from './blockChunks.js'
+import { CompactFaceMesh } from './compactFaceMesh.js'
 import { mergeTranslucentBlocks } from './translucentBlocks.js'
 import { markBlockObject, setBlockFaceKeys } from './selectionSources.js'
 
@@ -1356,11 +1357,10 @@ export class Renderer {
     const D = bounds.depth
     const H = bounds.height
     const strideY = W * D
-    const surface = new Map()
     const fluids = palette.map(fluidOfEntry)
-    for (const [key, gi] of blocks) {
+    const heightAt = (key, gi = blocks.get(key)) => {
       const fo = fluids[gi]
-      if (!fo || fo.kind !== 'water') continue
+      if (!fo || fo.kind !== 'water') return undefined
       const ly = Math.floor(key / strideY)
       const y = ly + bounds.minY
       let h = fluidHeight(fo.level)
@@ -1376,7 +1376,14 @@ export class Renderer {
           }
         }
       }
-      surface.set(key, y + h)
+      return y + h
+    }
+    // Camera fog needs one cell, not a second Map containing every water block.
+    if (blocks.isPagedBlockStore) { this._waterSurface = { get: heightAt }; return }
+    const surface = new Map()
+    for (const [key, gi] of blocks) {
+      const height = heightAt(key, gi)
+      if (height !== undefined) surface.set(key, height)
     }
     this._waterSurface = surface
   }
@@ -1533,6 +1540,15 @@ export class Renderer {
     for (const [texKey, g] of groups) {
       const mat = materials.get(texKey)
       if (!mat) continue
+      if (g.isCompactFaceData) {
+        const mesh = new CompactFaceMesh(g, mat)
+        target.add(mesh)
+        if (this._freezeStatic !== false) freezeStaticObject(mesh)
+        if (performance.now() >= yieldAt) {
+          await new Promise(resolve => setTimeout(resolve, 0)); yieldAt = performance.now() + 8
+        }
+        continue
+      }
       // 气泡组是点云：positions 只存中心坐标（每点 3 个 float）。
       // renderOrder = -1：强制气泡在所有透明物体之前绘制——水会写深度（默认 depthWrite），
       // 若气泡排在水后面，柱内的气泡会被水面深度全部挡住（只有个别角度可见）。

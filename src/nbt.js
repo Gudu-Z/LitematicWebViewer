@@ -18,13 +18,15 @@ export function validateNbtLimit(maxBytes) {
 }
 
 class NBTReader {
-  constructor(data, selectField, { maxBytes = MAX_NBT_BYTES, stats } = {}) {
+  constructor(data, selectField, { maxBytes = MAX_NBT_BYTES, stats, maxNodes = MAX_NBT_NODES } = {}) {
     validateNbtLimit(maxBytes)
     this.dv = new DataView(data.buffer, data.byteOffset, data.byteLength)
     this.pos = 0
     this.selectField = selectField
     this.path = []
     this.maxBytes = maxBytes; this.stats = stats; this.omittedBytes = 0
+    if (!Number.isSafeInteger(maxNodes) || maxNodes < 0 || maxNodes > 16_000_000) throw new RangeError('Invalid NBT node budget')
+    this.maxNodes = maxNodes
     this.depth = -1; this.nodes = 0
   }
 
@@ -115,7 +117,7 @@ class NBTReader {
     const type = this.u8()
     const len = this.i32()
     if (len < 0 || type > 12 || type === 0 && len) throw new RangeError('Invalid NBT list')
-    if (len > MAX_NBT_NODES - this.nodes) throw nbtLimitError('complexity')
+    if (len > this.maxNodes - this.nodes) throw nbtLimitError('complexity')
     this.checkLength(len, widths[type] || 1)
     const arr = new Array(len)
     for (let i = 0; i < len; i++) arr[i] = this.payload(type)
@@ -172,7 +174,7 @@ class NBTReader {
   }
 
   payload(type) {
-    if (++this.depth > MAX_NBT_DEPTH || ++this.nodes > MAX_NBT_NODES) throw nbtLimitError('complexity')
+    if (++this.depth > MAX_NBT_DEPTH || ++this.nodes > this.maxNodes) throw nbtLimitError('complexity')
     this.checkRetained(this.pos + (widths[type] || 0))
     try {
       switch (type) {

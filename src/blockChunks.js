@@ -51,6 +51,14 @@ function addLayer(layers, y, id) {
 export function createBlockChunkIndex(data, options = {}) {
   const settings = { ...DEFAULTS, ...options }
   const { palette, blocks, bounds } = data
+  if (blocks.isPagedBlockStore) {
+    // The compact store already has bounded pages. Do not duplicate hundreds of
+    // millions of cell keys just to enumerate an original-order texture group.
+    const layers = new Map()
+    for (const region of blocks.regions) for (let y = region.minY; y <= region.maxY; y++) layers.set(y, new Set([null]))
+    return { data, enabled: false, compact: true, chunkSize: settings.chunkSize, splitGroups: new Set(),
+      chunks: new Map(), globalKeys: blocks.keyView, ids: [null], layers, layerYs: [...layers.keys()].sort((a, b) => a - b) }
+  }
   const useCounts = new Float64Array(palette.length)
   for (const gi of blocks.values()) useCounts[gi]++
   const safePalette = palette.map(isUnitCube)
@@ -127,7 +135,7 @@ export async function buildBlockChunk(index, id, filter, onProgress, trackBlocks
   const includeGroup = !index.enabled ? undefined
     : id === null ? key => !index.splitGroups.has(key) : key => index.splitGroups.has(key)
   const { palette, blocks, bounds } = index.data
-  const result = await buildFaceGroups(palette, blocks, bounds, onProgress, filter, { keys, includeGroup, trackBlocks })
+  const result = await buildFaceGroups(palette, blocks, bounds, onProgress, filter, { keys, includeGroup, trackBlocks, compactFaces: index.compact })
   return { ...result, scannedBlocks: keys.length }
 }
 

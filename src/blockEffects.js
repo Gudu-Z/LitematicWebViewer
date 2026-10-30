@@ -117,7 +117,7 @@ export async function addBlockEffects(group, data, assets, visible) {
   const supported = new Set(['bell', 'enchanting_table', 'conduit', 'lectern'])
   const entries = data.palette.map(p => supported.has(p.name.replace('minecraft:', '')) ? p : null)
   if (!entries.some(Boolean)) return
-  for (const [key, index] of data.blocks) {
+  for (const [key, index] of data.blocks.entriesForPalette?.(entries) || data.blocks) {
     const p = entries[index]; if (!p) continue
     const x = key % w, z = Math.floor(key / w) % d, y = Math.floor(key / (w * d))
     if (visible && !visible(x + minX, y + minY, z + minZ, y)) continue

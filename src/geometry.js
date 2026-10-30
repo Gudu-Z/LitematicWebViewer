@@ -11,6 +11,7 @@
 // 绕到下一行 z 的 x=0），因此查找前必须先做边界检查，否则会误删边界处的可见面。
 
 import { FLUID_FLOW_BLOCKS } from './fluidFlowBlocks.js'
+import { CompactFaceData, canCompactFaces } from './compactFaceData.js'
 
 const SKIP_BLOCKS = new Set([
   'air', 'cave_air', 'void_air',
@@ -477,7 +478,7 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
   })
 
   const keys = options?.keys
-  const entries = keys ? function* () {
+  const entries = keys && keys !== blocks.keyView ? function* () {
     for (const key of keys) {
       const gi = blocks.get(key)
       if (gi !== undefined) yield [key, gi]
@@ -528,6 +529,10 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
   // 气泡组是「点」而非面：只存中心坐标（每点 3 个 float），渲染端用 THREE.Points。
   const groups = new Map()
   for (const [gKey, count] of counts) {
+    if (options?.compactFaces && canCompactFaces(bounds, gKey)) {
+      groups.set(gKey, new CompactFaceData(count, bounds))
+      continue
+    }
     groups.set(gKey, gKey === 'particle/bubble'
       ? { positions: new Float32Array(count * 3), v: 0 }
       : {
@@ -584,9 +589,12 @@ export async function buildFaceGroups(palette, blocks, bounds, onProgress, filte
       const q = quads[qi]
       if (!faceGroups[qi]) continue
       if (faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible)) continue
-      writeFace(faceGroups[qi], q.verts, q.uvs, x, y, z, key)
+      const group = faceGroups[qi]
+      if (group.isCompactFaceData) group.write(q, x, y, z, key)
+      else writeFace(group, q.verts, q.uvs, x, y, z, key)
     }
   }
 
+  for (const group of groups.values()) if (group.isCompactFaceData) group.finish()
   return { groups, emitted }
 }

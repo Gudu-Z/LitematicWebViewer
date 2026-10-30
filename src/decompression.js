@@ -126,7 +126,16 @@ export async function consumeDecompressed(data, createSink, { onProgress, maxExp
       sink.push(chunk)
     }
     try {
-      if (!format) push(bytes)
+      if (!format) {
+        let yieldAt = performance.now() + 12
+        for (let offset = 0; offset < bytes.length; offset += 64 * 1024) {
+          push(bytes.subarray(offset, offset + 64 * 1024))
+          if (performance.now() >= yieldAt) {
+            report(Math.min(1, (offset + 64 * 1024) / bytes.length))
+            await new Promise(resolve => setTimeout(resolve, 0)); yieldAt = performance.now() + 12
+          }
+        }
+      }
       else if (attempt === 0) await visitNative(bytes, format, push)
       else if (attempt === 1) {
         if (nextGzipHeader(bytes, 10) === bytes.length) throw lastError
@@ -158,12 +167,16 @@ async function visitNative(data, format, onChunk) {
   let reader
   try { reader = new Blob([data]).stream().pipeThrough(new DecompressionStream(format)).getReader() }
   catch (error) { throw compressionError(error) }
+  let yieldAt = performance.now() + 12
   try {
     for (;;) {
       let result
       try { result = await reader.read() } catch (error) { throw compressionError(error) }
       if (result.done) break
       onChunk(result.value)
+      if (performance.now() >= yieldAt) {
+        await new Promise(resolve => setTimeout(resolve, 0)); yieldAt = performance.now() + 12
+      }
     }
   } finally {
     await reader.cancel().catch(() => {})

@@ -296,7 +296,7 @@ SDK 保持单文件 ES module 地址。采用新接口时建议使用定制器�
 - **打开“完整预览”会保留文件、相机位置、投影方式、语言、材质预设和外观配置。**透明背景也会保留；新标签页不会复制宿主页面背后的图片或渐变。文件通过经来源、窗口和随机标记校验的 `postMessage` 交接，不依赖第三方 Cookie 或浏览器存储，也不上传到服务器。请保持原页面和预览卡片打开直到加载完成，并允许用户单击打开新标签页。[postMessage 说明](https://developer.mozilla.org/en-US/docs/Web/API/Window/postMessage)
 - **文件数据模式的完整页面刷新后需要重新打开文件。**公开 URL 模式保留 `file` 参数，可重新下载；临时签名链接过期后需由档案馆更新。
 - 卡片及其打开的完整页面使用指定的 `xk` / `vanilla` 预设，不读取个人资源包，也不覆盖已有资源包偏好。自定义 ZIP 暂不作为嵌入参数提供。
-- 嵌入文件上限为 **64 MiB（压缩文件大小）**，另受下文投影方块数量与浏览器内存限制。大型投影依然需要完整下载和解析，建议档案馆列表使用封面图片，详情页提供交互预览。
+- 嵌入文件上限为 **64 MiB（压缩文件大小）**，另受下文数据预算与浏览器内存限制。大型投影依然需要完整下载和解析，建议档案馆列表使用封面图片，详情页提供交互预览。
 - 使用严格 CSP 的宿主需允许本站的 `frame-src`；JS 方式还需允许本站的模块脚本。若设置 iframe `sandbox`，保留示例中的四项权限；完整预览器还需要 `allow-downloads` 用于导出 PNG，SDK 会自动添加。
 - 可在当前静态托管上运行，不需要后端代理。自建部署时从自己的域名引入 `embed.js`，脚本会自动找到同目录的 `embed.html` 或 `index.html`；相对路径也兼容子目录部署。托管响应不能用 `X-Frame-Options: DENY/SAMEORIGIN` 或限制性的 CSP `frame-ancestors` 阻止合作网站嵌入。
 
@@ -463,6 +463,9 @@ node scripts/verify-cushion.mjs  # 坐垫 16 色、原版尺寸/UV/朝向、NBT 
 node scripts/verify-special-rendering.mjs  # 特殊方块、分组、流向、42 种幼体及变种、1,233 个对应物品、中英文
 node scripts/verify-release-coverage.mjs   # 独立 26.3 生物清单、全部方块状态、旋转、雕像/书本/活塞、新生物及装备
 node scripts/verify-release-browser.mjs    # build 后验证 19 个真实 WebGL 状态；--url=https://站点/ 可检查线上版本
+node scripts/verify-paged-blocks.mjs       # 无损方块页、流式数组、重叠区域与数据预算
+node scripts/verify-compact-faces.mjs      # 顶点/UV 逐位一致、大范围寻址与精确拾取
+node scripts/verify-compact-browser.mjs    # Chrome + setup 资源；原版/XK 逐像素对比及切层恢复（CHROME_PATH 可指定浏览器）
 npm run build
 ```
 
@@ -472,8 +475,8 @@ npm run build
 
 ## 五、已知限制
 
-- 超大投影（约 2000 万方块以上）会提示「文件过大」无法预览——浏览器内存放不下全部方块与合并几何
-- NBT 采用流式过滤，支持单段及多段 GZIP、zlib 和未压缩数据。512 MiB 上限针对过滤后需要保留的 NBT，而非书页等被跳过的内容；另有 16 GiB 扫描上限及嵌套深度、结构数量限制。跳过书页不等于跳过整个压缩流，仍需扫描与校验，所以包含大量书页的文件仍会花时间加载。
+- 大投影使用紧凑方块页，不再因超过 2000 万方块直接拒绝。常规模型共享原始面模板，每个可见面只保存位置及模板编号（通常 8 字节，超大范围 12 字节），保留原顶点精度、UV、面顺序和完整范围；流体等特殊几何仍使用原路径。首次加载仍须遍历方块、剔除隐藏面和上传可见几何，大文件可能需要数分钟；这不等于任意大小的投影都能流畅旋转，实际仍受内存、可见面数量及显卡性能限制。
+- NBT 采用流式过滤，支持单段及多段 GZIP、zlib 和未压缩数据。大方块数组通过两遍有界解压直接写入方块页，不保留完整展开数组。512 MiB 上限针对过滤后需要保留的 NBT，紧凑方块页另有 1 GiB 预算；还有 16 GiB 扫描上限及嵌套深度、结构数量限制。跳过书页不等于跳过整个压缩流，仍需扫描与校验，所以包含大量书页的文件仍会花时间加载。
 - 没有生物群系信息，草 / 树叶 / 藤蔓统一用默认颜色（原版会按群系渐变）
 - 方块模型的个别边角（`uvlock`、极端旋转组合）可能与原版有细微差异
 - 极老版本存档的部分方块贴图可能有细微出入
@@ -497,6 +500,9 @@ src/
   blocks.js            方块状态 -> 方块模型解析（含 multipart/变体）
   modelBaker.js        模型 JSON -> 面（quad）烘焙
   geometry.js          隐藏面剔除 + 按贴图分组合并几何
+  pagedBlocks.js       流式方块页编码、紧凑查询与区域覆盖
+  compactFaceData.js   共享原始面模板与精确位置索引
+  compactFaceMesh.js   共享面 GPU 绘制、边界与精确拾取
   renderer.js          Three.js 渲染（相机、材质、实体、水下雾）
   entities.js          实体模型（矿车/船/物品展示框等）
   entityModel.js       实体几何、骨骼与透明面排序
