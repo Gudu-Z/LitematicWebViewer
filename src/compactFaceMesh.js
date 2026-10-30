@@ -1,5 +1,6 @@
 import * as THREE from 'three'
 import { FACE_BATCH_SIZE, compactFaceKey, readCompactFace } from './compactFaceData.js'
+import { copySpatialFaces } from './spatialFaces.js'
 
 const declarations = `
 attribute uint compactCell;
@@ -89,7 +90,7 @@ export class CompactFaceMesh extends THREE.Mesh {
     this.isCompactFaceMesh = true; this.compactData = data
   }
 
-  copy(source, recursive) { super.copy(source, recursive); this.compactData = source.compactData; return this }
+  copy(source, recursive) { super.copy(source, recursive); this.compactData = source.compactData; return copySpatialFaces(this, source) }
 
   // Keep exact triangle/UV picking without expanding all instances. Coarse
   // original-order batches discard most faces before the per-cell/triangle test.
@@ -100,7 +101,7 @@ export class CompactFaceMesh extends THREE.Mesh {
     const geometry = new THREE.BufferGeometry(), positions = new Float32Array(12), uvs = new Float32Array(8)
     geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3))
     geometry.setAttribute('uv', new THREE.BufferAttribute(uvs, 2)); geometry.setIndex([0, 1, 2, 2, 1, 3])
-    const proxy = new THREE.Mesh(geometry, this.material), box = new THREE.Box3(), cellBox = new THREE.Box3(), results = []
+    const proxy = new THREE.Mesh(geometry, Array.isArray(this.material) ? this.material[0] : this.material), box = new THREE.Box3(), cellBox = new THREE.Box3(), results = []
     const modelMagnitude = Math.max(1, ...data.modelMin.map(Math.abs), ...data.modelMax.map(Math.abs))
     proxy.matrixWorld.copy(this.matrixWorld)
     for (let batch = 0; batch < data.cellBounds.length / 6; batch++) {

@@ -26,13 +26,15 @@ class TranslucentBlockMesh extends THREE.Mesh {
         centers[face * 3 + axis] = (p.array[face * 12 + axis] + p.array[face * 12 + 9 + axis]) / 2
       }
       state = { centers, indices: geometry.index.array.slice(), order: Uint32Array.from({ length: count }, (_, i) => i),
-        distances: new Float64Array(count), camera: new THREE.Matrix4(), world: new THREE.Matrix4(),
+        distances: new Float64Array(count), world: new THREE.Matrix4(),
         point: new THREE.Vector3(), eye: new THREE.Vector3(), ready: false }
       sorting.set(this, state)
     }
-    if (state.ready && state.camera.equals(camera.matrixWorld) && state.world.equals(this.matrixWorld)) return
-    state.ready = true; state.camera.copy(camera.matrixWorld); state.world.copy(this.matrixWorld)
-    state.eye.setFromMatrixPosition(camera.matrixWorld)
+    // Distance ordering depends on the eye position, not its viewing direction.
+    // Turning in place leaves every distance and the uploaded index order exact.
+    state.point.setFromMatrixPosition(camera.matrixWorld)
+    if (state.ready && state.eye.equals(state.point) && state.world.equals(this.matrixWorld)) return
+    state.ready = true; state.eye.copy(state.point); state.world.copy(this.matrixWorld)
     for (let i = 0; i < count; i++) {
       state.point.fromArray(state.centers, i * 3).applyMatrix4(this.matrixWorld)
       state.distances[i] = state.point.distanceToSquared(state.eye)

@@ -47,6 +47,47 @@ function checkSort(mesh, position) {
   assert.equal(mesh.geometry.index.version, version, 'Stationary previews do not repeatedly sort/upload')
   checks++
 }
+
+function checkSortDependencies(mesh) {
+  const camera = new THREE.PerspectiveCamera(), rig = new THREE.Group()
+  rig.position.set(-2, 1, 4); rig.add(camera); camera.position.set(4, 3, 5)
+  mesh.updateWorldMatrix(true, false); rig.updateMatrixWorld(true)
+  const index = mesh.geometry.index, positions = mesh.geometry.attributes.position.array
+  const exactReference = () => {
+    const eye = new THREE.Vector3().setFromMatrixPosition(camera.matrixWorld)
+    const faces = Array.from({ length: index.count / 6 }, (_, face) => {
+      const center = new THREE.Vector3()
+      for (let axis = 0; axis < 3; axis++) center.setComponent(axis, (positions[face * 12 + axis] + positions[face * 12 + 9 + axis]) / 2)
+      return { face, distance: center.applyMatrix4(mesh.matrixWorld).distanceToSquared(eye) }
+    }).sort((a, b) => b.distance - a.distance || a.face - b.face)
+    return Uint32Array.from(faces.flatMap(({ face }) => [0, 1, 2, 2, 1, 3].map(i => face * 4 + i)))
+  }
+  mesh.onBeforeRender(null, null, camera)
+  const initial = index.array.slice(), version = index.version
+  assert.deepEqual(index.array, exactReference())
+  for (const rotation of [[.4, 1.2, 0], [-1, -2.5, .7], [0, Math.PI, 0]]) {
+    camera.rotation.set(...rotation); rig.updateMatrixWorld(true)
+    mesh.onBeforeRender(null, null, camera)
+    assert.equal(index.version, version, 'Turning in place does not sort or upload identical indices')
+    assert.deepEqual(index.array, initial)
+    assert.deepEqual(index.array, exactReference(), 'Cached yaw/pitch/roll order equals full distance sort')
+  }
+  camera.fov = 35; camera.updateProjectionMatrix(); mesh.onBeforeRender(null, null, camera)
+  assert.equal(index.version, version, 'Projection changes do not change world-space distance ordering')
+  camera.position.x += .125; rig.updateMatrixWorld(true); mesh.onBeforeRender(null, null, camera)
+  assert.equal(index.version, version + 1); assert.deepEqual(index.array, exactReference())
+  rig.position.z -= .5; rig.updateMatrixWorld(true); mesh.onBeforeRender(null, null, camera)
+  assert.equal(index.version, version + 2, 'A parent moving the camera invalidates the cache')
+  assert.deepEqual(index.array, exactReference())
+  const matrix = mesh.matrix.clone(), auto = mesh.matrixAutoUpdate, worldAuto = mesh.matrixWorldAutoUpdate
+  mesh.matrixAutoUpdate = false; mesh.matrixWorldAutoUpdate = true
+  mesh.matrix.elements[12] += 2; mesh.updateWorldMatrix(true, false, true)
+  mesh.onBeforeRender(null, null, camera)
+  assert.equal(index.version, version + 3, 'A changed mesh transform invalidates the cache')
+  assert.deepEqual(index.array, exactReference())
+  mesh.matrix.copy(matrix); mesh.matrixAutoUpdate = auto; mesh.updateWorldMatrix(true, false, true); mesh.matrixWorldAutoUpdate = worldAuto
+  mesh.onBeforeRender(null, null, camera); assert.deepEqual(index.array, exactReference())
+}
 try {
   const xk = await JSZip.loadAsync(readFileSync('resourcepacks/XK redstone display 26.3.0.zip'))
   for (const pack of [null, xk]) {
@@ -78,6 +119,7 @@ try {
       assert.equal(mesh.material.translucentMaps.length, id === 0 ? 1 : 3)
       assert.equal(collectSceneResources(world).retained.size, id === 0 ? 1 : 3)
       for (const position of [[4, 3, 5], [-4, -3, -5], [1, 10, 1]]) checkSort(mesh, position)
+      checkSortDependencies(mesh)
       const clone = mesh.clone(); clone.position.set(3, 1, -2)
       checkSort(clone, [6, 2, -4]); clone.geometry.dispose()
       dispose(world)
@@ -132,5 +174,5 @@ try {
   const item = await buildItemPreview({ id: 'minecraft:honey_block', count: 1 }, assets)
   assert.equal(translucent(item).length, 12, 'Complex packs fall back to sortable faces within sampler limits')
   translucent(item).forEach(mesh => assert.equal(mesh.material.translucentMaps.length, 1)); dispose(item)
-  console.log(`PASS translucent blocks: vanilla/XK inner shells, contact culling, slices, ${checks} camera sorts, items/GUI/cached frames, pack sprite replacement and shared texture ownership`)
+  console.log(`PASS translucent blocks: vanilla/XK inner shells, contact culling, slices, ${checks} camera sorts, exact yaw/pitch/roll cache, camera/mesh movement invalidation, items/GUI/cached frames, pack sprite replacement and shared texture ownership`)
 } finally { assets.clearCaches(); globalThis.fetch = originalFetch }

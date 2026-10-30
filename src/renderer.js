@@ -15,6 +15,7 @@ import { batchItemFrames, updateFrameBatches, freezeStaticObject } from './frame
 import { collectSceneResources } from './sceneResources.js'
 import { createBlockChunkIndex, buildBlockChunk, planBlockChunkUpdate } from './blockChunks.js'
 import { CompactFaceMesh } from './compactFaceMesh.js'
+import { enableSpatialFaces } from './spatialFaces.js'
 import { mergeTranslucentBlocks } from './translucentBlocks.js'
 import { markBlockObject, setBlockFaceKeys } from './selectionSources.js'
 
@@ -1541,7 +1542,7 @@ export class Renderer {
       const mat = materials.get(texKey)
       if (!mat) continue
       if (g.isCompactFaceData) {
-        const mesh = new CompactFaceMesh(g, mat)
+        const mesh = enableSpatialFaces(new CompactFaceMesh(g, mat))
         target.add(mesh)
         if (this._freezeStatic !== false) freezeStaticObject(mesh)
         if (performance.now() >= yieldAt) {

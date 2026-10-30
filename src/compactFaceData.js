@@ -27,7 +27,9 @@ export class CompactFaceData {
     this.cellYs = bounds.width * bounds.height * bounds.depth > 2 ** 32 ? new Uint32Array(count) : null
     this.templates = []; this.lookup = new Map(); this.quads = new WeakMap()
     this.cellBounds = new Float64Array(Math.ceil(count / FACE_BATCH_SIZE) * 6)
+    this.faceBounds = new Float32Array(this.cellBounds.length)
     for (let i = 0; i < this.cellBounds.length; i += 6) this.cellBounds.set([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity], i)
+    this.faceBounds.set(this.cellBounds)
     this.modelMin = [Infinity, Infinity, Infinity]; this.modelMax = [-Infinity, -Infinity, -Infinity]
     this.worldBounds = new Float64Array([Infinity, Infinity, Infinity, -Infinity, -Infinity, -Infinity])
     this.variants = 0; this.absolute = 0
@@ -103,8 +105,11 @@ export class CompactFaceData {
       this.cellBounds[batch + 3 + a] = Math.max(this.cellBounds[batch + 3 + a], offset[a])
       // Float32 conversion is monotonic, so local extrema give exactly the
       // legacy vertex-array bounds without visiting or expanding all vertices.
-      this.worldBounds[a] = Math.min(this.worldBounds[a], Math.fround(offset[a] + record.quadBounds[a]))
-      this.worldBounds[a + 3] = Math.max(this.worldBounds[a + 3], Math.fround(offset[a] + record.quadBounds[a + 3]))
+      const min = Math.fround(offset[a] + record.quadBounds[a]), max = Math.fround(offset[a] + record.quadBounds[a + 3])
+      this.worldBounds[a] = Math.min(this.worldBounds[a], min)
+      this.worldBounds[a + 3] = Math.max(this.worldBounds[a + 3], max)
+      this.faceBounds[batch + a] = Math.min(this.faceBounds[batch + a], min)
+      this.faceBounds[batch + a + 3] = Math.max(this.faceBounds[batch + a + 3], max)
     }
   }
 

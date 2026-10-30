@@ -16,6 +16,11 @@ function assertCompactBounds(group, positions) {
   const expected = new THREE.Box3().setFromBufferAttribute(new THREE.BufferAttribute(positions, 3))
   assert.deepEqual(group.worldBounds, Float64Array.from([...expected.min.toArray(), ...expected.max.toArray()]),
     'Compact world bounds exactly match the legacy Float32 vertices for unchanged export framing')
+  for (let face = 0; face < group.count; face += 4096) {
+    const batch = new THREE.Box3().setFromBufferAttribute(new THREE.BufferAttribute(positions.subarray(face * 12, (face + 4096) * 12), 3))
+    assert.deepEqual(group.faceBounds.subarray(face / 4096 * 6, face / 4096 * 6 + 6),
+      Float32Array.from([...batch.min.toArray(), ...batch.max.toArray()]), 'Spatial batches enclose exact original vertices')
+  }
   return expected
 }
 

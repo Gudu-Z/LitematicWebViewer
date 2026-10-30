@@ -466,6 +466,8 @@ node scripts/verify-release-browser.mjs    # build 后验证 19 个真实 WebGL 
 node scripts/verify-paged-blocks.mjs       # 无损方块页、流式数组、重叠区域与数据预算
 node scripts/verify-compact-faces.mjs      # 顶点/UV 逐位一致、大范围寻址与精确拾取
 node scripts/verify-compact-browser.mjs    # Chrome + setup 资源；原版/XK 逐像素对比及切层恢复（CHROME_PATH 可指定浏览器）
+node scripts/verify-spatial-faces.mjs      # 原序空间批次、视锥切换、宽坐标、拾取及克隆
+node scripts/verify-spatial-browser.mjs    # Chrome 逐像素对比、显存复用、导出相机和透明安全回退
 npm run build
 ```
 
@@ -476,6 +478,7 @@ npm run build
 ## 五、已知限制
 
 - 大投影使用紧凑方块页，不再因超过 2000 万方块直接拒绝。常规模型共享原始面模板，每个可见面只保存位置及模板编号（通常 8 字节，超大范围 12 字节），保留原顶点精度、UV、面顺序和完整范围；流体等特殊几何仍使用原路径。首次加载仍须遍历方块、剔除隐藏面和上传可见几何，大文件可能需要数分钟；这不等于任意大小的投影都能流畅旋转，实际仍受内存、可见面数量及显卡性能限制。
+- 大型常规模型按原始面顺序分批，只提交当前视锥内的批次，相邻批次合并绘制；全景自动使用整组绘制。各批次共用同一份显存，不降低距离、模型精度或贴图质量。半透明模型保留原绘制顺序；黏液/蜂蜜的距离排序仅在相机位置或模型变换变化时重算，原地转头复用完全相同的索引。
 - NBT 采用流式过滤，支持单段及多段 GZIP、zlib 和未压缩数据。大方块数组通过两遍有界解压直接写入方块页，不保留完整展开数组。512 MiB 上限针对过滤后需要保留的 NBT，紧凑方块页另有 1 GiB 预算；还有 16 GiB 扫描上限及嵌套深度、结构数量限制。跳过书页不等于跳过整个压缩流，仍需扫描与校验，所以包含大量书页的文件仍会花时间加载。
 - 没有生物群系信息，草 / 树叶 / 藤蔓统一用默认颜色（原版会按群系渐变）
 - 方块模型的个别边角（`uvlock`、极端旋转组合）可能与原版有细微差异
@@ -503,6 +506,7 @@ src/
   pagedBlocks.js       流式方块页编码、紧凑查询与区域覆盖
   compactFaceData.js   共享原始面模板与精确位置索引
   compactFaceMesh.js   共享面 GPU 绘制、边界与精确拾取
+  spatialFaces.js      保持原序的视锥批次、共享显存与全景整组绘制
   renderer.js          Three.js 渲染（相机、材质、实体、水下雾）
   entities.js          实体模型（矿车/船/物品展示框等）
   entityModel.js       实体几何、骨骼与透明面排序
