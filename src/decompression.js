@@ -1,6 +1,9 @@
 // Keep native decompression for ordinary files. Browser DecompressionStream
 // rejects concatenated gzip members, although they are valid RFC 1952 files.
+import { throwIfAborted, withAbort } from './loadingTask.js'
+
 const MAX_DECOMPRESSED = 512 * 1024 * 1024
+const yieldThread = () => new Promise(resolve => setTimeout(resolve, 0))
 
 function sizeError() {
   const error = new Error('解压后数据过大')
@@ -73,13 +76,22 @@ async function inflateGzipMembers(data, maxBytes) {
   return output
 }
 
-async function visitGzipChunks(data, onChunk, onProgress) {
+async function loadGzipDecoder() {
+  // Keep the named import visible to the bundler: wrapping the entire module
+  // namespace in the cancellation helper would retain unused pako codecs.
+  const { ZStream, zlibInflateInit2, zlibInflate, zlibInflateEnd, Z_NO_FLUSH, Z_OK, Z_STREAM_END } = await import('pako')
+  return { ZStream, zlibInflateInit2, zlibInflate, zlibInflateEnd, Z_NO_FLUSH, Z_OK, Z_STREAM_END }
+}
+
+async function visitGzipChunks(data, onChunk, onProgress, { yieldTask = yieldThread, signal } = {}) {
   // Loaded only after native gzip fails; normal projections/cards pay no extra
   // download or JS decompression cost. Low-level streaming bounds each step.
-  const { ZStream, zlibInflateInit2, zlibInflate, zlibInflateEnd, Z_NO_FLUSH, Z_OK, Z_STREAM_END } = await import('pako')
+  const { ZStream, zlibInflateInit2, zlibInflate, zlibInflateEnd, Z_NO_FLUSH, Z_OK, Z_STREAM_END } = await withAbort(loadGzipDecoder(), signal)
+  throwIfAborted(signal)
   const buffer = new Uint8Array(64 * 1024)
   let offset = 0, yieldAt = performance.now() + 8
   while (offset < data.length) {
+    throwIfAborted(signal)
     const stream = new ZStream()
     if (zlibInflateInit2(stream, 31) !== Z_OK) throw new Error('Cannot initialize gzip decoder')
     stream.input = data
@@ -87,6 +99,7 @@ async function visitGzipChunks(data, onChunk, onProgress) {
     stream.avail_in = data.length - offset
     try {
       for (;;) {
+        throwIfAborted(signal)
         stream.output = buffer
         stream.next_out = 0
         stream.avail_out = buffer.length
@@ -98,7 +111,8 @@ async function visitGzipChunks(data, onChunk, onProgress) {
         }
         if (performance.now() >= yieldAt) {
           onProgress?.(stream.next_in / data.length)
-          await new Promise(resolve => setTimeout(resolve, 0))
+          await withAbort(yieldTask(), signal)
+          throwIfAborted(signal)
           yieldAt = performance.now() + 8
         }
         if (status === Z_STREAM_END) { offset = stream.next_in; break }
@@ -111,12 +125,18 @@ async function visitGzipChunks(data, onChunk, onProgress) {
 
 // A fresh sink is required for each attempt: native gzip may have emitted valid
 // prefix bytes before rejecting a second member. Never reuse that partial NBT.
-export async function consumeDecompressed(data, createSink, { onProgress, onStage, maxExpandedBytes = 16 * 1024 ** 3 } = {}) {
+export async function consumeDecompressed(data, createSink, { onProgress, onStage, maxExpandedBytes = 16 * 1024 ** 3, yieldTask = yieldThread, signal } = {}) {
+  throwIfAborted(signal)
   if (!Number.isSafeInteger(maxExpandedBytes) || maxExpandedBytes < 0 || maxExpandedBytes > 16 * 1024 ** 3) throw new RangeError('Invalid scan limit')
   const bytes = data instanceof Uint8Array ? data : new Uint8Array(data)
   const format = bytes[0] === 31 && bytes[1] === 139 ? 'gzip' : bytes[0] === 0x78 ? 'deflate' : null
   let lastError, progress = 0
-  const report = value => { progress = Math.max(progress, value); onProgress?.(progress) }
+  const scheduling = { yieldTask, signal }
+  const report = value => {
+    throwIfAborted(signal)
+    progress = Math.max(progress, value); onProgress?.(progress)
+    throwIfAborted(signal)
+  }
   let processedBytes = 0, stageReportAt = 0
   const reportBytes = (expanded, force = false) => {
     // Native gzip exposes output chunks, not a reliable total output size.
@@ -130,13 +150,16 @@ export async function consumeDecompressed(data, createSink, { onProgress, onStag
     }
   }
   for (let attempt = 0; attempt < (format === 'gzip' ? 3 : 1); attempt++) {
+    throwIfAborted(signal)
     const sink = createSink()
     let expanded = 0
     const push = chunk => {
+      throwIfAborted(signal)
       expanded += chunk.length
       if (expanded > maxExpandedBytes) throw Object.assign(new Error('NBT scan limit exceeded'), { code: 'FILE_TOO_LARGE', reason: 'scan' })
       sink.push(chunk)
       if (onStage) reportBytes(expanded)
+      throwIfAborted(signal)
     }
     try {
       if (!format) {
@@ -145,26 +168,30 @@ export async function consumeDecompressed(data, createSink, { onProgress, onStag
           push(bytes.subarray(offset, offset + 64 * 1024))
           if (performance.now() >= yieldAt) {
             report(Math.min(1, (offset + 64 * 1024) / bytes.length))
-            await new Promise(resolve => setTimeout(resolve, 0)); yieldAt = performance.now() + 12
+            await withAbort(yieldTask(), signal)
+            throwIfAborted(signal); yieldAt = performance.now() + 12
           }
         }
       }
-      else if (attempt === 0) await visitNative(bytes, format, push)
+      else if (attempt === 0) await visitNative(bytes, format, push, scheduling)
       else if (attempt === 1) {
         if (nextGzipHeader(bytes, 10) === bytes.length) throw lastError
         let start = 0, reportAt = 0
         while (start < bytes.length) {
           const end = nextGzipHeader(bytes, start + 10)
-          await visitNative(bytes.subarray(start, end), 'gzip', push)
+          await visitNative(bytes.subarray(start, end), 'gzip', push, scheduling)
           start = end
           if (performance.now() >= reportAt) { report(start / bytes.length); reportAt = performance.now() + 16 }
         }
-      } else await visitGzipChunks(bytes, push, report)
+      } else await visitGzipChunks(bytes, push, report, scheduling)
+      throwIfAborted(signal)
       const result = sink.finish()
+      throwIfAborted(signal)
       if (onStage) reportBytes(expanded, true)
       report(1)
       return result
     } catch (error) {
+      throwIfAborted(signal)
       lastError = error
       // A malformed NBT structure or exhausted budget is independent of the
       // decompressor. Retry only compressed-stream validation failures.
@@ -177,19 +204,24 @@ function compressionError(error) {
   return Object.assign(new Error(error.message || 'Invalid compressed data'), { code: 'INVALID_COMPRESSION', cause: error })
 }
 
-async function visitNative(data, format, onChunk) {
+async function visitNative(data, format, onChunk, { yieldTask = yieldThread, signal } = {}) {
+  throwIfAborted(signal)
   let reader
   try { reader = new Blob([data]).stream().pipeThrough(new DecompressionStream(format)).getReader() }
   catch (error) { throw compressionError(error) }
   let yieldAt = performance.now() + 12
   try {
     for (;;) {
+      throwIfAborted(signal)
       let result
-      try { result = await reader.read() } catch (error) { throw compressionError(error) }
+      try { result = await withAbort(reader.read(), signal) }
+      catch (error) { throwIfAborted(signal); throw compressionError(error) }
+      throwIfAborted(signal)
       if (result.done) break
       onChunk(result.value)
       if (performance.now() >= yieldAt) {
-        await new Promise(resolve => setTimeout(resolve, 0)); yieldAt = performance.now() + 12
+        await withAbort(yieldTask(), signal)
+        throwIfAborted(signal); yieldAt = performance.now() + 12
       }
     }
   } finally {

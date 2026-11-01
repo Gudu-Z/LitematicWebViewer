@@ -3,13 +3,15 @@ import { NbtStreamFilter, isBookPages } from './nbtStream.js'
 import { MAX_NBT_BYTES, parseNBT, validateNbtLimit } from './nbt.js'
 import { selectRenderNbtField } from './renderNbt.js'
 import { BlockStatePageWriter, createBlockPageBudget } from './pagedBlocks.js'
+import { throwIfAborted } from './loadingTask.js'
 
 // Most schematics fit in this bounded buffer. Parse those once, without a second
 // field-by-field streaming pass. Larger inputs transition to filtering while the
 // remaining data is still being decompressed, regardless of the compressed size.
 const FAST_BUFFER_BYTES = 32 * 1024 * 1024
 
-export async function readSchematicNBT(data, { renderOnly = false, onProgress, onStage, maxBytes = MAX_NBT_BYTES, maxExpandedBytes, streamThreshold = FAST_BUFFER_BYTES, compactBlocks = false } = {}) {
+export async function readSchematicNBT(data, { renderOnly = false, onProgress, onStage, maxBytes = MAX_NBT_BYTES, maxExpandedBytes, streamThreshold = FAST_BUFFER_BYTES, compactBlocks = false, yieldTask, signal } = {}) {
+  throwIfAborted(signal)
   validateNbtLimit(maxBytes)
   // Large storage builds legitimately contain millions of small block-entity
   // fields. Compact callers retain the same byte/depth limits and a bounded,
@@ -66,7 +68,7 @@ export async function readSchematicNBT(data, { renderOnly = false, onProgress, o
       },
       abort() { chunks = []; filter?.abort() },
     }
-  }, { onProgress: compactBlocks ? value => reportProgress(value * .5) : onProgress, onStage, maxExpandedBytes })
+  }, { onProgress: compactBlocks ? value => reportProgress(value * .5) : onProgress, onStage, maxExpandedBytes, yieldTask, signal })
   const { root, stats, extracted } = result
   if (extracted.size) {
     const totalBlockBytes = [...extracted.values()].reduce((sum, record) => sum + record.length * 8, 0)
@@ -104,7 +106,7 @@ export async function readSchematicNBT(data, { renderOnly = false, onProgress, o
         finish() { parser.finish(); return regions },
         abort() { parser.abort() },
       }
-    }, { onProgress: value => { if (value === 1) reportProgress(1) }, maxExpandedBytes })
+    }, { onProgress: value => { if (value === 1) reportProgress(1) }, maxExpandedBytes, yieldTask, signal })
     stats.blockStateBytes = 0; stats.compactBlockBytes = 0
     for (const [key, { path, length }] of extracted) {
       const states = paged.get(key)
@@ -113,6 +115,7 @@ export async function readSchematicNBT(data, { renderOnly = false, onProgress, o
       stats.blockStateBytes += length * 8; stats.compactBlockBytes += states.bytes
     }
   }
+  throwIfAborted(signal)
   if (compactBlocks) reportProgress(1)
   return { root, stats }
 }

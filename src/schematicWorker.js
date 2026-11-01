@@ -87,6 +87,8 @@ export function createSchematicWorker({ postMessage, parse = parseLitematica, bu
         progress(job, 0, 'decompress')
         const data = await parse(message.bytes, fraction => progress(job, fraction, fraction < .5 ? 'decompress' : 'parse'), {
           ...message.options,
+          signal: job.controller.signal,
+          yieldTask,
           onStage: detail => progress(job, job.fraction, 'decompress', detail),
         })
         check(job)

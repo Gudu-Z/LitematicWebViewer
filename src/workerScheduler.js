@@ -1,6 +1,6 @@
-// Dedicated-worker geometry needs a real task boundary for queued commands.
+// Dedicated-worker parsing/building needs a real task boundary for queued commands.
 // Repeated setTimeout(0) calls acquire a browser timer clamp; MessageChannel
-// yields to the task queue without adding that delay to every 65,536 cells.
+// yields to the task queue without adding that delay to every work checkpoint.
 export function createWorkerScheduler({ MessageChannel: Channel = globalThis.MessageChannel } = {}) {
   const pending = new Set()
   let channel = null, disposed = false
@@ -48,7 +48,7 @@ export function createWorkerScheduler({ MessageChannel: Channel = globalThis.Mes
       if (disposed) return
       disposed = true
       closeChannel()
-      // Wake interrupted geometry so its existing signal check can finish;
+      // Wake interrupted work so its existing signal check can finish;
       // closing a MessagePort alone would strand the await forever.
       for (const entry of pending) {
         if (entry.timer !== undefined) clearTimeout(entry.timer)

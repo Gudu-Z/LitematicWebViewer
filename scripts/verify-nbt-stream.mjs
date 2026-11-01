@@ -115,3 +115,71 @@ for (const streamThreshold of [undefined, 0, 100]) {
   await assert.rejects(readSchematicNBT(emptyObjects, { streamThreshold }), { code: 'FILE_TOO_LARGE', reason: 'complexity' })
 }
 console.log('PASS retained-data, scan and structural budgets; huge skipped pages and malformed/truncated NBT')
+
+// Retained headers/scalars can straddle the 64 KiB output boundary independently
+// of input chunks. Compare the original binary representation, including NaN
+// payload bits, negative zero and signed longs that object parsing cannot prove.
+const exactFields = [
+  tag(1, '', Buffer.from([255])), tag(2, 'short', Buffer.from([128, 1])), tag(3, 'int', int(-2147483648)),
+  tag(4, 'long', Buffer.from('8000000000000001', 'hex')),
+  tag(5, 'float', Buffer.from('7fc12345', 'hex')), tag(6, 'double', Buffer.from('7ff8000012345678', 'hex')),
+  tag(6, 'negativeZero', Buffer.from('8000000000000000', 'hex')), text('汉字 🦜', '保留原始字节'),
+  tag(7, 'empty', int(0)), tag(11, 'ints', Buffer.concat([int(2), int(-1), int(0)])),
+  tag(12, 'longs', Buffer.concat([int(1), Buffer.from('fffffffffffffffe', 'hex')])),
+]
+for (const room of [0, 1, 2, 3, 4, 7, 8]) {
+  // Root header = 3 bytes, named byte-array header/length = 14 bytes.
+  const padding = Buffer.alloc(65536 - room - 17, 173)
+  const fixture = tag(10, '', compound(tag(7, 'padding', Buffer.concat([int(padding.length), padding])), ...exactFields))
+  for (const chunkSize of [1, 3, 7, 65533, 65536, fixture.length]) {
+    const filter = new NbtStreamFilter(undefined, { maxBytes: fixture.length })
+    const scratch = new Uint8Array(chunkSize + 23)
+    for (let pos = 0; pos < fixture.length; pos += chunkSize) {
+      const count = Math.min(chunkSize, fixture.length - pos)
+      scratch.set(fixture.subarray(pos, pos + count), 9)
+      filter.push(scratch.subarray(9, 9 + count)); scratch.fill(0)
+    }
+    const result = filter.finish()
+    assert.deepEqual(Buffer.from(result.bytes), fixture, `Exact retained bytes: output room=${room}, input=${chunkSize}`)
+    assert.deepEqual(result.stats, { readBytes: fixture.length, retainedBytes: fixture.length, omittedFields: 0, bookPageFields: 0 })
+    filter.abort()
+  }
+  const limited = new NbtStreamFilter(undefined, { maxBytes: fixture.length - 1 })
+  assert.throws(() => limited.push(fixture), { code: 'FILE_TOO_LARGE', reason: 'retained' }); limited.abort()
+}
+const longName = tag(10, 'n'.repeat(65535), compound(text('leaf', 'value')))
+const nameFilter = new NbtStreamFilter()
+for (let pos = 0; pos < longName.length; pos += 3) nameFilter.push(longName.subarray(pos, pos + 3))
+assert.deepEqual(Buffer.from(nameFilter.finish().bytes), longName); nameFilter.abort()
+
+const arrayValues = Buffer.from('8000000000000001fffffffffffffffe', 'hex')
+const pathFixture = tag(10, '', compound(tag(10, 'Container', compound(tag(9, 'List', list(10, [compound(
+  text('leaf', 'value'), tag(12, 'data', Buffer.concat([int(2), arrayValues])),
+)]))))))
+const expectedPaths = ['Container', 'Container/List', 'Container/List/leaf', 'Container/List/data']
+const paths = [], sinkParts = [], sinkPaths = []
+const sinkFilter = new NbtStreamFilter((path, name) => { paths.push([...path, name].join('/')); return true }, {
+  arraySink(path, type, length) {
+    sinkPaths.push({ path: [...path], type, length })
+    return { push(bytes) { sinkParts.push(Buffer.from(bytes)) } }
+  },
+})
+for (let pos = 0; pos < pathFixture.length; pos += 3) sinkFilter.push(pathFixture.subarray(pos, pos + 3))
+assert.deepEqual(paths, expectedPaths)
+assert.deepEqual(sinkPaths, [{ path: ['Container', 'List', 'data'], type: 12, length: 2 }])
+assert.deepEqual(Buffer.concat(sinkParts), arrayValues)
+assert.deepEqual(Buffer.from(sinkFilter.finish().bytes), tag(10, '', compound(tag(10, 'Container', compound(tag(9, 'List', list(10, [compound(
+  text('leaf', 'value'), tag(12, 'data', int(0)),
+)])))))))
+sinkFilter.abort()
+for (const type of [7, 11, 12]) {
+  const invalid = new NbtStreamFilter()
+  assert.throws(() => invalid.push(tag(10, '', compound(tag(type, 'invalid', int(-2147483648))))), RangeError)
+  invalid.abort()
+}
+for (const limits of [{ maxDepth: 0 }, { maxNodes: 1 }]) {
+  const limited = new NbtStreamFilter(undefined, limits)
+  assert.throws(() => limited.push(tag(10, '', compound(text('leaf', 'value')))), { code: 'FILE_TOO_LARGE', reason: 'complexity' })
+  limited.abort()
+}
+console.log('PASS exact tiny headers/scalars across retained/input boundaries, reusable slices, IEEE payload bits, unsigned names, array sink paths and leaf budgets')

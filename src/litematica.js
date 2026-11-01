@@ -11,6 +11,7 @@ import { LITTLE_ENDIAN } from './nbt.js'
 import { renderedBlockEntities } from './renderNbt.js'
 import { readSchematicNBT } from './schematicNbt.js'
 import { BlockStatePageWriter, PagedBlockStore, createBlockPageBudget } from './pagedBlocks.js'
+import { throwIfAborted, withAbort } from './loadingTask.js'
 
 // 空气类方块：解析时直接跳过、不存入 blocks Map，避免超大型投影占用过多内存。
 const SKIP_NAMES = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
@@ -56,13 +57,14 @@ function vec(v) {
 // （lx = wx-minX，W=宽，D=深，strideY = W*D）。相比 "x,y,z" 字符串 key，
 // 整数 key 的邻居查找是纯整数算术、速度快数倍，内存也更小，超大投影收益显著。
 // onProgress(fraction) 在解析过程中回调进度（0~1），用于超大文件显示进度。
-export async function parseLitematicaRaw(rawBytes, onProgress, { renderOnly = false, compactBlocks } = {}) {
-  const { root, stats } = await readSchematicNBT(rawBytes, { renderOnly, compactBlocks: compactBlocks !== false })
-  return parseLitematicaRoot(root, onProgress, renderOnly, stats, compactBlocks)
+export async function parseLitematicaRaw(rawBytes, onProgress, { renderOnly = false, compactBlocks, yieldTask, signal } = {}) {
+  const { root, stats } = await readSchematicNBT(rawBytes, { renderOnly, compactBlocks: compactBlocks !== false, yieldTask, signal })
+  return parseLitematicaRoot(root, onProgress, renderOnly, stats, compactBlocks, { yieldTask, signal })
 }
 
-async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compactBlocks) {
-
+async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compactBlocks, { yieldTask, signal } = {}) {
+  throwIfAborted(signal)
+  const yieldWork = yieldTask || (() => new Promise(resolve => setTimeout(resolve, 0)))
   const meta = root.Metadata || {}
   const metadata = {
     name: meta.Name ?? '',
@@ -87,6 +89,7 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
   let maxX = -Infinity, maxY = -Infinity, maxZ = -Infinity
   const regionList = []
   for (const [name, region] of Object.entries(regions)) {
+    throwIfAborted(signal)
     const pos = vec(region.Position)
     const size = vec(region.Size)
     const dx = Math.abs(size.x)
@@ -143,6 +146,7 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
 
   // 第二遍：解码并建立整数 key 的方块映射
   for (const [name, region] of Object.entries(regions)) {
+    throwIfAborted(signal)
     const pos = vec(region.Position)
     const size = vec(region.Size)
 
@@ -197,7 +201,8 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
           writer.word(words[i * 2 + low]); writer.word(words[i * 2 + (low ^ 1)])
           if ((i & 0x3fff) === 0 && performance.now() - lastYield >= 12) {
             onProgress?.((doneBlocks + Math.min(dx * dy * dz, (i + 1) * 64 / writer.bits)) / totalBlocks)
-            await new Promise(resolve => setTimeout(resolve, 0)); lastYield = performance.now()
+            await withAbort(yieldWork(), signal)
+            throwIfAborted(signal); lastYield = performance.now()
           }
         }
         writer.inputBytes = states.length * 8
@@ -238,7 +243,8 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
       doneBlocks += count
       if (performance.now() - lastYield >= 12) {
         onProgress?.(totalBlocks ? doneBlocks / totalBlocks : 0)
-        await new Promise((r) => setTimeout(r, 0))
+        await withAbort(yieldWork(), signal)
+        throwIfAborted(signal)
         lastYield = performance.now()
       }
     }
@@ -251,9 +257,11 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
     height: maxY - minY + 1,
     depth: D,
   }
+  throwIfAborted(signal)
   if (paged) blocks = new PagedBlockStore(packedRegions, bounds, palette.length)
 
   onProgress?.(1)
+  throwIfAborted(signal)
   return { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList, nbtInfo }
 }
 
@@ -261,5 +269,5 @@ export async function parseLitematica(buffer, onProgress, options) {
   // options.onStage reports real first-pass expanded bytes independently of
   // the existing numeric fractions for NBT extraction and block decoding.
   const { root, stats } = await readSchematicNBT(buffer, { ...options, compactBlocks: options?.compactBlocks !== false, onProgress: value => onProgress?.(value * .5) })
-  return parseLitematicaRoot(root, value => onProgress?.(.5 + value * .5), options?.renderOnly ?? false, stats, options?.compactBlocks)
+  return parseLitematicaRoot(root, value => onProgress?.(.5 + value * .5), options?.renderOnly ?? false, stats, options?.compactBlocks, options)
 }

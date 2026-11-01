@@ -18,6 +18,10 @@ export function encodeBlockPage(values, length = values.length) {
     indices[i] = id
     if (value !== previous) { previous = value; runs++ }
   }
+  return finishEncodedPage(palette, indices, length, count, runs)
+}
+
+function finishEncodedPage(palette, indices, length, count, runs) {
   if (palette.length === 1) return palette[0]
   const bits = Math.ceil(Math.log2(palette.length)), words = Math.ceil(length * bits / 32)
   const page = { palette: Uint32Array.from(palette), length, count, bits }
@@ -70,7 +74,8 @@ export function createBlockPageBudget(maxBytes = MAX_PAGE_BYTES) {
 }
 
 // Accepts arbitrary byte boundaries, including split big-endian longs. Only one
-// small decoded page and at most seven unfinished input bytes are retained.
+// small page of palette indices and at most seven unfinished input bytes are
+// retained. Build its palette while decoding instead of scanning it again.
 export class BlockStatePageWriter {
   constructor(palette, volume, longCount, budget = createBlockPageBudget()) {
     this.bits = Math.max(2, Math.ceil(Math.log2(palette.length)))
@@ -82,7 +87,8 @@ export class BlockStatePageWriter {
     this.mask = this.bits === 32 ? 0xffffffff : (1 << this.bits) - 1
     this.skip = Uint8Array.from(palette, p => skip(p.Name) ? 1 : 0)
     this.result = { isPagedBlockStates: true, pages: [], volume, count: 0, counts: new Float64Array(palette.length), bytes: 0 }
-    this.budget = budget; this.output = new Uint32Array(BLOCK_PAGE_SIZE)
+    this.budget = budget; this.indices = new Uint16Array(BLOCK_PAGE_SIZE)
+    this.pagePalette = []; this.lookup = new Map(); this.previous = -1; this.id = 0; this.runs = 0; this.countAtStart = 0
     this.position = 0; this.used = 0; this.carry = 0; this.carryBits = 0
     this.tail = new Uint8Array(8); this.tailSize = 0; this.inputBytes = 0; this.expectedBytes = longCount * 8
   }
@@ -92,13 +98,42 @@ export class BlockStatePageWriter {
     // Match the original decoder's fallback for an out-of-palette index.
     if (value >= this.skip.length) value = 0
     const stored = this.skip[value] ? 0 : value + 1
-    this.output[this.used++] = stored; this.position++
+    // Runs share one palette lookup. The reusable indices never escape into
+    // emitted pages: finishEncodedPage creates their owned output arrays.
+    if (stored !== this.previous) {
+      this.previous = stored; this.runs++
+      let id = this.lookup.get(stored)
+      if (id === undefined) { id = this.pagePalette.length; this.lookup.set(stored, id); this.pagePalette.push(stored) }
+      this.id = id
+    }
+    this.indices[this.used++] = this.id; this.position++
     if (stored) { this.result.count++; this.result.counts[value]++ }
     if (this.used === BLOCK_PAGE_SIZE) this.flush()
   }
 
   word(word) {
     const bits = this.bits
+    if (word === 0 && (!this.carryBits || this.carry === 0)) {
+      // A zero packed word and zero carry contain only palette index zero.
+      // Consume it in one run, including a partial page or final padding.
+      const available = 32 + this.carryBits, stored = this.skip[0] ? 0 : 1
+      let count = Math.min(Math.floor(available / bits), this.result.volume - this.position)
+      this.carryBits = available % bits; this.carry = 0
+      while (count > 0) {
+        const take = Math.min(count, BLOCK_PAGE_SIZE - this.used)
+        if (stored !== this.previous) {
+          this.previous = stored; this.runs++
+          let id = this.lookup.get(stored)
+          if (id === undefined) { id = this.pagePalette.length; this.lookup.set(stored, id); this.pagePalette.push(stored) }
+          this.id = id
+        }
+        this.indices.fill(this.id, this.used, this.used + take); this.used += take; this.position += take
+        if (stored) { this.result.count += take; this.result.counts[0] += take }
+        if (this.used === BLOCK_PAGE_SIZE) this.flush()
+        count -= take
+      }
+      return
+    }
     if (bits === 32) { this.emit(word >>> 0); return }
     let available = 32
     if (this.carryBits) {
@@ -132,8 +167,9 @@ export class BlockStatePageWriter {
 
   flush() {
     if (!this.used) return
-    const page = encodeBlockPage(this.output, this.used), bytes = blockPageBytes(page)
+    const page = finishEncodedPage(this.pagePalette, this.indices, this.used, this.result.count - this.countAtStart, this.runs), bytes = blockPageBytes(page)
     this.budget.add(bytes); this.result.bytes += bytes; this.result.pages.push(page); this.used = 0
+    this.countAtStart = this.result.count; this.pagePalette.length = 0; this.lookup.clear(); this.runs = 0; this.previous = -1
   }
 
   finish() {
