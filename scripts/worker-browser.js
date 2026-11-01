@@ -54,6 +54,68 @@ function equalGeometry(actual, expected, path) {
   }
 }
 
+async function checkParseHandoff(client, small, smallWire) {
+  const bytes = await fetchFixture('inspection'), rows = 32769
+  let header, final, tileCount = 0
+  const sequences = []
+  const loading = client.parse(bytes), worker = client.worker
+  const observe = ({ data: message }) => {
+    if (message.type === 'parse-header') header = { parts: message.header.partCount, rows: message.header.counts.tileEntities }
+    if (message.type === 'parse-part') {
+      sequences.push(message.seq)
+      if (message.packet.kind === 'tileEntities') tileCount += message.packet.values.length
+    }
+    if (message.type === 'result') final = message.result
+  }
+  worker.addEventListener('message', observe)
+  let data
+  // Chrome may resume the promise from worker.onmessage at the microtask
+  // checkpoint before invoking this later diagnostic EventTarget listener.
+  try { data = await loading; await pause(0) } finally { worker.removeEventListener('message', observe) }
+  assert(header?.rows === rows && header.parts === sequences.length && sequences.length > 2, 'Real bundled Worker sends a complete parse handoff')
+  assert(sequences.every((seq, i) => seq === i) && tileCount === rows, 'Ordered parse packets cover all inspection records')
+  assert(final?.parseHandoffVersion === 1 && final.partCount === header.parts && !Object.hasOwn(final, 'blocks'), 'Final parse reply does not resend the wire graph')
+  assert(Array.isArray(data.tileEntities) && data.tileEntities.length === rows && data.blocks.size === 2, 'Complete native collections are available synchronously')
+  for (let i = 0; i < rows; i++) {
+    const t = data.tileEntities[i]
+    assert(t.id === 'minecraft:chest' && t.region === 'inspection' && t.nbt.rank === i && t.x === -4 && t.y === 2 && t.z === 9
+      && t.nbt.x === 0 && t.nbt.y === 0 && t.nbt.z === 0, 'Tile order and original/world positions: ' + i)
+  }
+  for (const i of [0, 16384, rows - 1]) {
+    const nbt = data.tileEntities[i].nbt
+    assert(nbt.note === '完整 NBT' && nbt.long === 9223372036854775807n, 'String and exact signed long survive the handoff')
+    equal(nbt.bytes, Int8Array.of(-1, -128)); equal(nbt.longs, BigInt64Array.of(-7n, -9223372036854775808n))
+    equal(nbt.Items, [{ id: 'minecraft:diamond', Slot: 2, count: 64 }], 'Nested inventory list')
+  }
+  assert(client.canBuild(data), 'Register the complete file as the retained session')
+  const palette = data.palette.map(entry => ({ ...entry, baked: cube('block/stone') }))
+  const geometry = await client.build(data, { palette, trackBlocks: true, compactFaces: false })
+  assert(geometry.emitted === 10, 'Both adjacent solid blocks still build in the same Worker session')
+
+  const ctrl = new AbortController()
+  const cancelled = client.parse(bytes, null, { signal: ctrl.signal }), oldWorker = client.worker
+  let cancelledParts = 0, cancelledRows = 0, sawFinal = false
+  const interrupt = ({ data: message }) => {
+    if (message.type === 'result') sawFinal = true
+    if (message.type !== 'parse-part') return
+    cancelledParts++
+    if (message.packet.kind === 'tileEntities' && !ctrl.signal.aborted) {
+      cancelledRows = message.packet.values.length
+      ctrl.abort() // An actual native message, after the client accepted this part.
+    }
+  }
+  oldWorker.addEventListener('message', interrupt)
+  try { await rejects(cancelled, { name: 'AbortError' }) } finally { oldWorker.removeEventListener('message', interrupt) }
+  assert(ctrl.signal.aborted && cancelledRows > 0 && cancelledRows < rows && !sawFinal, 'Abort interrupts a partially delivered file')
+  assert(!client.worker && !client.pending.size && !client.canBuild(data), 'Abort terminates the Worker and drops its incomplete handoff')
+  assert(data.tileEntities.length === rows && data.tileEntities.at(-1).nbt.rank === rows - 1, 'Earlier published data remains intact')
+  const reopened = await client.parse(small, null, { renderOnly: true, compactBlocks: false })
+  await pause(0)
+  assert(client.canBuild(reopened) && client.worker !== oldWorker && !client.pending.size, 'Small file reopens in a fresh session')
+  equal(serializeSchematic(reopened), smallWire, 'No late rows from the cancelled Worker enter the new file')
+  return { rows, parts: header.parts, faces: geometry.emitted, cancelledParts, cancelledRows }
+}
+
 window.runWorkerBrowser = async ({ csp = false } = {}) => {
   const small = await fetchFixture('small'), large = csp ? null : await fetchFixture('paged')
   let fallbackCalls = 0
@@ -80,9 +142,10 @@ window.runWorkerBrowser = async ({ csp = false } = {}) => {
       assert(fallbackCalls === 1 && !client.canBuild(data), 'Real worker-src CSP failure falls back before parsing')
       return { cspFallback: true, blocks: data.blocks.size }
     }
-    let geometries = 0, streamedGeometries = 0, streamBatches = 0, data, main
+    let geometries = 0, streamedGeometries = 0, streamBatches = 0, data, main, smallWire
     for (const [name, bytes, options] of [['small', small, { renderOnly: true, compactBlocks: false }], ['paged', large, { renderOnly: true }]]) {
       main = await parseLitematica(bytes, null, options)
+      if (name === 'small') smallWire = serializeSchematic(main)
       data = await measure(name + '-worker-parse', () => client.parse(bytes, progress, options))
       equal(serializeSchematic(data), serializeSchematic(main), name + ' parse fields/pages')
       equal([...data.blocks], [...main.blocks], name + ' page iteration')
@@ -195,11 +258,12 @@ window.runWorkerBrowser = async ({ csp = false } = {}) => {
     assert(abortedAt && !client.canBuild(data) && !client.worker, 'Build cancellation terminates worker and invalidates session')
     equal(serializeSchematic(data), beforeBuild, 'Cancelled build preserves main arrays')
     const reopened = await client.parse(small)
-    assert(client.canBuild(reopened), 'A fresh file opens after cancellation')
+    assert(client.canBuild(reopened), 'A fresh file opens after build cancellation')
+    const handoff = await checkParseHandoff(client, small, smallWire)
     assert(fallbackCalls === 0, 'Healthy Worker never executes main-thread fallback')
     assert(stages.has('decompress') && stages.has('parse') && stages.has('count') && stages.has('allocate') && stages.has('fill'), 'All real stages reached the client')
     assert(samples.some(sample => sample.ticks > 0), 'Main-thread heartbeat continues during background work')
-    return { geometries, streamedGeometries, streamBatches, streamCancels, blocks: main.blocks.size, stages: [...stages], samples, cooperativeCancelMs, parseCancelMs, buildCancelMs,
+    return { geometries, streamedGeometries, streamBatches, streamCancels, handoff, blocks: main.blocks.size, stages: [...stages], samples, cooperativeCancelMs, parseCancelMs, buildCancelMs,
       heartbeatTicks: samples.reduce((sum, sample) => sum + sample.ticks, 0), maxGap: Math.max(...samples.map(sample => sample.maxGap)) }
   } finally { client.dispose() }
 }

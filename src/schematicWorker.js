@@ -3,6 +3,7 @@ import { buildFaceGroups, buildFaceGroupsStream } from './geometry.js'
 import { serializeSchematic, filterFromDescriptor, transferBuffers, serializeWorkerError,
   GEOMETRY_STREAM_VERSION, streamBatchBytes, snapshotStreamSlabs, validateStreamAck } from './workerProtocol.js'
 import { createWorkerScheduler } from './workerScheduler.js'
+import { PARSE_HANDOFF_VERSION, planParseHandoff } from './parseHandoff.js'
 
 function abortError() { return Object.assign(new Error('Background task cancelled'), { name: 'AbortError', code: 'ABORT_ERR' }) }
 function protocolError(message, code = 'WORKER_PROTOCOL') { return Object.assign(new Error(message), { code }) }
@@ -15,6 +16,30 @@ export function createSchematicWorker({ postMessage, parse = parseLitematica, bu
   let session = null, active = null
   const post = (job, type, values = {}, transfers = []) => postMessage({ type, id: job.id, session: job.session, ...values }, transfers)
   const check = job => { if (job.failure) throw job.failure; if (job.cancelled || active !== job) throw abortError() }
+
+  // Two unacknowledged parts let main materialize one while the worker posts
+  // the next, without filling the browser's task queue with the entire file.
+  async function sendParseResult(job, plan) {
+    const flight = job.parseFlight = { sent: 0, acked: 0, wake: null }
+    const wake = () => { flight.wake?.(); flight.wake = null }
+    const wait = () => new Promise(resolve => { flight.wake = resolve })
+    job.controller.signal.addEventListener('abort', wake, { once: true })
+    try {
+      post(job, 'parse-header', { header: plan.header })
+      for (const packet of plan.packets) {
+        check(job)
+        post(job, 'parse-part', { seq: flight.sent++, packet })
+        while (flight.sent - flight.acked >= 2) { check(job); await wait() }
+      }
+      while (flight.acked < flight.sent) { check(job); await wait() }
+      check(job)
+      if (flight.sent !== plan.header.partCount) throw protocolError('Incomplete parse handoff')
+      return { parseHandoffVersion: PARSE_HANDOFF_VERSION, partCount: flight.sent }
+    } finally {
+      job.controller.signal.removeEventListener('abort', wake)
+      job.parseFlight = null
+    }
+  }
   const settleAck = (job, error, slabs) => {
     const waiting = job.waitingAck
     if (!waiting) return
@@ -52,6 +77,18 @@ export function createSchematicWorker({ postMessage, parse = parseLitematica, bu
   async function handle(message) {
     if (!message || !validId(message.id) || !validId(message.session)) return
     const { type, id } = message
+    if (type === 'parse-ack') {
+      const job = active
+      if (!job || job.id !== id || job.session !== message.session) return
+      const flight = job.parseFlight
+      if (!flight || message.seq !== flight.acked || message.seq >= flight.sent) {
+        job.failure = protocolError('Unexpected parse handoff ACK'); job.controller.abort()
+        return
+      }
+      flight.acked++
+      flight.wake?.(); flight.wake = null
+      return
+    }
     if (type === 'ack') {
       const job = active
       if (!job || job.id !== id || job.session !== message.session) return
@@ -96,10 +133,19 @@ export function createSchematicWorker({ postMessage, parse = parseLitematica, bu
         // Retain only the store needed for neighbour queries. In particular,
         // hundreds of thousands of block-entity NBT objects stay only on main.
         session = { id: message.session, blocks: data.blocks, bounds: data.bounds }
-        const retained = new Set(transferBuffers(result.blocks))
-        const transfers = transferBuffers(result, retained)
+        // The NBT reader and page writer own independent records/pages. An
+        // injected parser may return arbitrary cross-record aliases; a single
+        // structured clone preserves those, as it does for older clients.
+        const plan = message.parseHandoffVersion === PARSE_HANDOFF_VERSION && parse === parseLitematica && planParseHandoff(result)
         progress(job, 1, 'parse')
-        post(job, 'result', { result }, transfers)
+        if (plan) {
+          const completed = await sendParseResult(job, plan)
+          check(job)
+          post(job, 'result', { result: completed })
+        } else {
+          const retained = new Set(transferBuffers(result.blocks))
+          post(job, 'result', { result }, transferBuffers(result, retained))
+        }
       } else if (type === 'build' || type === 'build-stream') {
         if (!session || session.id !== message.session) throw protocolError('Background schematic session expired', 'WORKER_SESSION')
         if (!Array.isArray(message.palette)) throw protocolError('Missing baked block palette')

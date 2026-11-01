@@ -16,7 +16,7 @@ const text = (name, value) => tag(8, name, string(value))
 const compound = (...values) => Buffer.concat([...values, Buffer.from([0])])
 const list = (type, values) => Buffer.concat([Buffer.from([type]), int(values.length), ...values])
 const vector = (name, values) => tag(10, name, compound(...['x', 'y', 'z'].map((axis, i) => tag(3, axis, int(values[i])))))
-function region(name, position, size, valueAt) {
+function region(name, position, size, valueAt, extra = []) {
   const volume = size.reduce((a, b) => a * b, 1), states = Buffer.alloc(Math.ceil(volume / 32) * 8)
   // Two-bit slots never straddle their 64-bit word; independent Java byte order.
   for (let i = 0; i < volume; i++) {
@@ -26,10 +26,29 @@ function region(name, position, size, valueAt) {
   }
   return tag(10, name, compound(vector('Position', position), vector('Size', size),
     tag(9, 'BlockStatePalette', list(10, ['air', 'stone', 'glass'].map(name => compound(text('Name', 'minecraft:' + name))))),
-    tag(12, 'BlockStates', Buffer.concat([int(states.length / 8), states]))))
+    tag(12, 'BlockStates', Buffer.concat([int(states.length / 8), states])), ...extra))
+}
+// Two blocks keep geometry cheap. Many tiny, ordered inspection records force
+// parse packets, with richer NBT at the beginning, middle and final partial row.
+function inspectionFixture() {
+  const count = 32769, tile = compound(text('id', 'minecraft:chest'), tag(3, 'x', int(0)), tag(3, 'y', int(0)), tag(3, 'z', int(0)), tag(3, 'rank', int(0)))
+  const rows = Buffer.alloc(tile.length * count, tile)
+  for (let i = 0; i < count; i++) rows.writeInt32BE(i, (i + 1) * tile.length - 5)
+  const rich = Buffer.concat([text('note', '完整 NBT'), tag(7, 'bytes', Buffer.from([0, 0, 0, 2, 255, 128])),
+    tag(4, 'long', Buffer.from('7fffffffffffffff', 'hex')), tag(12, 'longs', Buffer.concat([int(2), Buffer.from('fffffffffffffff98000000000000000', 'hex')])),
+    tag(9, 'Items', list(10, [compound(text('id', 'minecraft:diamond'), tag(1, 'Slot', Buffer.from([2])), tag(3, 'count', int(64)))]))])
+  const chunks = [Buffer.from([10]), int(count)]; let start = 0
+  for (const rank of [0, 16384, count - 1]) {
+    const endTag = (rank + 1) * tile.length - 1
+    chunks.push(rows.subarray(start, endTag), rich); start = endTag
+  }
+  chunks.push(rows.subarray(start))
+  return gzipSync(tag(10, '', compound(tag(10, 'Regions', compound(region('inspection', [-4, 2, 9], [2, 1, 1], () => 1,
+    [tag(9, 'TileEntities', Buffer.concat(chunks))]))))))
 }
 const fixtures = {
   small: await readFile('schematics/投影预览测试.litematic'),
+  inspection: inspectionFixture(),
   paged: gzipSync(tag(10, '', compound(tag(10, 'Metadata', compound(text('Name', 'Worker regression'))),
     tag(10, 'Regions', compound(region('base', [-20, -5, -30], [128, 129, 128], (x, y, z) => x < 64 && y < 32 && z < 64 ? 1 : 0),
       region('overlay', [-16, -1, -26], [8, 8, 8], (x, y, z) => (x + y + z) % 3 ? 2 : 0)))))),
@@ -110,6 +129,9 @@ try {
         assert.equal(result.streamedGeometries, result.geometries, 'Every old-build case also exercises streamed reconstruction')
         assert.ok(result.streamBatches > result.streamedGeometries, 'Multiple real transferable slabs cross Worker boundaries')
         assert.equal(result.streamCancels.length, 4, 'Both ACK waits cover terminate and cooperative cancellation')
+        assert.equal(result.handoff.rows, 32769); assert.ok(result.handoff.parts > 2)
+        assert.ok(result.handoff.cancelledParts > 0 && result.handoff.cancelledParts < result.handoff.parts)
+        assert.equal(result.handoff.faces, 10)
       }
       results.push({ mode, csp, ...result })
       assert.equal(errors.length, 0, 'No uncaught browser errors')
@@ -118,6 +140,7 @@ try {
         streamCancels: result.streamCancels, blocks: result.blocks, heartbeatTicks: result.heartbeatTicks,
         maxGap: Number(result.maxGap.toFixed(1)), parseCancelMs: Number(result.parseCancelMs.toFixed(1)), buildCancelMs: Number(result.buildCancelMs.toFixed(1)),
         cooperativeCancelMs: Number(result.cooperativeCancelMs.toFixed(1)),
+        handoff: result.handoff,
       })
     }
     await server.close(); server = null

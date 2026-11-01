@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { SchematicWorkerClient } from '../src/workerClient.js'
 import { serializeSchematic } from '../src/workerProtocol.js'
+import { PARSE_HANDOFF_VERSION, planParseHandoff } from '../src/parseHandoff.js'
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0))
 const schematic = () => ({
@@ -48,6 +49,7 @@ const data = await client.parse(input, (fraction, detail) => progress.push([frac
 assert.equal(input.byteLength, 3); assert.equal(data.blocks.get(7), 0); assert.ok(client.canBuild(data))
 assert.equal(progress[0][1].phase, 'parse'); assert.equal(progress[0][1].stageFraction, 0)
 assert.equal(workers[0].messages[0].options.renderOnly, true)
+assert.equal(workers[0].messages[0].parseHandoffVersion, PARSE_HANDOFF_VERSION, 'Opt in without requiring a new ready handshake')
 const buildProgress = [], hiddenRegions = [{ minX: 0, minY: 0, minZ: 0, maxX: 2, maxY: 0, maxZ: 0 }]
 const result = await client.build(data, { descriptor: { mode: 'single', layerY: 0, hiddenRegions }, trackBlocks: true,
   keys: [7], includeGroups: ['block/stone'], compactFaces: true }, (f, detail) => buildProgress.push(detail), { maxGeometryBytes: 1024 })
@@ -197,3 +199,82 @@ errorWorker.handler = (worker, message) => { successful(worker, message); errors
 await assert.rejects(errors.build(lateData), { name: 'AbortError' })
 errors.dispose()
 console.log('PASS worker client: corrupt input, callback/clone/protocol/message errors and late cancellation never leave pending jobs')
+
+// Use the real planner/receiver and independent native clones for every packet.
+// These ordinary parser-shaped records include raw NBT BigInts/typed arrays,
+// the same tile coordinates multiple times, and non-integer entity positions.
+const large = schematic()
+large.tileEntities = Array.from({ length: 20000 }, (_, i) => ({ id: 'minecraft:chest', x: i % 8, y: 0, z: 0, region: 'A',
+  nbt: i % 2048 ? { x: i, Items: [] } : { x: i, Items: [{ Slot: 2, count: 64, long: -3n }], bytes: Int8Array.of(-7, 2), longs: BigInt64Array.of(-9n, 4n) } }))
+large.entities.push({ id: 'minecraft:pig', pos: [.125, .25, -.5], rotation: [30, -2], region: 'A', nbt: { Pos: [-2.75, 0, 3.5], Passengers: [{ id: 'minecraft:parrot' }] } })
+const plan = planParseHandoff(serializeSchematic(large)), packets = [...plan.packets]
+assert.ok(packets.length > 2); assert.equal(packets.length, plan.header.partCount)
+const completion = { parseHandoffVersion: PARSE_HANDOFF_VERSION, partCount: packets.length }
+async function beginHandoff(signal) {
+  let worker
+  const client = new SchematicWorkerClient({ workerFactory: () => (worker = new FakeWorker(() => {})), parseFallback: () => assert.fail('Do not retry protocol failures on main') })
+  const result = client.parse(input, undefined, { signal })
+  await tick()
+  const message = worker.messages[0], send = body => worker.emit({ id: message.id, session: message.session, ...body })
+  return { client, worker, message, result, send, header: () => send({ type: 'parse-header', header: plan.header }),
+    part: seq => send({ type: 'parse-part', seq, packet: packets[seq] }), end: () => send({ type: 'result', result: completion }) }
+}
+{
+  const job = await beginHandoff(); let done = false
+  const ready = job.result.then(value => { done = true; return value })
+  job.header(); assert.equal(job.worker.messages.length, 1, 'The header does not consume or receive a packet ACK')
+  for (let seq = 0; seq < packets.length; seq++) {
+    job.part(seq)
+    assert.deepEqual(job.worker.messages.at(-1), { type: 'parse-ack', id: job.message.id, session: job.message.session, seq })
+    if (!seq) {
+      await tick(); assert.equal(done, false, 'No partial result is published')
+      job.send({ type: 'parse-part', seq: -1, id: job.message.id + 1, packet: {} })
+      job.send({ type: 'parse-header', session: job.message.session + 1, header: {} })
+      assert.equal(job.worker.messages.length, 2, 'Wrong request/session packets receive no ACK')
+    }
+  }
+  await tick(); assert.equal(done, false, 'Wait for the matching final result even if all rows arrived')
+  job.end(); const restored = await ready
+  assert.deepEqual(restored, large); assert.ok(Array.isArray(restored.tileEntities)); assert.ok(job.client.canBuild(restored)); job.client.dispose()
+}
+for (const invalid of [
+  job => job.part(0), job => job.end(), job => { job.header(); job.header() },
+  job => { job.header(); job.part(1) }, job => { job.header(); job.part(0); job.part(0) },
+  job => { job.header(); job.send({ type: 'parse-part', seq: 0, packet: { ...packets[0], start: 1 } }) },
+  job => { job.header(); job.send({ type: 'result', result: serializeSchematic(schematic()) }) },
+  job => { job.header(); job.part(0); job.send({ type: 'result', result: { ...completion, partCount: 1 } }) },
+  job => { job.header(); job.end() },
+  job => { job.header(); packets.forEach((_, i) => job.part(i)); job.send({ type: 'result', result: { ...completion, parseHandoffVersion: -1 } }) },
+]) {
+  const job = await beginHandoff(), rejected = assert.rejects(job.result, { code: 'WORKER_PROTOCOL' })
+  invalid(job); await rejected; assert.ok(job.worker.terminated); assert.equal(job.client.pending.size, 0); job.client.dispose()
+}
+{
+  const job = await beginHandoff(), rejected = assert.rejects(job.result, /ACK clone failed/)
+  job.header(); job.worker.postMessage = () => { throw Error('ACK clone failed') }; job.part(0)
+  await rejected; assert.ok(job.worker.terminated); job.client.dispose()
+}
+for (const action of ['abort', 'crash', 'supersede']) {
+  const ctrl = new AbortController(), job = await beginHandoff(ctrl.signal)
+  job.header(); job.part(0)
+  const rejected = assert.rejects(job.result, action === 'crash' ? { code: 'WORKER_CRASHED' } : { name: 'AbortError' })
+  if (action === 'abort') ctrl.abort()
+  if (action === 'crash') job.worker.fail('Crashed between packets')
+  let fresh
+  job.client.workerFactory = () => (fresh = new FakeWorker(() => {}))
+  const reopened = job.client.parse(input); await rejected; await tick()
+  assert.ok(job.worker.terminated); const oldAcks = job.worker.messages.length
+  job.part(1); job.end(); assert.equal(job.worker.messages.length, oldAcks)
+  fresh.reply(fresh.messages[0], serializeSchematic(schematic()))
+  const data = await reopened; assert.ok(job.client.canBuild(data)); assert.deepEqual(data.tileEntities, []); assert.ok(!fresh.terminated)
+  job.client.dispose()
+}
+{
+  let worker
+  const client = new SchematicWorkerClient({ workerFactory: () => (worker = new FakeWorker(successful)) })
+  const data = await client.parse(input)
+  worker.handler = (w, msg) => w.emit({ id: msg.id, session: msg.session, type: 'parse-header', header: plan.header })
+  await assert.rejects(client.build(data), { code: 'WORKER_PROTOCOL' }); assert.ok(worker.terminated)
+  assert.equal(data.blocks.get(7), 0); client.dispose()
+}
+console.log('PASS segmented parse client: per-packet ACKs, exact ordered NBT, legacy results, invalid/missing packets, crash/abort/supersession and late-message isolation')

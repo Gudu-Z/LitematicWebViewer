@@ -1,6 +1,7 @@
 import { parseLitematica } from './litematica.js'
 import { deserializeSchematic, deserializeWorkerError, GEOMETRY_STREAM_VERSION, streamBatchBytes, streamProtocolError,
   validateStreamLayout, validateStreamBatch, validateStreamAck, validateStreamResult } from './workerProtocol.js'
+import { PARSE_HANDOFF_VERSION, createParseHandoffReceiver } from './parseHandoff.js'
 
 function abortError(reason) {
   if (reason?.name === 'AbortError') return reason
@@ -70,11 +71,24 @@ export class SchematicWorkerClient {
         try { request.onProgress?.(message.fraction, message) } catch (error) { this._reset(error) }
         return
       }
+      if (message.type === 'parse-header' || message.type === 'parse-part') {
+        try { this._parsePacket(message, request) } catch (error) { this._reset(error) }
+        return
+      }
       if (message.type === 'layout' || message.type === 'batch') {
         void this._streamMessage(message, request)
         return
       }
       if (message.type !== 'result' && message.type !== 'error') return
+      let result = message.result
+      if (message.type === 'result' && (request.handoff || result && Object.hasOwn(result, 'parseHandoffVersion'))) {
+        try {
+          const handoff = request.handoff
+          if (!handoff || result?.parseHandoffVersion !== PARSE_HANDOFF_VERSION || result.partCount !== handoff.received
+            || handoff.received !== handoff.total || Object.hasOwn(result, 'blocks')) throw streamProtocolError('Incomplete parse handoff result')
+          result = handoff.receiver.finish()
+        } catch (error) { this._reset(error); return }
+      }
       if (message.type === 'result' && request.stream) {
         try {
           const stream = request.stream
@@ -87,7 +101,7 @@ export class SchematicWorkerClient {
         const error = deserializeWorkerError(message.error)
         request.stream?.controller.abort(error); request.reject(error)
       }
-      else request.resolve(message.result)
+      else request.resolve(result)
     }
     const fail = event => {
       if (!current()) return
@@ -109,7 +123,7 @@ export class SchematicWorkerClient {
       const cleanup = () => signal?.removeEventListener('abort', abort)
       const stream = streamHandlers ? { ...streamHandlers, controller: new AbortController(), nextSeq: 0, batchCount: 0, layout: null, cursors: [], busy: false } : null
       if (stream) stream.context = { signal: stream.controller.signal, id, session }
-      this.pending.set(id, { session, resolve, reject, onProgress, cleanup, stream, worker: this.worker })
+      this.pending.set(id, { type, session, resolve, reject, onProgress, cleanup, stream, worker: this.worker })
       signal?.addEventListener('abort', abort, { once: true })
       try {
         // Never detach a caller-owned input or the main thread's block pages.
@@ -117,6 +131,23 @@ export class SchematicWorkerClient {
         this.worker.postMessage({ ...payload, type, id, session })
       } catch (error) { this._reset(error) }
     })
+  }
+
+  _parsePacket(message, request) {
+    if (request.type !== 'parse') throw streamProtocolError('Parse handoff packet outside a parse request')
+    if (message.type === 'parse-header') {
+      if (request.handoff) throw streamProtocolError('Repeated parse handoff header')
+      const receiver = createParseHandoffReceiver(message.header)
+      request.handoff = { receiver, total: message.header.partCount, received: 0 }
+      return
+    }
+    const handoff = request.handoff
+    if (!handoff || message.seq !== handoff.received || handoff.received >= handoff.total) throw streamProtocolError('Unexpected parse handoff packet')
+    handoff.receiver.append(message.packet)
+    handoff.received++
+    // Only ACK after these rows belong to the request's private result. No
+    // partially populated array is exposed to a renderer or a caller.
+    request.worker.postMessage({ type: 'parse-ack', id: message.id, session: request.session, seq: message.seq })
   }
 
   async _streamMessage(message, request) {
@@ -194,7 +225,7 @@ export class SchematicWorkerClient {
       this._check(signal, operation)
       return data
     }
-    const result = await this._request('parse', { bytes, options }, onProgress, signal)
+    const result = await this._request('parse', { bytes, options, parseHandoffVersion: PARSE_HANDOFF_VERSION }, onProgress, signal)
     this._check(signal, operation)
     let data
     try { data = deserializeSchematic(result) } catch (error) { this._reset(error); throw error }

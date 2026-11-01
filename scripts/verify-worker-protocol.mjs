@@ -6,6 +6,7 @@ import { parseLitematica } from '../src/litematica.js'
 import { bakeModel } from '../src/modelBaker.js'
 import { buildFaceGroups } from '../src/geometry.js'
 import { createSchematicWorker } from '../src/schematicWorker.js'
+import { PARSE_HANDOFF_VERSION, createParseHandoffReceiver } from '../src/parseHandoff.js'
 import { SchematicWorkerClient } from '../src/workerClient.js'
 import { serializeSchematic, deserializeSchematic, filterFromDescriptor, transferBuffers, deserializeWorkerError } from '../src/workerProtocol.js'
 
@@ -116,6 +117,67 @@ const failure = createSchematicWorker({ postMessage: message => messages.push(me
 await failure.handle({ type: 'parse', id: 53, session: 7 })
 assert.deepEqual(messages.at(-1).error, { name: 'Error', message: 'Too large', code: 'FILE_TOO_LARGE', reason: 'blocks', bytes: 123, maxBytes: 100 })
 console.log('PASS strict filters, deduplicated/retained transfers, busy/cancelled jobs and structured resource errors')
+
+// Exercise the negotiated sender with genuine NBT, independently of the
+// client's receiver tests. Two cells keep geometry tiny; enough distinct tile
+// records ensure an ACK has to make room before more data can be posted.
+const i32 = n => { const b = Buffer.alloc(4); b.writeInt32BE(n); return b }
+const string = s => { const b = Buffer.from(s), len = Buffer.alloc(2); len.writeUInt16BE(b.length); return Buffer.concat([len, b]) }
+const tag = (t, name, body) => Buffer.concat([Buffer.from([t]), string(name), body])
+const compound = (...fields) => Buffer.concat([...fields, Buffer.from([0])])
+const vector = (name, x, y, z) => tag(10, name, compound(...[x,y,z].map((n, i) => tag(3, 'xyz'[i], i32(n)))))
+const tile = compound(tag(8, 'id', string('minecraft:chest')), tag(3, 'x', i32(0)), tag(3, 'y', i32(0)), tag(3, 'z', i32(0)), tag(3, 'rank', i32(0)))
+const count = 32769, rows = Buffer.alloc(tile.length * count, tile)
+for (let i = 0; i < count; i++) rows.writeInt32BE(i, (i + 1) * tile.length - 5)
+const twoStates = Buffer.alloc(8); twoStates[7] = 4
+const manyTiles = tag(10, '', compound(tag(10, 'Regions', compound(tag(10, 'A', compound(
+  vector('Position', 0, 0, 0), vector('Size', 2, 1, 1),
+  tag(9, 'BlockStatePalette', Buffer.concat([Buffer.from([10]), i32(2), ...['stone','dirt'].map(s => compound(tag(8, 'Name', string('minecraft:' + s))))])),
+  tag(12, 'BlockStates', Buffer.concat([i32(1), twoStates])), tag(9, 'TileEntities', Buffer.concat([Buffer.from([10]), i32(count), rows])),
+))))))
+
+for (const action of ['complete', 'cancel', 'bad-ack']) {
+  let wake, sent = 0, result, error, receiver
+  const windowFull = new Promise(resolve => { wake = resolve })
+  const sender = createSchematicWorker({ postMessage(message) {
+    if (message.type === 'parse-header') receiver = createParseHandoffReceiver(structuredClone(message.header))
+    if (message.type === 'parse-part') {
+      assert.equal(message.seq, sent++); receiver.append(structuredClone(message.packet))
+      if (sent === 2) wake()
+    }
+    if (message.type === 'result') result = message.result
+    if (message.type === 'error') { error = message.error; wake() }
+  }, build: async (_palette, blocks) => [...blocks] })
+  const address = { session: 10, id: 100 }
+  const pending = sender.handle({ ...address, type: 'parse', bytes: manyTiles, options: { compactBlocks: true }, parseHandoffVersion: PARSE_HANDOFF_VERSION })
+  await windowFull
+  assert.equal(error, undefined); assert.equal(sent, 2)
+  await sender.handle({ ...address, session: 99, type: 'parse-ack', seq: 0 })
+  assert.equal(sent, 2, 'An unrelated ACK cannot release a slot')
+  if (action === 'complete') {
+    for (let seq = 0; seq < sent; seq++) {
+      assert.equal(result, undefined, 'The result waits for every ACK')
+      await sender.handle({ ...address, type: 'parse-ack', seq })
+      assert.ok(sent <= seq + 3, 'At most two unacknowledged parse parts')
+    }
+    await pending
+    assert.deepEqual(result, { parseHandoffVersion: PARSE_HANDOFF_VERSION, partCount: sent })
+    const data = deserializeSchematic(receiver.finish())
+    assert.equal(data.tileEntities.length, count)
+    for (let i = 0; i < count; i++) assert.equal(data.tileEntities[i].nbt.rank, i)
+    await sender.handle({ session: 10, id: 101, type: 'build', palette: data.palette })
+    assert.deepEqual(result, [...data.blocks]); assert.deepEqual(result, [[0, 0], [1, 1]], 'Worker still owns its mixed page')
+  } else {
+    await sender.handle(action === 'cancel' ? { ...address, type: 'cancel' } : { ...address, type: 'parse-ack', seq: sent })
+    await pending
+    assert.equal(result, undefined); assert.equal(sent, 2)
+    assert.equal(action === 'cancel' ? error?.name : error?.code, action === 'cancel' ? 'AbortError' : 'WORKER_PROTOCOL')
+    await sender.handle({ session: 10, id: 101, type: 'build', palette: [] })
+    assert.equal(error.code, 'WORKER_SESSION', 'A partial parse must not publish a worker session')
+  }
+  sender.dispose()
+}
+console.log('PASS large parse handoff: two-part backpressure, last ACK, exact ordered NBT, retained pages and interrupted session cleanup')
 
 // Exercise the actual module entry point and client across an isolated thread,
 // with only the standard DedicatedWorker messaging names adapted for Node.
