@@ -580,7 +580,12 @@ async function renderCurrentDetails(options = {}) {
   const steps = [renderCurrentSigns, renderCurrentPlayerHeads, renderCurrentBanners, renderCurrentStatues, renderCurrentPots]
   for (let i = 0; i < steps.length; i++) {
     throwIfAborted(options.signal)
-    await steps[i](options)
+    await steps[i]({ ...options, onProgress: (fraction, detail) => {
+      throwIfAborted(options.signal)
+      ui.setLoadingStage('details', { fraction: (i + fraction) / steps.length })
+      if (steps[i] === renderCurrentPlayerHeads && detail.total) ui.setStatusKey('statusHeadProgress', detail)
+      ui.setProgress(.75 + (i + fraction) / steps.length * .05)
+    } })
     ui.setLoadingStage('details', { completed: i + 1, total: steps.length })
     ui.setProgress(.75 + (i + 1) / steps.length * .05)
   }

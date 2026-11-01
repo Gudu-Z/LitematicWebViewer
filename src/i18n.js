@@ -162,6 +162,7 @@ const STRINGS = {
   statusParsing: ['正在解析方块模型（{n} 种方块）…', 'Resolving block models ({n} types)…'],
   statusGeometry: ['正在生成几何体（{n} 个方块）…', 'Generating geometry ({n} blocks)…'],
   statusBlockEntities: ['正在加载告示牌、头颅等…', 'Loading signs, heads and other block entities…'],
+  statusHeadProgress: ['正在加载玩家头颅（{completed}/{total}）…', 'Loading player heads ({completed}/{total})…'],
   statusEntityProgress: ['正在加载实体（{completed}/{total}，含展示框）…', 'Loading entities ({completed}/{total}, including item frames)…'],
   statusEntitiesFinishing: ['正在完成展示框和实体渲染…', 'Finishing item frames and entities…'],
   statusDone: ['完成：{faces} 个面，{textures} 种贴图{entities}', 'Done: {faces} faces, {textures} textures{entities}'],

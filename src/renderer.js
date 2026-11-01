@@ -21,6 +21,7 @@ import { GeometryReceiver } from './geometryReceiver.js'
 import { GPUUpload } from './gpuUpload.js'
 import { mergeTranslucentBlocks } from './translucentBlocks.js'
 import { markBlockObject, setBlockFaceKeys } from './selectionSources.js'
+import { createHeadTextureLoader } from './headTextures.js'
 
 function disposePrivateTexture(texture) {
   if (texture && !isAssetTexture(texture)) texture.dispose()
@@ -272,10 +273,7 @@ export class Renderer {
       })
       return root
     } catch (error) {
-      root.traverse(o => {
-        if (o.geometry && o.geometry !== BANNER_FLAG_GEO && !POT_SIDE_GEO.includes(o.geometry)) o.geometry.dispose()
-        o.material?.dispose()
-      })
+      disposeBlockObjects(root, false, true, new Set([BANNER_FLAG_GEO, ...POT_SIDE_GEO]))
       throw error
     } finally {
       end?.()
@@ -804,16 +802,10 @@ export class Renderer {
   }
 
   clearHeads() {
-    while (this.headsGroup.children.length) {
-      const child = this.headsGroup.children[this.headsGroup.children.length - 1]
-      this.headsGroup.remove(child)
-      child.geometry?.dispose()
-      const mats = Array.isArray(child.material) ? child.material : [child.material]
-      mats.forEach((m) => {
-        disposePrivateTexture(m.map)
-        m.dispose()
-      })
-    }
+    this._headRenderJob?.stop?.()
+    this._headRenderJob = null
+    // Orientations share geometry within this build, but never across viewers.
+    disposeBlockObjects(this.headsGroup, true)
   }
 
   clearSigns() {
@@ -1043,22 +1035,57 @@ export class Renderer {
     throwIfAborted(signal)
     this.clearHeads()
     if (!heads || !heads.length) return
-    for (const head of heads) {
+    const job = {}, revision = assets.cacheRevision
+    this._headRenderJob = job
+    const stale = () => signal?.aborted || this._headRenderJob !== job || assets.cacheRevision !== revision
+    const geometries = new Map()
+    let textures, completed = 0, reportAt = 0, yieldAt = performance.now() + 8
+    const progress = () => {
+      if (stale() || !options.onProgress) return
+      const now = performance.now()
+      if (completed !== 0 && completed !== heads.length && now < reportAt) return
+      reportAt = now + 50
+      options.onProgress(completed / heads.length, { completed, total: heads.length })
+    }
+    try {
+      textures = createHeadTextureLoader(heads, assets, { isCurrent: () => !stale() })
+      job.stop = textures.stop
+      progress()
+      for (const head of heads) {
+        throwIfAborted(signal)
+        if (stale()) return
+        // Fetch distinct skins concurrently, then create meshes/materials in the
+        // original order so overlapping heads keep the same opaque draw order.
+        const skinTex = await withAbort(textures.get(head), signal)
+        throwIfAborted(signal)
+        if (stale()) return
+        if (skinTex) {
+          const yDeg = head.facing ? (HEAD_FACING_Y[head.facing] || 0) : (Number(head.rotation) || 0) * 22.5
+          let geometry = geometries.get(yDeg)
+          if (!geometry) {
+            const quads = bakeModel(HEAD_MODEL, { y: yDeg }, [64, 64]).quads
+            geometries.set(yDeg, geometry = quadsToHeadGeometry(quads))
+          }
+          const mat = new THREE.MeshLambertMaterial({ map: skinTex, alphaTest: 0.5, flatShading: true })
+          const mesh = new THREE.Mesh(geometry, mat)
+          mesh.position.set(head.x, head.y, head.z)
+          markBlockObject(mesh, head.x, head.y, head.z)
+          this._addLayerObject(this.headsGroup, mesh, head.y, true)
+        }
+        completed++
+        progress()
+        // Warm skin caches must still let input, cancellation and progress paint.
+        if (performance.now() >= yieldAt) {
+          await withAbort(new Promise(resolve => setTimeout(resolve, 0)), signal)
+          throwIfAborted(signal)
+          if (stale()) return
+          yieldAt = performance.now() + 8
+        }
+      }
       throwIfAborted(signal)
-      // 有皮肤 URL 就加载玩家皮肤，否则用默认 Steve 皮肤
-      const skinTex = await withAbort(head.skinUrl
-        ? assets.getExternalTexture(head.skinUrl)
-        : assets.getTexture('entity/player/wide/steve'), signal)
-      throwIfAborted(signal)
-      if (!skinTex) continue
-      // 立地头颅用 rotation(0-15)，墙上头颅用 facing（与 blocks.js headVariant 一致）
-      const yDeg = head.facing ? (HEAD_FACING_Y[head.facing] || 0) : (Number(head.rotation) || 0) * 22.5
-      const quads = bakeModel(HEAD_MODEL, { y: yDeg }, [64, 64]).quads
-      const mat = new THREE.MeshLambertMaterial({ map: skinTex, alphaTest: 0.5, flatShading: true })
-      const mesh = new THREE.Mesh(quadsToHeadGeometry(quads), mat)
-      mesh.position.set(head.x, head.y, head.z)
-      markBlockObject(mesh, head.x, head.y, head.z)
-      this._addLayerObject(this.headsGroup, mesh, head.y, true)
+    } finally {
+      textures?.stop()
+      if (this._headRenderJob === job) this._headRenderJob = null
     }
   }
 

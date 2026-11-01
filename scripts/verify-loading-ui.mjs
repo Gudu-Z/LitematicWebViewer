@@ -73,6 +73,11 @@ for (const [phase, word] of [['decompress', 'Decompressing'], ['parse', 'Reading
   ui.setLoadingStage(phase, { completed: 3, total: 4 })
   assert.match(node('status').textContent, new RegExp(`${word}.*75%`))
 }
+ui.setStatusKey('statusHeadProgress', { completed: 7, total: 23 })
+assert.equal(node('status').textContent, 'Loading player heads (7/23)…')
+setLang('zh'); ui.refreshStatus()
+assert.equal(node('status').textContent, '正在加载玩家头颅（7/23）…')
+setLang('en')
 ui.setLoadingStage('count', { stageFraction: -2 })
 assert.match(node('status').textContent, /0%/)
 ui.setLoadingStage('count', { stageFraction: 2 })
