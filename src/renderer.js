@@ -16,6 +16,7 @@ import { collectSceneResources } from './sceneResources.js'
 import { createBlockChunkIndex, buildBlockChunk, planBlockChunkUpdate } from './blockChunks.js'
 import { CompactFaceMesh } from './compactFaceMesh.js'
 import { enableSpatialFaces } from './spatialFaces.js'
+import { installSignDrawBatches } from './signDrawBatches.js'
 import { throwIfAborted, withAbort } from './loadingTask.js'
 import { GeometryReceiver } from './geometryReceiver.js'
 import { GPUUpload } from './gpuUpload.js'
@@ -809,6 +810,8 @@ export class Renderer {
   }
 
   clearSigns() {
+    this._releaseSignDrawBatches?.()
+    this._releaseSignDrawBatches = null
     // Repeated text shares resources within this scene. Release each only once.
     disposeBlockObjects(this.signsGroup, true)
   }
@@ -1436,6 +1439,7 @@ export class Renderer {
         yieldAt = performance.now() + 8
       }
     }
+    this._releaseSignDrawBatches = installSignDrawBatches(this.scene, this.signsGroup, this.renderer)
   }
 
   _makeSignTexture(lines, color) {

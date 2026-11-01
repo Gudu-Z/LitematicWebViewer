@@ -83,8 +83,9 @@ try {
     delete failure.images
   }
   await writeFile('scripts/_ref/compact-faces-browser.json', JSON.stringify({ result, errors }, null, 2))
-  if (result.changedPixels || errors.length) throw Error('Compact face GPU regression: ' + JSON.stringify({ result, errors }))
-  console.log(`PASS compact GPU: ${result.results.length} vanilla/XK views, ${result.pixelSamples} compared pixels, zero differences; ${result.gpu}`)
+  if (result.failures.length || result.firstErrors || errors.length) throw Error('Compact face GPU regression: ' + JSON.stringify({ result, errors }))
+  const exact = result.results.filter(r => r.outcome === 'identical').length
+  console.log(`PASS compact GPU: ${exact}/${result.results.length} views exact on both draws, ${result.results.length - exact} reference-only drift; ${result.pixelSamples} pixels per draw, raw first/second differences ${result.firstChangedPixels}/${result.changedPixels}; ${result.gpu}`)
 } finally {
   socket?.close()
   for (const request of pending.values()) clearTimeout(request.timer)

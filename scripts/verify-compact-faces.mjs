@@ -7,7 +7,7 @@ import { BlockModelResolver } from '../src/blocks.js'
 import { bakeModel } from '../src/modelBaker.js'
 import { buildFaceGroups } from '../src/geometry.js'
 import { CompactFaceData, compactFaceKey, canCompactFaces, readCompactFace } from '../src/compactFaceData.js'
-import { CompactFaceMesh } from '../src/compactFaceMesh.js'
+import { CompactFaceMesh, configureCompactMaterial } from '../src/compactFaceMesh.js'
 import { sourceForIntersection } from '../src/selectionPicking.js'
 import { collectSceneResources } from '../src/sceneResources.js'
 import { PagedBlockStore, encodeBlockPage, blockPageBytes } from '../src/pagedBlocks.js'
@@ -167,8 +167,29 @@ for (const key of palaceBlocks.keys()) {
 }
 const palaceShader = { uniforms: {}, vertexShader: '#include <common>\n#include <uv_vertex>\n#include <begin_vertex>' }
 palaceMesh.material.onBeforeCompile(palaceShader)
-assert.ok(palaceShader.vertexShader.startsWith('#define COMPACT_SEPARATE_Y\n'))
+assert.match(palaceShader.vertexShader, /^#define COMPACT_SEPARATE_Y$/m)
 assert.notEqual(palaceMesh.material.customProgramCacheKey(), replacement.material.customProgramCacheKey())
+
+// One material can be rebuilt with a different grid or atlas layout. Shader
+// constants must select a distinct program; ordinary texture/position changes
+// still reuse the compiled program and its uniform object.
+{
+  const mat = new THREE.MeshLambertMaterial(), first = new THREE.Texture(), second = new THREE.Texture()
+  const configure = (width, depth, wide = false, rows = 1, atlasWidth = 1024, tex = first) => {
+    configureCompactMaterial(mat, { bounds: { minX: -2, minY: 1, minZ: 0, width, depth },
+      cellYs: wide ? new Uint32Array(1) : null, textureWidth: atlasWidth, textureHeight: rows }, tex)
+    return mat.customProgramCacheKey()
+  }
+  const normal = configure(585, 593), binding = mat.uniforms.compactQuads
+  assert.equal(configure(585, 593, false, 1, 8, second), normal, 'Any single-row atlas uses the same program')
+  assert.equal(mat.uniforms.compactQuads, binding)
+  assert.equal(binding.value, second)
+  const multi = configure(585, 593, false, 2)
+  assert.equal(configure(585, 593, false, 100), multi)
+  assert.equal(new Set([normal, multi, configure(5120, 593), configure(585, 6656), configure(585, 593, true)]).size, 5)
+  assert.equal(configure(5120, 6656, true), configure(5120, 4096, true), 'Separate-Y addressing only depends on grid width')
+  first.dispose(); second.dispose(); mat.dispose()
+}
 palaceMesh.geometry.dispose(); palaceMesh.material.dispose()
 console.log('PASS compact Palace-sized bounds above 2^32 cells: exact vertices, UVs, full selection keys and separate shader variant')
 

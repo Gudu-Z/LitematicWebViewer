@@ -9,30 +9,58 @@ attribute uint compactCellY;
 #endif
 attribute uint compactTemplate;
 uniform highp sampler2D compactQuads;
-uniform uvec3 compactDimensions;
 uniform ivec3 compactMinimum;
-uniform int compactWidth;
-vec4 compactTexel(int index) {
-  return texelFetch(compactQuads, ivec2(index % compactWidth, index / compactWidth), 0);
-}
 `
 const readVertex = `
 int compactIndex = int(compactTemplate & 0x7fffffffu) * 8 + gl_VertexID * 2;
-vec4 compactA = compactTexel(compactIndex);
-vec4 compactB = compactTexel(compactIndex + 1);
-uint compactYZ = compactCell / compactDimensions.x;
+#ifdef COMPACT_ATLAS_SHIFT
+ivec2 compactTexel = ivec2(compactIndex & ((1 << COMPACT_ATLAS_SHIFT) - 1), compactIndex >> COMPACT_ATLAS_SHIFT);
+#else
+ivec2 compactTexel = ivec2(compactIndex, 0);
+#endif
+vec4 compactA = texelFetch(compactQuads, compactTexel, 0);
+vec4 compactB = texelFetch(compactQuads, compactTexel + ivec2(1, 0), 0);
+uint compactYZ = compactCell / COMPACT_GRID_WIDTH;
+uint compactX = compactCell - compactYZ * COMPACT_GRID_WIDTH;
 #ifdef COMPACT_SEPARATE_Y
 uint compactY = compactCellY;
+uint compactZ = compactYZ;
 #else
-uint compactY = compactYZ / compactDimensions.z;
+uint compactY = compactYZ / COMPACT_GRID_DEPTH;
+uint compactZ = compactYZ - compactY * COMPACT_GRID_DEPTH;
 #endif
-ivec3 compactOrigin = ivec3(compactCell % compactDimensions.x, compactY,
-  compactYZ % compactDimensions.z) + compactMinimum;
+ivec3 compactOrigin = ivec3(compactX, compactY, compactZ) + compactMinimum;
 if ((compactTemplate & 0x80000000u) != 0u) compactOrigin = ivec3(0);
 #ifdef USE_MAP
   vMapUv = (mapTransform * vec3(compactA.w, compactB.w, 1.0)).xy;
 #endif
 `
+
+export function configureCompactMaterial(material, data, texture) {
+  const b = data.bounds, width = b.width >>> 0, depth = b.depth >>> 0
+  // The template atlas has a power-of-two width; the two texels of a vertex
+  // are an aligned pair and never cross a row. Single-row atlases need no
+  // address arithmetic. Grid divisors are shared by every material in a build.
+  const shift = data.textureHeight > 1 ? Math.log2(data.textureWidth) : 0
+  const defines = '#define COMPACT_GRID_WIDTH ' + width + 'u\n'
+    + (data.cellYs ? '#define COMPACT_SEPARATE_Y\n' : '#define COMPACT_GRID_DEPTH ' + depth + 'u\n')
+    + (shift ? '#define COMPACT_ATLAS_SHIFT ' + shift + '\n' : '')
+  const uniforms = { compactQuads: { value: texture }, compactMinimum: { value: new Int32Array([b.minX, b.minY, b.minZ]) } }
+  material.uniforms ||= {}
+  for (const [key, uniform] of Object.entries(uniforms)) {
+    if (material.uniforms[key]) material.uniforms[key].value = uniform.value
+    else material.uniforms[key] = uniform
+  }
+  material.onBeforeCompile = shader => {
+    Object.assign(shader.uniforms, material.uniforms)
+    shader.vertexShader = defines + shader.vertexShader.replace('#include <common>', '#include <common>\n' + declarations)
+      .replace('#include <uv_vertex>', '#include <uv_vertex>\n' + readVertex)
+      .replace('#include <begin_vertex>', 'vec3 transformed = vec3(compactOrigin + ivec3(compactB.xyz)) + compactA.xyz;')
+  }
+  const key = 'compact-block-faces-v3-' + width + '-' + (data.cellYs ? 'y' : depth) + '-' + shift
+  material.customProgramCacheKey = () => key
+  material.needsUpdate = true
+}
 
 function boxFor(data, offset, box) {
   const cells = data.cellBounds
@@ -67,25 +95,7 @@ export class CompactFaceMesh extends THREE.Mesh {
     const texture = new THREE.DataTexture(data.templateData, data.textureWidth, data.textureHeight, THREE.RGBAFormat, THREE.FloatType)
     texture.needsUpdate = true
     geometry.addEventListener('dispose', () => texture.dispose())
-    const b = data.bounds
-    const uniforms = {
-      compactQuads: { value: texture }, compactWidth: { value: data.textureWidth },
-      compactDimensions: { value: new Uint32Array([b.width, b.height, b.depth]) },
-      compactMinimum: { value: new Int32Array([b.minX, b.minY, b.minZ]) },
-    }
-    material.uniforms ||= {}
-    for (const [key, uniform] of Object.entries(uniforms)) {
-      if (material.uniforms[key]) material.uniforms[key].value = uniform.value
-      else material.uniforms[key] = uniform
-    }
-    material.onBeforeCompile = shader => {
-      Object.assign(shader.uniforms, material.uniforms)
-      shader.vertexShader = (data.cellYs ? '#define COMPACT_SEPARATE_Y\n' : '') + shader.vertexShader.replace('#include <common>', '#include <common>\n' + declarations)
-        .replace('#include <uv_vertex>', '#include <uv_vertex>\n' + readVertex)
-        .replace('#include <begin_vertex>', 'vec3 transformed = vec3(compactOrigin + ivec3(compactB.xyz)) + compactA.xyz;')
-    }
-    material.customProgramCacheKey = () => data.cellYs ? 'compact-block-faces-v2-xz-y' : 'compact-block-faces-v2-xyz'
-    material.needsUpdate = true
+    configureCompactMaterial(material, data, texture)
     super(geometry, material)
     this.isCompactFaceMesh = true; this.compactData = data
   }

@@ -11,6 +11,9 @@ import { Renderer } from '../src/renderer.js'
 import { buildEntityMesh, buildItemPreview, buildGuiItem } from '../src/entities.js'
 import { collectSceneResources } from '../src/sceneResources.js'
 import { batchItemFrames } from '../src/frameBatches.js'
+import { mergeTranslucentBlocks } from '../src/translucentBlocks.js'
+import { createFaceRadixSort } from '../src/translucentFaceOrder.js'
+import { blockFaceKeys, setBlockFaceKeys } from '../src/selectionSources.js'
 
 const assets = new AssetProvider(), originalFetch = globalThis.fetch, root = 'public/assets/minecraft/'
 assets.baseUrl = 'https://translucent.test/'
@@ -176,3 +179,80 @@ try {
   translucent(item).forEach(mesh => assert.equal(mesh.material.translucentMaps.length, 1)); dispose(item)
   console.log(`PASS translucent blocks: vanilla/XK inner shells, contact culling, slices, ${checks} camera sorts, exact yaw/pitch/roll cache, camera/mesh movement invalidation, items/GUI/cached frames, pack sprite replacement and shared texture ownership`)
 } finally { assets.clearCaches(); globalThis.fetch = originalFetch }
+
+// Independent oracle: use the original Three world transform, double squared
+// distance, prior Uint32 order and comparator. Compare every original triangle.
+let random = 0x9e3779b9
+function nextWord() { random = (Math.imul(random, 1664525) + 1013904223) >>> 0; return random }
+const count = 6151
+for (const [custom, nonFinite] of [[false, false], [true, false], [true, true]]) {
+  const source = new THREE.BufferGeometry(), positions = new Float32Array(count * 12), uvs = new Float32Array(count * 8)
+  const index = new Uint32Array(count * 6), keys = Float64Array.from({ length: count }, (_, id) => 2 ** 32 + id)
+  for (let i = 0; i < count; i++) {
+    // Pairs at ±1 have distinct double distances that round to the same float
+    // from a slightly off-centre eye. Repeated centres require stable ties.
+    const x = i % 8 < 2 ? (i % 8 ? -1 : 1) : (nextWord() % 16384 - 8192) / 16
+    const y = i % 8 < 2 ? 0 : (nextWord() % 31 - 15) / 8, z = i % 8 < 2 ? 0 : (nextWord() % 4096 - 2048) / 16
+    for (let k = 0; k < 4; k++) { const j = i * 12 + k * 3; positions[j] = x + (k & 1 ? .125 : -.125); positions[j + 1] = y + (k & 2 ? .125 : -.125); positions[j + 2] = z }
+    const triangle = custom && i % 17 === 0 ? [3, 2, 1, 1, 2, 0] : [0, 1, 2, 2, 1, 3]
+    for (let k = 0; k < 6; k++) index[i * 6 + k] = i * 4 + triangle[k]
+    uvs[i * 8] = i / count
+  }
+  if (nonFinite) positions[(count - 2) * 12] = Infinity // Existing comparator for non-finite centres, including identity 0*Infinity.
+  source.setAttribute('position', new THREE.BufferAttribute(positions, 3)); source.setAttribute('uv', new THREE.BufferAttribute(uvs, 2))
+  source.setIndex(new THREE.BufferAttribute(index, 1)); setBlockFaceKeys(source, keys)
+  const inputMaterial = new THREE.MeshLambertMaterial({ map: new THREE.Texture() })
+  const [mesh] = mergeTranslucentBlocks([new THREE.Mesh(source, inputMaterial)])
+  const camera = new THREE.PerspectiveCamera(), order = Uint32Array.from({ length: count }, (_, i) => i), distance = new Float64Array(count)
+  const point = new THREE.Vector3(), expected = new Uint32Array(index.length)
+  for (const [step, eye] of [[1e-9, 0, 0], [0, 0, 0], [840.125, 241.5, -516.75], [840.5, 241.75, -516.125],
+    [-29999999.75, 50, 30000000.5], [-29999999.75, 50, 30000000.5], [-30000000.15, 50.5, 29999999.5],
+    [1e200, 2, 3], [4, -1, 7]].entries()) {
+    if (step === 4) { mesh.position.set(-30000000, 51, 30000000); mesh.rotation.set(.2, -.1, .7); mesh.scale.set(.5, 2, -1.5) }
+    if (step === 5) camera.rotation.y += .8
+    if (step === 8) { mesh.position.set(0, 0, 0); mesh.rotation.set(0, 0, 0); mesh.scale.set(1, 1, 1) }
+    mesh.updateMatrixWorld(true); camera.position.fromArray(eye); camera.updateMatrixWorld(true)
+    for (let i = 0, j = 0; i < count; i++, j += 12) {
+      point.set((positions[j] + positions[j + 9]) / 2, (positions[j + 1] + positions[j + 10]) / 2, (positions[j + 2] + positions[j + 11]) / 2)
+      distance[i] = point.applyMatrix4(mesh.matrixWorld).distanceToSquared(camera.position)
+    }
+    if (!step) { assert.notEqual(distance[0], distance[1]); assert.equal(Math.fround(distance[0]), Math.fround(distance[1])) }
+    if (step !== 5) order.sort((a, b) => distance[b] - distance[a] || a - b)
+    for (let i = 0; i < count; i++) for (let k = 0; k < 6; k++) expected[i * 6 + k] = index[order[i] * 6 + k]
+    const version = mesh.geometry.index.version
+    mesh.onBeforeRender(null, null, camera)
+    assert.deepEqual(mesh.geometry.index.array, expected)
+    if (step === 5) assert.equal(mesh.geometry.index.version, version, 'Camera direction does not reorder or upload')
+  }
+  assert.deepEqual(mesh.geometry.attributes.position.array, positions); assert.deepEqual(mesh.geometry.attributes.uv.array, uvs)
+  if (!nonFinite) {
+    // Moving straight away from a coplanar set adds the same exact constant
+    // to all these dyadic squared distances, so the existing upload is valid.
+    mesh.scale.z = 0; mesh.updateMatrixWorld(true)
+    camera.position.set(0, 0, 1); camera.updateMatrixWorld(true); mesh.onBeforeRender(null, null, camera)
+    const version = mesh.geometry.index.version, sorted = mesh.geometry.index.array.slice()
+    camera.position.z = 2; camera.updateMatrixWorld(true); mesh.onBeforeRender(null, null, camera)
+    assert.equal(mesh.geometry.index.version, version); assert.deepEqual(mesh.geometry.index.array, sorted)
+  }
+  assert.deepEqual(blockFaceKeys(mesh.geometry), keys, 'Picking provenance still follows the original position vertices')
+  const clone = mesh.clone(); assert.deepEqual(clone.geometry.index.array, index, 'Clone starts from the original (including custom) triangles')
+  assert.deepEqual(blockFaceKeys(clone.geometry), keys); assert.notEqual(clone.geometry.index.array.buffer, mesh.geometry.index.array.buffer)
+  clone.geometry.dispose(); mesh.geometry.dispose(); mesh.material.dispose(); inputMaterial.map.dispose(); inputMaterial.dispose()
+}
+// Exercise the whole nonnegative double key domain, not only distances from a
+// typical world: subnormals, adjacent mantissas, many exponent bands and ties.
+{
+  const distances = new Float64Array(8193), raw = new DataView(new ArrayBuffer(8))
+  const special = [-0, 0, Number.MIN_VALUE, Number.MIN_VALUE * 2, 1, 1 + Number.EPSILON, 2 ** 32, 2 ** 53, Number.MAX_VALUE]
+  for (let i = 0; i < distances.length; i++) {
+    raw.setUint32(0, nextWord() & 0x7fefffff); raw.setUint32(4, nextWord())
+    distances[i] = i % 4 === 0 ? special[(i / 4) % special.length] : raw.getFloat64(0)
+  }
+  const order = Uint32Array.from({ length: distances.length }, (_, i) => distances.length - 1 - i), radix = createFaceRadixSort(distances)
+  for (const vary of [true, false]) {
+    if (!vary) distances.fill(17.5)
+    const expected = order.slice().sort((a,b) => distances[b] - distances[a] || a - b)
+    radix(order); assert.deepEqual(order, expected)
+  }
+}
+console.log('PASS large translucent camera paths: original triangle bytes, exact doubles/ties, far transforms, non-finite fallback, stable clone geometry and picking')

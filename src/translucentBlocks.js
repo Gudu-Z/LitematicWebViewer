@@ -1,7 +1,47 @@
 import * as THREE from 'three'
 import { blockFaceKeys, setBlockFaceKeys } from './selectionSources.js'
+import { createFaceRadixSort } from './translucentFaceOrder.js'
 
 const sorting = new WeakMap()
+const identity = new THREE.Matrix4()
+
+function canonicalQuads(indices) {
+  for (let i = 0, base = 0; i < indices.length; i += 6, base += 4) {
+    if (indices[i] !== base || indices[i + 1] !== base + 1 || indices[i + 2] !== base + 2 ||
+      indices[i + 3] !== base + 2 || indices[i + 4] !== base + 1 || indices[i + 5] !== base + 3) return false
+  }
+  return true
+}
+
+function writeQuads(target, order, original) {
+  if (original) {
+    for (let i = 0, j = 0; j < target.length; i++, j += 6) {
+      const k = order[i] * 6
+      for (let c = 0; c < 6; c++) target[j + c] = original[k + c]
+    }
+  } else for (let i = 0, j = 0; j < target.length; i++, j += 6) {
+    const base = (order ? order[i] : i) * 4
+    target[j] = base; target[j + 1] = base + 1; target[j + 2] = base + 2
+    target[j + 3] = base + 2; target[j + 4] = base + 1; target[j + 5] = base + 3
+  }
+}
+
+function worldCenters(state, positions, matrix) {
+  const { centers, point } = state, local = matrix.equals(identity)
+  for (let i = 0, j = 0; j < centers.length; i += 12, j += 3) {
+    const x = (positions[i] + positions[i + 9]) / 2, y = (positions[i + 1] + positions[i + 10]) / 2, z = (positions[i + 2] + positions[i + 11]) / 2
+    if (local && Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) { centers[j] = x; centers[j + 1] = y; centers[j + 2] = z }
+    else point.set(x, y, z).applyMatrix4(matrix).toArray(centers, j)
+  }
+}
+
+function stillOrdered(order, distances) {
+  for (let i = 1; i < order.length; i++) {
+    const a = order[i - 1], b = order[i]
+    if (distances[a] < distances[b] || (distances[a] === distances[b] && a > b)) return false
+  }
+  return true
+}
 
 // Block quads use 0,1,2 / 2,1,3 (unlike entity ModelPart quads). Keep their
 // original triangles and sort all textures together, including the honey core.
@@ -11,8 +51,9 @@ class TranslucentBlockMesh extends THREE.Mesh {
     // Cached frame instances need independent camera-dependent index buffers.
     this.geometry = source.geometry.clone()
     setBlockFaceKeys(this.geometry, blockFaceKeys(source.geometry))
-    const original = sorting.get(source)?.indices
-    if (original) this.geometry.index.array.set(original)
+    const state = sorting.get(source)
+    if (state?.indices) this.geometry.index.array.set(state.indices)
+    else if (state) writeQuads(this.geometry.index.array, null, null)
     sorting.delete(this)
     return this
   }
@@ -21,29 +62,38 @@ class TranslucentBlockMesh extends THREE.Mesh {
     let state = sorting.get(this)
     const geometry = this.geometry, count = geometry.index.count / 6
     if (!state) {
-      const centers = new Float64Array(count * 3), p = geometry.attributes.position
-      for (let face = 0; face < count; face++) for (let axis = 0; axis < 3; axis++) {
-        centers[face * 3 + axis] = (p.array[face * 12 + axis] + p.array[face * 12 + 9 + axis]) / 2
-      }
-      state = { centers, indices: geometry.index.array.slice(), order: Uint32Array.from({ length: count }, (_, i) => i),
-        distances: new Float64Array(count), world: new THREE.Matrix4(),
+      const distances = new Float64Array(count), index = geometry.index.array
+      state = { centers: new Float64Array(count * 3), indices: canonicalQuads(index) ? null : index.slice(),
+        order: Uint32Array.from({ length: count }, (_, i) => i), distances, radix: createFaceRadixSort(distances), world: new THREE.Matrix4(),
         point: new THREE.Vector3(), eye: new THREE.Vector3(), ready: false }
       sorting.set(this, state)
     }
     // Distance ordering depends on the eye position, not its viewing direction.
     // Turning in place leaves every distance and the uploaded index order exact.
     state.point.setFromMatrixPosition(camera.matrixWorld)
-    if (state.ready && state.eye.equals(state.point) && state.world.equals(this.matrixWorld)) return
-    state.ready = true; state.eye.copy(state.point); state.world.copy(this.matrixWorld)
-    for (let i = 0; i < count; i++) {
-      state.point.fromArray(state.centers, i * 3).applyMatrix4(this.matrixWorld)
-      state.distances[i] = state.point.distanceToSquared(state.eye)
+    const sameWorld = state.ready && state.world.equals(this.matrixWorld)
+    if (sameWorld && state.eye.equals(state.point)) return
+    state.eye.copy(state.point)
+    if (!sameWorld) {
+      worldCenters(state, geometry.attributes.position.array, this.matrixWorld)
+      state.world.copy(this.matrixWorld); state.ready = true
     }
-    state.order.sort((a, b) => state.distances[b] - state.distances[a] || a - b)
-    for (let i = 0; i < count; i++) {
-      const from = state.order[i] * 6
-      for (let k = 0; k < 6; k++) geometry.index.array[i * 6 + k] = state.indices[from + k]
+    const { centers, distances, order, eye } = state
+    let finite = true
+    for (let i = 0, j = 0; i < count; i++, j += 3) {
+      const x = centers[j] - eye.x, y = centers[j + 1] - eye.y, z = centers[j + 2] - eye.z
+      const distance = x * x + y * y + z * z
+      distances[i] = distance
+      if (!Number.isFinite(distance)) finite = false
     }
+    if (state.radix && finite) {
+      if (stillOrdered(order, distances)) return
+      state.radix(order)
+    } else {
+      // Keep the original comparator (and previous order) for non-finite keys.
+      order.sort((a, b) => distances[b] - distances[a] || a - b)
+    }
+    writeQuads(geometry.index.array, order, state.indices)
     geometry.index.needsUpdate = true
   }
 }

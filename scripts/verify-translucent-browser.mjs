@@ -86,7 +86,8 @@ async function verifyInBrowser() {
         dispose(root)
       }
     }
-    return { cases, maxError }
+    const { verifySignDrawBatches } = await import('/scripts/sign-draw-batches-browser.js')
+    return { cases, maxError, signBatches: verifySignDrawBatches(renderer) }
   } finally { renderer.dispose(); assets.clearCaches() }
 }
 
