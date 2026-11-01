@@ -1048,7 +1048,7 @@ export class Renderer {
       options.onProgress(completed / heads.length, { completed, total: heads.length })
     }
     try {
-      textures = createHeadTextureLoader(heads, assets, { isCurrent: () => !stale() })
+      textures = options.headPreparation?.take(heads, assets) ?? createHeadTextureLoader(heads, assets, { isCurrent: () => !stale() })
       job.stop = textures.stop
       progress()
       for (const head of heads) {

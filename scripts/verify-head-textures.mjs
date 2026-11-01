@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
-import { createHeadTextureLoader } from '../src/headTextures.js'
+import { getEventListeners } from 'node:events'
+import { AssetProvider } from '../src/assets.js'
+import { createHeadTextureLoader, createPlayerHeadPreparation } from '../src/headTextures.js'
 
 const head = skinUrl => ({ skinUrl })
 const deferred = () => {
@@ -172,10 +174,89 @@ try {
     assert.equal(fixture.requests.length, 1, 'A stale render does not dispatch queued work')
     assert.equal(await loader.get(heads[2]), null)
   }
+
+  // The parse and render stages must consume the same results: a prefetched
+  // failure still belongs to the first head, and must not trigger a retry
+  // until the second matching head. No new texture requests on handoff.
+  {
+    const heads = ['skin', null, 'skin', 'skin'].map(head)
+    const fixture = controlledAssets(), assets = Object.assign(new AssetProvider(), fixture.assets)
+    const { signal } = new AbortController()
+    const prepared = createPlayerHeadPreparation(heads, assets, { signal })
+    assert.equal(prepared.heads, heads)
+    assert.deepEqual(fixture.requests.map(r => r.key), ['skin', null])
+    fixture.requests[0].resolve(null); fixture.requests[1].resolve()
+    await turn()
+    const loader = prepared.take(heads, assets)
+    assert.ok(loader)
+    assert.equal(prepared.take(heads, assets), null, 'A second consumer cannot claim these results')
+    assert.equal(await loader.get(heads[0]), null)
+    assert.equal(await loader.get(heads[1]), fixture.requests[1].texture)
+    assert.equal(fixture.requests.length, 2)
+    const retry = loader.get(heads[2]); fixture.requests[2].resolve()
+    assert.equal(await retry, fixture.requests[2].texture)
+    assert.equal(await loader.get(heads[3]), fixture.requests[2].texture)
+    assert.deepEqual(fixture.requests.map(r => r.key), ['skin', null, 'skin'])
+    loader.stop()
+    assert.equal(getEventListeners(signal, 'abort').length, 0)
+    assert.equal(assets._cacheClearListeners.size, 0)
+    prepared.stop()
+    assert.equal(fixture.disposals, 0)
+  }
+
+  // Abort, file-load failure and real provider revision changes may happen
+  // before the head renderer runs, as well as after it has taken the loader.
+  for (const action of ['abort', 'stop', 'pack']) for (const claimed of [false, true]) {
+    const heads = Array.from({ length: 12 }, (_, i) => head('held-' + i))
+    const controller = new AbortController(), { signal } = controller
+    const fixture = controlledAssets(), assets = Object.assign(new AssetProvider(), fixture.assets)
+    const prepared = createPlayerHeadPreparation(heads, assets, { signal })
+    const loader = claimed && prepared.take(heads, assets)
+    const waiting = loader && loader.get(heads[0])
+    assert.equal(fixture.requests.length, 8)
+    assert.equal(getEventListeners(signal, 'abort').length, 1)
+    assert.equal(assets._cacheClearListeners.size, 1)
+    if (action === 'abort') controller.abort()
+    else if (action === 'pack') assets.clearCaches()
+    else prepared.stop()
+    if (claimed) assert.equal(await Promise.race([waiting, turn().then(() => 'not settled')]), null)
+    assert.equal(prepared.take(heads, assets), null)
+    assert.equal(getEventListeners(signal, 'abort').length, 0)
+    assert.equal(assets._cacheClearListeners.size, 0)
+    // The provider may finish borrowed requests after this file is gone.
+    fixture.requests.forEach((r, i) => i % 2 ? r.reject(Error('late failure')) : r.resolve())
+    await turn()
+    assert.equal(fixture.requests.length, 8, 'An abandoned job never starts its four queued requests')
+    assert.equal(fixture.disposals, 0)
+    prepared.stop()
+  }
+
+  for (const mismatch of ['heads', 'provider', 'revision']) {
+    const heads = [head('same')], fixture = controlledAssets(), assets = fixture.assets
+    assets.cacheRevision = 0
+    const prepared = createPlayerHeadPreparation(heads, assets)
+    if (mismatch === 'revision') assets.cacheRevision++ // Also works without onCacheClear.
+    const result = prepared.take(mismatch === 'heads' ? [...heads] : heads, mismatch === 'provider' ? {} : assets)
+    assert.equal(result, null)
+    assert.equal(prepared.take(heads, assets), null, 'Stop an abandoned preparation after mismatched handoff')
+    fixture.requests[0].reject(Error('late failure'))
+  }
+
+  for (const preAborted of [false, true]) {
+    const controller = new AbortController(), { signal } = controller
+    if (preAborted) controller.abort()
+    const heads = preAborted ? [head('unused')] : []
+    const assets = new Proxy({}, { get() { throw Error('An empty or aborted preparation must not touch the provider') } })
+    const prepared = createPlayerHeadPreparation(heads, assets, { signal })
+    assert.equal(prepared.heads, heads)
+    assert.equal(prepared.take(heads, assets), null)
+    assert.equal(getEventListeners(signal, 'abort').length, 0)
+    prepared.stop()
+  }
   await turn()
   assert.deepEqual(unhandled, [])
 } finally {
   process.off('unhandledRejection', onUnhandled)
 }
 
-console.log('PASS head textures: bounded distinct prefetch, ordered consumption, failure retries, shared ownership, stop/stale handling and observed late rejections')
+console.log('PASS head textures: bounded prefetch, ordered failures/retries, preparation handoff, abort/pack changes, stale work and shared texture ownership')

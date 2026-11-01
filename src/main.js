@@ -2,6 +2,7 @@
 
 import './styles.css'
 import { extractPlayerHeads, extractSigns, extractBanners, extractStatues, extractDecoratedPots } from './schematicDetails.js'
+import { createPlayerHeadPreparation } from './headTextures.js'
 import { ViewerPacks } from './viewerPacks.js'
 import { SchematicWorkerClient } from './workerClient.js'
 import { throwIfAborted, withAbort } from './loadingTask.js'
@@ -434,7 +435,7 @@ async function openFile(file, camera) {
   setBusy(true)
   const controller = new AbortController(), { signal } = controller
   const options = { signal, onStage: detail => ui.setLoadingStage(detail.phase, detail) }
-  let data, replaced = false
+  let data, headPreparation, replaced = false
   ui.setLoadingCancelable(true, () => controller.abort())
   integrationBridge.loading = true
   integrationBridge.notify('loading', { message: t('parsingFile'), progress: 0 })
@@ -456,6 +457,9 @@ async function openFile(file, camera) {
     throwIfAborted(signal)
     ui.setProgress(0.2)
 
+    // New files open with every region visible, regardless of which regions
+    // were hidden in the previous file. Start skins before models and geometry.
+    headPreparation = createPlayerHeadPreparation(extractPlayerHeads(data.tileEntities, data), assets, { signal })
     const palette = data.palette
     ui.setStatusKey('statusParsing', { n: palette.length })
     ui.setLoadingStage('models', { completed: 0, total: palette.length })
@@ -481,7 +485,7 @@ async function openFile(file, camera) {
     resetViewForData(data)
     ui.setStatusKey('statusGeometry', { n: data.blocks.size.toLocaleString() })
     const stats = await renderer.render(data, assets, (p) => ui.setProgress(0.35 + p * 0.4), null, true, options)
-    await renderCurrentDetails(options)
+    await renderCurrentDetails({ ...options, headPreparation })
     throwIfAborted(signal)
     ui.showMetadata(data.metadata)
     applyCamera(renderer, camera)
@@ -514,6 +518,7 @@ async function openFile(file, camera) {
     else ui.showError(t('loadFailed') + (e.message || e))
     return false
   } finally {
+    headPreparation?.stop()
     ui.setLoadingCancelable(false)
     integrationBridge.loading = false
     try { setBusy(false) } finally { endTextureLoad(); assets.trimTextures() }
@@ -538,20 +543,23 @@ async function autoLoadDemo(sample = false) {
 async function reRenderCurrent() {
   if (!currentData || !renderer) return
   const endTextureLoad = assets.beginTextureLoad()
+  let headPreparation
   try {
     // 资源包集合已变化：贴图缓存已被清空，这里同步移除旧网格并释放其贴图，
     // 避免旧贴图残留（泄漏）或在异步重解析期间被动画循环重新上传。
     renderer.clear(true)
     resolver.clear()
+    const heads = extractPlayerHeads(filterByRegion(currentData.tileEntities || []), currentData)
+    headPreparation = createPlayerHeadPreparation(heads, assets)
     const palette = currentData.palette
     const baked = await Promise.all(palette.map((p) => resolver.resolve(p.name, p.properties)))
     palette.forEach((p, i) => {
       p.baked = baked[i]
     })
     await renderer.render(currentData, assets, (p) => ui.setProgress(.35 + p * .4), makeBlockFilter(), false)
-    await renderCurrentDetails()
+    await renderCurrentDetails({ headPreparation })
     ui.setProgress(1)
-  } finally { endTextureLoad(); assets.trimTextures() }
+  } finally { headPreparation?.stop(); endTextureLoad(); assets.trimTextures() }
 }
 
 // 渲染当前结构里的告示牌
@@ -600,8 +608,8 @@ async function renderCurrentDetails(options = {}) {
 // 渲染当前结构里的玩家头颅（用玩家自己的皮肤）
 async function renderCurrentPlayerHeads(options = {}) {
   if (!currentData || !renderer) return
-  const tes = filterByRegion(currentData.tileEntities || [])
-  await renderer.renderPlayerHeads(extractPlayerHeads(tes, currentData), assets, options)
+  const heads = options.headPreparation?.heads ?? extractPlayerHeads(filterByRegion(currentData.tileEntities || []), currentData)
+  await renderer.renderPlayerHeads(heads, assets, options)
 }
 
 // 渲染当前结构里的旗帜（底色 + 图案）

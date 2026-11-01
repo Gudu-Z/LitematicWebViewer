@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto'
 import * as THREE from 'three'
 import { Renderer } from '../src/renderer.js'
 import { AssetProvider } from '../src/assets.js'
+import { createPlayerHeadPreparation } from '../src/headTextures.js'
 import { selectionSource } from '../src/selectionSources.js'
 
 const angleCases = [
@@ -164,6 +165,34 @@ console.log('PASS player heads: cfaf675 golden bytes, exact angles, independent 
   for (let i = 1; i < view.headsGroup.children.length; i++) assert.ok(view.headsGroup.children[i - 1].material.id < view.headsGroup.children[i].material.id)
   view.clearHeads()
 }
+
+{
+  const view = viewer(), heads = [head(0, 'retry'), head(1, 'ok'), head(2, 'retry')]
+  const calls = [], recovered = texture('recovered'), ok = texture('ok')
+  const assets = { getExternalTexture(key) {
+    calls.push(key)
+    return key === 'ok' ? ok : calls.length === 1 ? null : recovered
+  } }
+  const headPreparation = createPlayerHeadPreparation(heads, assets)
+  await settle()
+  assert.deepEqual(calls, ['retry', 'ok']); assert.equal(view.headsGroup.children.length, 0)
+  await view.renderPlayerHeads(heads, assets, { headPreparation })
+  assert.deepEqual(calls, ['retry', 'ok', 'retry'], 'Only the later duplicate retries the prepared failure')
+  assert.deepEqual(view.headsGroup.children.map(o => [o.position.x, o.material.map.name]), [[1, 'ok'], [2, 'recovered']])
+  headPreparation.stop(); view.clearHeads()
+}
+{
+  const view = viewer(), assets = new AssetProvider(), heads = [head(0)]
+  const old = texture('old Steve'), fresh = texture('new Steve')
+  assets._getTexture = async () => old
+  const headPreparation = createPlayerHeadPreparation(heads, assets)
+  await settle()
+  assets.clearCaches(); assets._getTexture = async () => fresh
+  await view.renderPlayerHeads(heads, assets, { headPreparation })
+  assert.equal(view.headsGroup.children[0].material.map, fresh, 'An invalidated preparation falls back to the active pack')
+  headPreparation.stop(); view.clearHeads()
+}
+console.log('PASS render consumes prepared results in order and reloads skins from a changed resource pack')
 
 for (const action of ['abort', 'clear', 'replacement', 'revision']) {
   const view = viewer(), gate = deferred(), controller = new AbortController(), progress = []

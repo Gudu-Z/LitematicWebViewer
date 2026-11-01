@@ -10,6 +10,7 @@ export function createHeadTextureLoader(heads, assets, { isCurrent = () => true,
   function stop() {
     if (stopped) return
     stopped = true
+    isCurrent = null // A late provider request no longer needs its scene/job guard.
     // The provider owns both the requests and textures. Settle our consumers
     // without cancelling a shared fetch or disposing a borrowed texture.
     for (const record of records.values()) record.resolve({ texture: null })
@@ -85,6 +86,39 @@ export function createHeadTextureLoader(heads, assets, { isCurrent = () => true,
       }
       if (result.failed) throw result.error
       return result.texture
+    },
+    stop,
+  }
+}
+
+// The file load already owns a texture transaction. Keep the same first
+// results (including failures) from parse completion through ordered rendering.
+export function createPlayerHeadPreparation(heads, assets, { signal } = {}) {
+  if (!heads.length || signal?.aborted) return { heads, take: () => null, stop() {} }
+
+  const revision = assets.cacheRevision
+  let claimed = false, stopped = false, offClear
+  const current = () => !stopped && !signal?.aborted && revision === assets.cacheRevision
+  const loader = createHeadTextureLoader(heads, assets, { isCurrent: current })
+  function stop() {
+    if (stopped) return
+    stopped = true
+    signal?.removeEventListener('abort', stop)
+    offClear?.()
+    loader.stop()
+  }
+  if (current()) {
+    signal?.addEventListener('abort', stop, { once: true })
+    offClear = assets.onCacheClear?.(stop)
+  } else stop() // A synchronous provider may invalidate the load during dispatch.
+
+  return {
+    heads,
+    take(list, provider) {
+      if (claimed) return null
+      if (list !== heads || provider !== assets || !current()) { stop(); return null }
+      claimed = true
+      return { get: loader.get, stop }
     },
     stop,
   }

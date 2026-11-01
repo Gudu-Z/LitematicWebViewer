@@ -6,6 +6,7 @@ import { SchematicWorkerClient } from './workerClient.js'
 import { throwIfAborted, withAbort } from './loadingTask.js'
 import { ViewerPacks } from './viewerPacks.js'
 import { extractSigns, extractPlayerHeads, extractBanners, extractStatues, extractDecoratedPots } from './schematicDetails.js'
+import { createPlayerHeadPreparation } from './headTextures.js'
 import { PROTOCOL, validFile, fileURL, fetchSchematic, openFullViewer, applyCamera } from './embedProtocol.js'
 import { normalizeOptions, applyTheme } from './previewOptions.js'
 
@@ -191,7 +192,7 @@ async function pump() {
     const checkRequest = () => throwIfAborted(signal)
     loadingProgress(undefined, 'loading')
     const endTextureLoad = assets.beginTextureLoad()
-    let endSceneUpdate, data
+    let endSceneUpdate, data, headPreparation
     try {
       let file, url
       if (typeof request.source === 'string') {
@@ -212,6 +213,10 @@ async function pump() {
         if (!signal.aborted) loadingProgress(value * .2, stage.phase, stage)
       }, { renderOnly: true, signal })
       checkRequest()
+      const tiles = data.tileEntities || []
+      // Start this card's skin requests while its block models and geometry
+      // build. Keep the same heads and first-request results for the detail pass.
+      headPreparation = createPlayerHeadPreparation(extractPlayerHeads(tiles, data), assets, { signal })
       loadingProgress(.2, 'models')
       const baked = await withAbort(Promise.all(data.palette.map(entry => resolver.resolve(entry.name, entry.properties))), signal)
       checkRequest()
@@ -223,10 +228,9 @@ async function pump() {
       } })
       checkRequest()
       loadingProgress(.85, 'details')
-      const tiles = data.tileEntities || []
       await renderer.renderSigns(extractSigns(tiles, data), assets, { signal })
       checkRequest()
-      await renderer.renderPlayerHeads(extractPlayerHeads(tiles, data), assets, { signal })
+      await renderer.renderPlayerHeads(headPreparation.heads, assets, { signal, headPreparation })
       checkRequest()
       await renderer.renderBanners(extractBanners(tiles, data), assets, { signal })
       checkRequest()
@@ -251,6 +255,7 @@ async function pump() {
         state('error', words[key] ? t(key) : `${t('failed')} ${error.message}`)
       }
     } finally {
+      headPreparation?.stop()
       // Cards never rebuild layers, so do not retain a second block store after loading.
       if (data) workerClient.release(data)
       else workerClient.cancel()
