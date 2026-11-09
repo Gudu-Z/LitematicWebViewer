@@ -1,7 +1,7 @@
 import { parseLitematica } from './litematica.js'
-import { deserializeSchematic, deserializeWorkerError, GEOMETRY_STREAM_VERSION, streamBatchBytes, streamProtocolError,
+import { serializeSchematic, deserializeSchematic, deserializeWorkerError, GEOMETRY_STREAM_VERSION, streamBatchBytes, streamProtocolError,
   validateStreamLayout, validateStreamBatch, validateStreamAck, validateStreamResult } from './workerProtocol.js'
-import { PARSE_HANDOFF_VERSION, createParseHandoffReceiver } from './parseHandoff.js'
+import { PARSE_HANDOFF_VERSION, createParseHandoffReceiver, planParseHandoff } from './parseHandoff.js'
 
 function abortError(reason) {
   if (reason?.name === 'AbortError') return reason
@@ -26,7 +26,7 @@ export class SchematicWorkerClient {
     this.workerFactory = workerFactory; this.parseFallback = parseFallback; this.handshakeTimeout = handshakeTimeout
     this.worker = null; this.ready = null; this.starting = null; this.pending = new Map()
     this.sessions = new WeakMap(); this.generation = 0; this.serial = 0; this.session = 0; this.operation = 0
-    this.disabled = false; this.disposed = false; this.sessionAbort = null; this.streamVersion = 0
+    this.disabled = false; this.disposed = false; this.sessionAbort = null; this.streamVersion = 0; this.restoring = null
   }
 
   _check(signal, operation) {
@@ -36,7 +36,7 @@ export class SchematicWorkerClient {
   _reset(error = abortError()) {
     this.sessionAbort?.(); this.sessionAbort = null
     const worker = this.worker
-    this.worker = null; this.ready = null; this.generation++; this.sessions = new WeakMap(); this.streamVersion = 0
+    this.worker = null; this.ready = null; this.generation++; this.sessions = new WeakMap(); this.streamVersion = 0; this.restoring = null
     if (this.starting) {
       clearTimeout(this.starting.timer); this.starting.reject(error); this.starting = null
     }
@@ -245,6 +245,55 @@ export class SchematicWorkerClient {
 
   canStream(data) { return this.streamVersion === GEOMETRY_STREAM_VERSION && this.canBuild(data) }
 
+  async ensureSession(data, { signal } = {}) {
+    this._check(signal)
+    if (this.canBuild(data)) return true
+    if (this.disabled) return false
+    if (this.restoring || this.pending.size || this.starting) throw workerError('Schematic worker is already busy', 'WORKER_BUSY')
+    const operation = ++this.operation
+    this._reset(); this.session++
+    const generation = this.generation
+    this.restoring = { data }
+    const current = () => operation === this.operation && generation === this.generation
+    const abort = () => { if (current()) this._reset(abortError(signal.reason)) }
+    const exchange = async (type, payload) => {
+      this._check(signal, operation)
+      const result = await this._request(type, payload, undefined, signal)
+      this._check(signal, operation)
+      if (result !== null) throw streamProtocolError('Invalid schematic restore acknowledgement')
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+    try {
+      await this._start()
+      this._check(signal, operation)
+      // Only the block store is needed to rebuild geometry. Leave entity NBT,
+      // baked models and every caller-owned buffer on the main thread.
+      const wire = serializeSchematic({ blocks: data.blocks, bounds: data.bounds, tileEntities: [], entities: [] })
+      const plan = planParseHandoff(wire)
+      if (plan) {
+        await exchange('restore-start', { header: plan.header })
+        for (const packet of plan.packets) {
+          // Await one ACK at a time so a large retained store cannot fill the
+          // browser message queue with all of its pages at once.
+          await exchange('restore-part', { packet })
+        }
+        await exchange('restore-finish', {})
+      } else await exchange('restore', { data: wire })
+      this._check(signal, operation)
+      if (!current() || !this.worker) throw workerError('Schematic worker session was lost', 'WORKER_SESSION_LOST')
+      this.sessions.set(data, { generation, session: this.session })
+      return true
+    } catch (error) {
+      // A newer parse may have replaced this operation while an ACK was in
+      // flight. Its worker and its cancellation handler belong to that parse.
+      if (current()) this._reset(error)
+      throw error
+    } finally {
+      signal?.removeEventListener('abort', abort)
+      if (current()) this.restoring = null
+    }
+  }
+
   async build(data, { palette = data.palette, descriptor = null, ...options } = {}, onProgress, { signal, maxGeometryBytes } = {}) {
     this._check(signal)
     if (!this.canBuild(data)) throw workerError('Schematic worker session is unavailable', 'WORKER_SESSION_LOST')
@@ -271,7 +320,7 @@ export class SchematicWorkerClient {
   }
 
   release(data) {
-    const active = this.canBuild(data)
+    const active = this.canBuild(data) || !!this.restoring && this.restoring.data === data
     this.sessions.delete(data)
     if (active) { this.operation++; this._reset() }
   }

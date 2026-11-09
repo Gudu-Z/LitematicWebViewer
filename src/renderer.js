@@ -1543,6 +1543,12 @@ export class Renderer {
     }
     const descriptor = filter ? filter.descriptor : null
     const plan = planBlockChunkUpdate(state.index, state.descriptor, descriptor)
+    if (plan.dirty.length && state.index.compact && (!filter || filter.descriptor) && !this.workerClient?.canBuild(data)) {
+      // Cancelling another file can leave this visible schematic without its
+      // worker session. Restore its pages before a large rebuild is scheduled.
+      await this.workerClient?.ensureSession?.(data, { signal })
+      throwIfAborted(signal)
+    }
     // A partial rebuild must never masquerade as the previously completed layer.
     state.descriptor = undefined
     if (plan.dirty.length || plan.fullRebuild) {

@@ -2,7 +2,7 @@ import * as THREE from 'three'
 import { FACE_BATCH_SIZE } from './compactFaceData.js'
 
 const states = new WeakMap(), storages = new WeakMap()
-const defaults = { batchFaces: 8192, minFaces: 262144, wholeRatio: .8 }
+const defaults = { batchFaces: FACE_BATCH_SIZE, minFaces: 262144, wholeRatio: .8 }
 
 function range(start, count) {
   // Every range draws the same four template vertices. Only the instance

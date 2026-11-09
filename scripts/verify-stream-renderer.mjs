@@ -30,8 +30,14 @@ const assets = { cacheRevision: 0, getTexture: async key => {
   return textures.get(key)
 } }
 let jobs = 0, ranges = [], cleanups = 0, prepared = [], abortOnBatch
+let workerAvailable = false, restorations = 0
 view.workerClient = {
-  canBuild: () => true, canStream: () => true,
+  canBuild: () => workerAvailable, canStream: () => workerAvailable,
+  async ensureSession(restored) {
+    assert.equal(restored, data, 'Restore the retained schematic, including its original block pages')
+    restorations++; workerAvailable = true
+    return true
+  },
   build: () => assert.fail('Capable worker must stream'),
   async buildStream(_data, options, handlers, controls) {
     jobs++
@@ -59,6 +65,7 @@ const progress = [], stages = []
 const stats = await view._buildBlockMeshes(data, assets, fraction => progress.push(fraction), null,
   { onStage: stage => stages.push(stage.phase) })
 assert.equal(jobs, 1)
+assert.equal(restorations, 1, 'A lost worker session is restored before scheduling geometry')
 assert.ok(stats.faces > 0 && ranges.length > 20)
 assert.ok(progress.every((fraction, index) => !index || fraction >= progress[index - 1]))
 assert.ok(stages.includes('upload'))
@@ -82,6 +89,7 @@ abortOnBatch = null; ranges = []
 await view.renderBlocks(data, assets, null)
 assert.equal(jobs, 3, 'A cancelled stream can rebuild the original full view')
 assert.equal([...view._blockState.parts.values()].every(part => part.complete), true)
+assert.equal(restorations, 1, 'A live worker is reused across layer rebuilds')
 const prepare = view._gpuUpload.prepareObject
 for (const cancel of [false, true]) {
   const controller = new AbortController(), owned = new Set(), disposed = new Set()
@@ -104,6 +112,24 @@ for (const cancel of [false, true]) {
   view._gpuUpload.prepareObject = prepare
   await view.renderBlocks(data, assets, null)
 }
+// Cancelling another file leaves this scene visible. A failed restoration must
+// not discard the displayed geometry or quietly build all faces on main.
+workerAvailable = false
+const restore = view.workerClient.ensureSession
+const previousRoots = [...view.group.children], previousDescriptor = view._blockState.descriptor, previousJobs = jobs
+const restoreController = new AbortController()
+view.workerClient.ensureSession = async (restored, { signal }) => {
+  assert.equal(restored, data); assert.equal(signal, restoreController.signal)
+  throw Object.assign(new Error('Injected session recovery failure'), { code: 'WORKER_CRASHED' })
+}
+await assert.rejects(view.renderBlocks(data, assets, filter, { signal: restoreController.signal }), { code: 'WORKER_CRASHED' })
+assert.equal(jobs, previousJobs)
+assert.deepEqual(view.group.children, previousRoots, 'Session recovery failure leaves the completed view intact')
+assert.equal(view._blockState.descriptor, previousDescriptor)
+view.workerClient.ensureSession = restore
+await view.renderBlocks(data, assets, filter)
+assert.equal(restorations, 2)
+assert.equal(jobs, previousJobs + 1, 'The next layer rebuild returns to the streaming worker')
 view.clearBlocks()
 for (const texture of textures.values()) texture.dispose()
-console.log('Stream renderer: retained arrays, translucent merge, progress, cancellation and rebuild passed')
+console.log('Stream renderer: retained arrays, translucent merge, progress, cancellation, lost-session recovery and rebuild passed')

@@ -1,9 +1,9 @@
 import { parseLitematica } from './litematica.js'
 import { buildFaceGroups, buildFaceGroupsStream } from './geometry.js'
-import { serializeSchematic, filterFromDescriptor, transferBuffers, serializeWorkerError,
+import { serializeSchematic, deserializeSchematic, filterFromDescriptor, transferBuffers, serializeWorkerError,
   GEOMETRY_STREAM_VERSION, streamBatchBytes, snapshotStreamSlabs, validateStreamAck } from './workerProtocol.js'
 import { createWorkerScheduler } from './workerScheduler.js'
-import { PARSE_HANDOFF_VERSION, planParseHandoff } from './parseHandoff.js'
+import { PARSE_HANDOFF_VERSION, planParseHandoff, createParseHandoffReceiver } from './parseHandoff.js'
 
 function abortError() { return Object.assign(new Error('Background task cancelled'), { name: 'AbortError', code: 'ABORT_ERR' }) }
 function protocolError(message, code = 'WORKER_PROTOCOL') { return Object.assign(new Error(message), { code }) }
@@ -13,7 +13,7 @@ const validId = value => Number.isSafeInteger(value) || typeof value === 'string
 // also be exercised with real structuredClone/transfer in Node regressions.
 export function createSchematicWorker({ postMessage, parse = parseLitematica, build = buildFaceGroups,
   buildStream = buildFaceGroupsStream, yieldTask, disposeScheduler }) {
-  let session = null, active = null
+  let session = null, active = null, restoring = null
   const post = (job, type, values = {}, transfers = []) => postMessage({ type, id: job.id, session: job.session, ...values }, transfers)
   const check = job => { if (job.failure) throw job.failure; if (job.cancelled || active !== job) throw abortError() }
 
@@ -112,6 +112,7 @@ export function createSchematicWorker({ postMessage, parse = parseLitematica, bu
     if (type === 'release') {
       if (active?.session === message.session) { active.cancelled = true; active.controller.abort() }
       if (session?.id === message.session) session = null
+      if (restoring?.id === message.session) restoring = null
       post(message, 'result', { result: null }); return
     }
     if (active) { post(message, 'error', { error: serializeWorkerError(protocolError('Background worker is busy', 'WORKER_BUSY')) }); return }
@@ -120,7 +121,7 @@ export function createSchematicWorker({ postMessage, parse = parseLitematica, bu
     active = job
     try {
       if (type === 'parse') {
-        session = null
+        session = null; restoring = null
         progress(job, 0, 'decompress')
         const data = await parse(message.bytes, fraction => progress(job, fraction, fraction < .5 ? 'decompress' : 'parse'), {
           ...message.options,
@@ -146,6 +147,28 @@ export function createSchematicWorker({ postMessage, parse = parseLitematica, bu
           const retained = new Set(transferBuffers(result.blocks))
           post(job, 'result', { result }, transferBuffers(result, retained))
         }
+      } else if (type === 'restore' || type === 'restore-start') {
+        if (restoring) throw protocolError('A schematic restore is already pending')
+        session = null
+        if (type === 'restore-start') {
+          if (message.header?.counts?.tileEntities !== 0 || message.header?.counts?.entities !== 0) {
+            throw protocolError('A schematic restore only accepts block pages')
+          }
+          restoring = { id: message.session, receiver: createParseHandoffReceiver(message.header) }
+        } else {
+          const data = deserializeSchematic(message.data)
+          session = { id: message.session, blocks: data.blocks, bounds: data.bounds }
+        }
+        post(job, 'result', { result: null })
+      } else if (type === 'restore-part' || type === 'restore-finish') {
+        if (!restoring || restoring.id !== message.session) throw protocolError('No schematic restore is pending')
+        if (type === 'restore-part') restoring.receiver.append(message.packet)
+        else {
+          const data = deserializeSchematic(restoring.receiver.finish())
+          session = { id: message.session, blocks: data.blocks, bounds: data.bounds }
+          restoring = null
+        }
+        post(job, 'result', { result: null })
       } else if (type === 'build' || type === 'build-stream') {
         if (!session || session.id !== message.session) throw protocolError('Background schematic session expired', 'WORKER_SESSION')
         if (!Array.isArray(message.palette)) throw protocolError('Missing baked block palette')
@@ -192,6 +215,7 @@ export function createSchematicWorker({ postMessage, parse = parseLitematica, bu
       } else throw protocolError('Unknown background worker command')
     } catch (error) {
       if (type === 'parse' && session?.id === message.session) session = null
+      if (typeof type === 'string' && type.startsWith('restore') && restoring?.id === message.session) restoring = null
       post(job, 'error', { error: serializeWorkerError(job.failure || error) })
     } finally {
       settleAck(job, job.failure || abortError())
@@ -200,7 +224,7 @@ export function createSchematicWorker({ postMessage, parse = parseLitematica, bu
   }
   return { handle, dispose() {
     if (active) { active.cancelled = true; active.controller.abort() }
-    session = null
+    session = null; restoring = null
     disposeScheduler?.()
   } }
 }

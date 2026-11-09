@@ -278,3 +278,102 @@ for (const action of ['abort', 'crash', 'supersede']) {
   assert.equal(data.blocks.get(7), 0); client.dispose()
 }
 console.log('PASS segmented parse client: per-packet ACKs, exact ordered NBT, legacy results, invalid/missing packets, crash/abort/supersession and late-message isolation')
+
+const restoreData = { ...schematic(), blocks: new Map(Array.from({ length: 32769 }, (_, i) => [i, 0])),
+  tileEntities: [{ notForWorker: () => {} }], entities: [{ notForWorker: () => {} }] }
+async function pendingRestore(signal) {
+  let worker
+  const client = new SchematicWorkerClient({ workerFactory: () => (worker = new FakeWorker((w, message) => {
+    if (message.type === 'restore-start') w.reply(message, null)
+  })), parseFallback: () => assert.fail('Restore must never restart on the main thread') })
+  const result = client.ensureSession(restoreData, { signal })
+  for (let n = 0; worker?.messages.at(-1)?.type !== 'restore-part'; n++) { assert.ok(n < 100); await tick() }
+  return { client, worker, result, message: worker.messages.at(-1) }
+}
+{
+  const job = await pendingRestore()
+  assert.equal(job.client.canBuild(restoreData), false, 'No partially restored session is published')
+  await assert.rejects(job.client.ensureSession(restoreData), { code: 'WORKER_BUSY' })
+  const header = job.worker.messages[0].header
+  assert.deepEqual(header.result.tileEntities, []); assert.deepEqual(header.result.entities, [])
+  assert.equal(header.counts.tileEntities, 0); assert.equal(header.counts.entities, 0)
+  let checkedGap
+  job.worker.handler = (worker, message) => {
+    worker.reply(message, null)
+    if (!checkedGap && message.type === 'restore-part') checkedGap = Promise.resolve().then(async () => {
+      assert.equal(job.client.pending.size, 0, 'Exercise the gap after an ACK and before the next packet')
+      await assert.rejects(job.client.ensureSession(restoreData), { code: 'WORKER_BUSY' })
+    })
+  }
+  job.worker.reply(job.message, null)
+  assert.equal(await job.result, true); await checkedGap
+  assert.ok(job.client.canBuild(restoreData)); assert.equal(job.client.restoring, null)
+  assert.equal(job.worker.messages.filter(m => m.type === 'restore-part').length, 5)
+  assert.ok(job.worker.messages.filter(m => m.type === 'restore-part').every(m => m.packet.values.length <= 8192 * 2))
+  const before = job.worker.messages.length
+  assert.equal(await job.client.ensureSession(restoreData), true)
+  assert.equal(job.worker.messages.length, before, 'A live session adds no messages')
+  job.client.release(undefined); assert.ok(job.client.canBuild(restoreData))
+  job.client.dispose()
+}
+for (const action of ['abort', 'release', 'crash', 'bad-ack', 'clone-error', 'supersede']) {
+  const controller = new AbortController(), job = await pendingRestore(controller.signal)
+  const expected = action === 'crash' ? { code: 'WORKER_CRASHED' } : action === 'bad-ack' ? { code: 'WORKER_PROTOCOL' }
+    : action === 'clone-error' ? /Cannot restore packet/ : { name: 'AbortError' }
+  const rejected = assert.rejects(job.result, expected)
+  if (action === 'abort') controller.abort()
+  if (action === 'release') job.client.release(restoreData)
+  if (action === 'crash') job.worker.fail('Restore crashed')
+  if (action === 'bad-ack') job.worker.reply(job.message, { incomplete: true })
+  if (action === 'clone-error') {
+    job.worker.postMessage = () => { throw Error('Cannot restore packet') }
+    job.worker.reply(job.message, null)
+  }
+  let nextWorker
+  job.client.workerFactory = () => (nextWorker = new FakeWorker(successful))
+  const fresh = action === 'supersede' ? job.client.parse(input) : null
+  await rejected
+  assert.ok(job.worker.terminated); assert.equal(job.client.disabled, false)
+  if (fresh) {
+    const current = await fresh
+    controller.abort(); job.worker.reply(job.message, null); await tick()
+    assert.ok(job.client.canBuild(current)); assert.ok(!nextWorker.terminated, 'Late restore handlers cannot reset a newer parse')
+  } else {
+    assert.equal(job.client.pending.size, 0); assert.equal(job.client.restoring, null)
+    assert.equal(job.client.canBuild(restoreData), false)
+  }
+  assert.equal(restoreData.blocks.size, 32769)
+  job.client.dispose()
+}
+{
+  const controller = new AbortController()
+  let worker
+  const client = new SchematicWorkerClient({ workerFactory: () => (worker = new FakeWorker((w, message) => {
+    if (message.type === 'restore') w.reply(message, null)
+    else successful(w, message)
+  })) })
+  const empty = { ...schematic(), blocks: new Map() }
+  assert.equal(await client.ensureSession(empty, { signal: controller.signal }), true)
+  assert.equal(worker.messages[0].type, 'restore', 'An empty store uses the direct path')
+  const newer = await client.parse(input)
+  controller.abort(); assert.ok(client.canBuild(newer), 'Completed restore releases its cancellation listener')
+  client.dispose()
+}
+for (const mode of ['disabled', 'startup-error', 'startup-abort']) {
+  const controller = new AbortController()
+  let worker
+  const client = new SchematicWorkerClient({ workerFactory: () => {
+    if (mode === 'startup-error') throw Error('Cannot start restoration worker')
+    return (worker = new FakeWorker(null, false))
+  }, parseFallback: () => assert.fail('Restore failures cannot fall back') })
+  client.disabled = mode === 'disabled'
+  const result = client.ensureSession(restoreData, { signal: controller.signal })
+  if (mode === 'disabled') { assert.equal(await result, false); assert.equal(worker, undefined) }
+  else {
+    const rejected = assert.rejects(result, mode === 'startup-abort' ? { name: 'AbortError' } : /Cannot start restoration worker/)
+    if (mode === 'startup-abort') controller.abort()
+    await rejected; assert.equal(client.disabled, false); assert.equal(client.restoring, null)
+  }
+  client.dispose()
+}
+console.log('PASS worker restoration: bounded ACKs, no-op reuse, busy gaps, startup/transfer errors, cancellation/release, late replies and supersession')

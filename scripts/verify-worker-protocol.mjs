@@ -6,7 +6,7 @@ import { parseLitematica } from '../src/litematica.js'
 import { bakeModel } from '../src/modelBaker.js'
 import { buildFaceGroups } from '../src/geometry.js'
 import { createSchematicWorker } from '../src/schematicWorker.js'
-import { PARSE_HANDOFF_VERSION, createParseHandoffReceiver } from '../src/parseHandoff.js'
+import { PARSE_HANDOFF_VERSION, createParseHandoffReceiver, planParseHandoff } from '../src/parseHandoff.js'
 import { SchematicWorkerClient } from '../src/workerClient.js'
 import { serializeSchematic, deserializeSchematic, filterFromDescriptor, transferBuffers, deserializeWorkerError } from '../src/workerProtocol.js'
 
@@ -206,5 +206,91 @@ try {
   assert.deepEqual(await client.build(data, { palette, descriptor: slice, compactFaces: true }),
     structuredClone(await buildFaceGroups(palette, parsed.blocks, parsed.bounds, null, filterFromDescriptor(slice), { compactFaces: true })))
   assert.deepEqual([...data.blocks], [...parsed.blocks])
+  // Cancelling another file releases the previous Worker, but the visible
+  // schematic stays on main. Its next layer rebuild must remain off-thread.
+  const controller = new AbortController()
+  const interrupted = client.parse(bytes, null, { signal: controller.signal })
+  const canceled = assert.rejects(interrupted, { name: 'AbortError' })
+  controller.abort(); await canceled
+  assert.equal(client.canBuild(data), false)
+  assert.equal(await client.ensureSession(data), true)
+  assert.ok(client.canStream(data))
+  assert.deepEqual(await client.build(data, { palette, compactFaces: true, trackBlocks: true }), structuredClone(expected))
+  const retainedWorker = client.worker
+  assert.equal(await client.ensureSession(data), true)
+  assert.equal(client.worker, retainedWorker, 'A live session is reused without cloning its pages')
+  client.release(undefined)
+  assert.equal(client.worker, retainedWorker, 'Releasing an absent parse result leaves the restored scene usable')
+
+  const values = new Uint32Array(4096); values.set([1, 2, 0, 1])
+  const largeRegion = region(0, [1, 2, 0, 1])
+  largeRegion.minY = largeRegion.maxY = largeRegion.minZ = largeRegion.maxZ = 0
+  largeRegion.width = 16384 * 4096; largeRegion.maxX = largeRegion.width - 1
+  largeRegion.states.volume = largeRegion.width
+  largeRegion.states.pages = [encodeBlockPage(values), ...Array(16383).fill(0)]
+  const overlay = region(1, [3, 0, 2])
+  overlay.minY = overlay.maxY = overlay.minZ = overlay.maxZ = 0
+  const sparseBounds = { minX: 0, minY: 0, minZ: 0, width: largeRegion.width, height: 1, depth: 1 }
+  const pages = new PagedBlockStore([largeRegion, overlay], sparseBounds, 3)
+  const sparse = { blocks: pages, bounds: sparseBounds, palette: Array(3).fill({ name: 'minecraft:stone', baked: cube }),
+    tileEntities: [{ uncloneable: () => {} }], entities: [{ uncloneable: () => {} }] }
+  const sparseExpected = await buildFaceGroups(sparse.palette, pages, sparseBounds, null, null, { compactFaces: false, trackBlocks: true })
+  const beforePages = [...pages]
+  client.cancel()
+  assert.equal(await client.ensureSession(sparse), true)
+  assert.ok(client.canStream(sparse))
+  assert.deepEqual(await client.build(sparse, { compactFaces: false, trackBlocks: true }), structuredClone(sparseExpected))
+  assert.deepEqual([...pages], beforePages, 'Restoring overlapping regions never detaches or changes source pages')
+  assert.ok(largeRegion.states.pages[0].palette.byteLength > 0)
+
+  const oldMap = { ...schematicForRestore(), blocks: new Map(Array.from({ length: 32769 }, (_, i) => [2 ** 32 + i * 3, i % 3])) }
+  client.cancel()
+  assert.equal(await client.ensureSession(oldMap), true)
+  assert.ok(client.canBuild(oldMap)); assert.equal(oldMap.blocks.size, 32769)
 } finally { client.dispose() }
 console.log('PASS isolated module Worker handshake, page transfer/hydration, repeat builds and byte-exact geometry through real client')
+
+function schematicForRestore() {
+  return { bounds: { minX: 0, minY: 0, minZ: 0, width: 16, height: 1, depth: 1 }, palette: [] }
+}
+
+// Incomplete, duplicate, out-of-order and released restoration packets must
+// never make a partial block store available to geometry work.
+const restoreWire = serializeSchematic({ blocks: new Map(Array.from({ length: 32769 }, (_, i) => [i, 0])),
+  ...schematicForRestore(), tileEntities: [], entities: [] })
+const restorePlan = planParseHandoff(restoreWire), restorePackets = [...restorePlan.packets]
+for (const action of ['finish-early', 'part-out-of-order', 'part-twice', 'release', 'wrong-session', 'complete']) {
+  const replies = []
+  const controller = createSchematicWorker({ postMessage: message => replies.push(structuredClone(message)),
+    build: async (_palette, blocks) => [...blocks] })
+  let sequence = 0
+  const send = async (type, extra = {}, session = 80) => {
+    await controller.handle(structuredClone({ type, ...extra, session, id: ++sequence }))
+    return replies.at(-1)
+  }
+  await send('restore-start', { header: restorePlan.header })
+  assert.equal((await send('build', { palette: [] })).error.code, 'WORKER_SESSION')
+  if (action === 'complete') {
+    for (const packet of restorePackets) assert.equal((await send('restore-part', { packet })).type, 'result')
+    assert.equal((await send('restore-finish')).type, 'result')
+    assert.deepEqual((await send('build', { palette: [] })).result, [...restoreWire.blocks.values])
+  } else {
+    if (action === 'finish-early') assert.equal((await send('restore-finish')).error.code, 'WORKER_PROTOCOL')
+    if (action === 'part-out-of-order') assert.equal((await send('restore-part', { packet: restorePackets[1] })).error.code, 'WORKER_PROTOCOL')
+    if (action === 'part-twice') {
+      await send('restore-part', { packet: restorePackets[0] })
+      assert.equal((await send('restore-part', { packet: restorePackets[0] })).error.code, 'WORKER_PROTOCOL')
+    }
+    if (action === 'release') { await send('release'); assert.equal((await send('restore-finish')).error.code, 'WORKER_PROTOCOL') }
+    if (action === 'wrong-session') {
+      assert.equal((await send('restore-part', { packet: restorePackets[0] }, 79)).error.code, 'WORKER_PROTOCOL')
+      for (const packet of restorePackets) await send('restore-part', { packet })
+      assert.equal((await send('restore-finish')).type, 'result', 'Stale packets cannot discard the current restore')
+      await send('release')
+    }
+    assert.equal((await send('build', { palette: [] })).error.code, 'WORKER_SESSION')
+  }
+  for (const type of [undefined, 27]) assert.equal((await send(type)).error.code, 'WORKER_PROTOCOL')
+  controller.dispose()
+}
+console.log('PASS restored worker sessions: exact legacy/overlapping paged blocks, bounded handoff, partial-session isolation and invalid packet cleanup')
