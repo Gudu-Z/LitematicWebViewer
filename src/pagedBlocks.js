@@ -4,8 +4,14 @@
 export const BLOCK_PAGE_SIZE = 4096
 export const MAX_CACHED_BLOCK_PAGES = 512
 const SKIP = new Set(['air', 'cave_air', 'void_air', 'structure_void', 'barrier', 'light'])
+const MARKERS = new Set(['minecraft:barrier', 'minecraft:light', 'minecraft:structure_void', 'minecraft:moving_piston'])
 const MAX_PAGE_BYTES = 1024 * 1024 * 1024
 const skip = name => SKIP.has((name || '').replace(/^minecraft:/, ''))
+
+export function markerPaletteFlags(palette) {
+  const flags = Uint8Array.from(palette, p => MARKERS.has(p.Name))
+  return flags.includes(1) ? flags : null
+}
 
 export function encodeBlockPage(values, length = values.length) {
   const palette = [], lookup = new Map(), indices = new Uint16Array(length)
@@ -111,27 +117,32 @@ export class BlockStatePageWriter {
     if (this.used === BLOCK_PAGE_SIZE) this.flush()
   }
 
+  emitZeroRun(count) {
+    const stored = this.skip[0] ? 0 : 1
+    while (count > 0) {
+      const take = Math.min(count, BLOCK_PAGE_SIZE - this.used)
+      if (stored !== this.previous) {
+        this.previous = stored; this.runs++
+        let id = this.lookup.get(stored)
+        if (id === undefined) { id = this.pagePalette.length; this.lookup.set(stored, id); this.pagePalette.push(stored) }
+        this.id = id
+      }
+      this.indices.fill(this.id, this.used, this.used + take); this.used += take; this.position += take
+      if (stored) { this.result.count += take; this.result.counts[0] += take }
+      if (this.used === BLOCK_PAGE_SIZE) this.flush()
+      count -= take
+    }
+  }
+
   word(word) {
     const bits = this.bits
     if (word === 0 && (!this.carryBits || this.carry === 0)) {
       // A zero packed word and zero carry contain only palette index zero.
       // Consume it in one run, including a partial page or final padding.
-      const available = 32 + this.carryBits, stored = this.skip[0] ? 0 : 1
-      let count = Math.min(Math.floor(available / bits), this.result.volume - this.position)
+      const available = 32 + this.carryBits
+      const count = Math.min(Math.floor(available / bits), this.result.volume - this.position)
       this.carryBits = available % bits; this.carry = 0
-      while (count > 0) {
-        const take = Math.min(count, BLOCK_PAGE_SIZE - this.used)
-        if (stored !== this.previous) {
-          this.previous = stored; this.runs++
-          let id = this.lookup.get(stored)
-          if (id === undefined) { id = this.pagePalette.length; this.lookup.set(stored, id); this.pagePalette.push(stored) }
-          this.id = id
-        }
-        this.indices.fill(this.id, this.used, this.used + take); this.used += take; this.position += take
-        if (stored) { this.result.count += take; this.result.counts[0] += take }
-        if (this.used === BLOCK_PAGE_SIZE) this.flush()
-        count -= take
-      }
+      this.emitZeroRun(count)
       return
     }
     if (bits === 32) { this.emit(word >>> 0); return }
@@ -176,6 +187,36 @@ export class BlockStatePageWriter {
     if (this.tailSize || this.inputBytes !== this.expectedBytes || this.position !== this.result.volume) throw new RangeError('Truncated BlockStates')
     this.flush(); return this.result
   }
+}
+
+// Observe cells before the writer folds invisible states into zero. Use the
+// ordinary writer unchanged when the region has no markers to collect.
+class MarkerBlockStatePageWriter extends BlockStatePageWriter {
+  constructor(palette, volume, longCount, budget, markers, onMarker) {
+    super(palette, volume, longCount, budget)
+    this.markers = markers; this.onMarker = onMarker
+  }
+
+  emit(value) {
+    if (this.markers[value] && this.position < this.result.volume) this.onMarker(this.position, value)
+    super.emit(value)
+  }
+
+  emitZeroRun(count) {
+    if (this.markers[0]) {
+      const end = this.position + count
+      for (let index = this.position; index < end; index++) this.onMarker(index, 0)
+    }
+    super.emitZeroRun(count)
+  }
+}
+
+export function createBlockStatePageWriter(palette, volume, longCount, budget, onMarker) {
+  if (onMarker) {
+    const markers = markerPaletteFlags(palette)
+    if (markers) return new MarkerBlockStatePageWriter(palette, volume, longCount, budget, markers, onMarker)
+  }
+  return new BlockStatePageWriter(palette, volume, longCount, budget)
 }
 
 // A bounded decoded-page cache is shared by every region in one schematic.

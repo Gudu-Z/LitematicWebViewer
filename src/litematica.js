@@ -10,7 +10,7 @@
 import { LITTLE_ENDIAN } from './nbt.js'
 import { renderedBlockEntities } from './renderNbt.js'
 import { readSchematicNBT } from './schematicNbt.js'
-import { BlockStatePageWriter, PagedBlockStore, createBlockPageBudget } from './pagedBlocks.js'
+import { PagedBlockStore, createBlockPageBudget, createBlockStatePageWriter, markerPaletteFlags } from './pagedBlocks.js'
 import { throwIfAborted, withAbort } from './loadingTask.js'
 
 // 空气类方块：解析时直接跳过、不存入 blocks Map，避免超大型投影占用过多内存。
@@ -57,12 +57,14 @@ function vec(v) {
 // （lx = wx-minX，W=宽，D=深，strideY = W*D）。相比 "x,y,z" 字符串 key，
 // 整数 key 的邻居查找是纯整数算术、速度快数倍，内存也更小，超大投影收益显著。
 // onProgress(fraction) 在解析过程中回调进度（0~1），用于超大文件显示进度。
-export async function parseLitematicaRaw(rawBytes, onProgress, { renderOnly = false, compactBlocks, yieldTask, signal } = {}) {
-  const { root, stats } = await readSchematicNBT(rawBytes, { renderOnly, compactBlocks: compactBlocks !== false, yieldTask, signal })
-  return parseLitematicaRoot(root, onProgress, renderOnly, stats, compactBlocks, { yieldTask, signal })
+// markerBlocks: true 时额外返回 markerBlocks 数组，按解码顺序记录屏障、光源方块、
+// 结构空位和移动的活塞。每项 { x, y, z, state } 使用世界坐标，state 为全局 palette 索引。
+export async function parseLitematicaRaw(rawBytes, onProgress, { renderOnly = false, compactBlocks, markerBlocks, yieldTask, signal } = {}) {
+  const { root, stats } = await readSchematicNBT(rawBytes, { renderOnly, compactBlocks: compactBlocks !== false, markerBlocks, yieldTask, signal })
+  return parseLitematicaRoot(root, onProgress, stats, { renderOnly, compactBlocks, markerBlocks, yieldTask, signal })
 }
 
-async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compactBlocks, { yieldTask, signal } = {}) {
+async function parseLitematicaRoot(root, onProgress, nbtInfo, { renderOnly = false, compactBlocks, markerBlocks: collectMarkers, yieldTask, signal } = {}) {
   throwIfAborted(signal)
   const yieldWork = yieldTask || (() => new Promise(resolve => setTimeout(resolve, 0)))
   const meta = root.Metadata || {}
@@ -138,6 +140,7 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
 
   let blocks = new Map()
   const packedRegions = [], pageBudget = createBlockPageBudget()
+  const markerBlocks = collectMarkers ? [] : undefined
   const tileEntities = [] // 方块实体（如告示牌）
   const entities = [] // 实体（如矿车、物品展示框）
   let doneBlocks = 0
@@ -166,6 +169,14 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
       localToGlobal[i] = getGlobalIndex(paletteList[i].Name, paletteList[i].Properties)
       isSkip[i] = SKIP_NAMES.has((paletteList[i].Name || '').replace(/^minecraft:/, '')) ? 1 : 0
     }
+    const recordMarker = markerBlocks && ((index, localState) => {
+      markerBlocks.push({
+        x: wx0 + index % dx,
+        y: wy0 + Math.floor(index / (dx * dz)),
+        z: wz0 + Math.floor(index / dx) % dz,
+        state: localToGlobal[localState],
+      })
+    })
 
     // 方块实体（告示牌/旗帜等）：坐标与方块网格一致，都相对区域「最小角」wx0（Size 为负时
     // Position 是最大角，不能直接加 Position）。实体（Pos）才是相对 Position 的。
@@ -195,7 +206,7 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
     if (paged) {
       let states = region.BlockStates
       if (!states?.isPagedBlockStates) {
-        const writer = new BlockStatePageWriter(paletteList, dx * dy * dz, states.length, pageBudget)
+        const writer = createBlockStatePageWriter(paletteList, dx * dy * dz, states.length, pageBudget, recordMarker)
         const words = new Uint32Array(states.buffer, states.byteOffset, states.length * 2), low = LITTLE_ENDIAN ? 0 : 1
         for (let i = 0; i < states.length; i++) {
           writer.word(words[i * 2 + low]); writer.word(words[i * 2 + (low ^ 1)])
@@ -207,7 +218,21 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
         }
         writer.inputBytes = states.length * 8
         states = writer.finish()
-      } else pageBudget.add(states.bytes)
+      } else {
+        pageBudget.add(states.bytes)
+        // 流式读取时只知道区域内的索引；现在已有最小角和全局调色板。
+        if (states.markerCells) {
+          const cells = states.markerCells
+          for (let i = 0; i < cells.length; i += 2) {
+            recordMarker(cells[i], cells[i + 1])
+            if ((i & 0xffff) === 0 && performance.now() - lastYield >= 12) {
+              await withAbort(yieldWork(), signal)
+              throwIfAborted(signal); lastYield = performance.now()
+            }
+          }
+          delete states.markerCells
+        }
+      }
       packedRegions.push({ ...regionList.find(r => r.name === name), states, localToGlobal })
       doneBlocks += dx * dy * dz; region.BlockStates = null
       onProgress?.(doneBlocks / totalBlocks)
@@ -215,6 +240,7 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
     }
 
     const bits = Math.max(2, Math.ceil(Math.log2(paletteList.length)))
+    const markerStates = markerBlocks && markerPaletteFlags(paletteList)
     const rowSize = dz * dx // 每层（y 固定）的方块数
     const lx0 = wx0 - minX
     const lz0 = wz0 - minZ
@@ -225,6 +251,12 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
     for (let start = 0; start < volume; start += decoded.length) {
       const count = Math.min(decoded.length, volume - start)
       decodeBlockStates(region.BlockStates, bits, count, start, decoded)
+      if (markerStates) {
+        for (let j = 0; j < count; j++) {
+          const li = decoded[j]
+          if (markerStates[li]) recordMarker(start + j, li)
+        }
+      }
       let j = 0
       while (j < count) {
         const index = start + j
@@ -262,12 +294,17 @@ async function parseLitematicaRoot(root, onProgress, renderOnly, nbtInfo, compac
 
   onProgress?.(1)
   throwIfAborted(signal)
-  return { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList, nbtInfo }
+  const result = { metadata, palette, blocks, bounds, tileEntities, entities, regions: regionList, nbtInfo }
+  if (markerBlocks) result.markerBlocks = markerBlocks
+  return result
 }
 
 export async function parseLitematica(buffer, onProgress, options) {
   // options.onStage reports real first-pass expanded bytes independently of
   // the existing numeric fractions for NBT extraction and block decoding.
-  const { root, stats } = await readSchematicNBT(buffer, { ...options, compactBlocks: options?.compactBlocks !== false, onProgress: value => onProgress?.(value * .5) })
-  return parseLitematicaRoot(root, value => onProgress?.(.5 + value * .5), options?.renderOnly ?? false, stats, options?.compactBlocks, options)
+  const parseOptions = { ...options }
+  const { root, stats } = await readSchematicNBT(buffer, {
+    ...parseOptions, compactBlocks: parseOptions.compactBlocks !== false, onProgress: value => onProgress?.(value * .5),
+  })
+  return parseLitematicaRoot(root, value => onProgress?.(.5 + value * .5), stats, parseOptions)
 }

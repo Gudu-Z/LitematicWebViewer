@@ -2,7 +2,7 @@ import { consumeDecompressed } from './decompression.js'
 import { NbtStreamFilter, isBookPages } from './nbtStream.js'
 import { MAX_NBT_BYTES, parseNBT, validateNbtLimit } from './nbt.js'
 import { selectRenderNbtField } from './renderNbt.js'
-import { BlockStatePageWriter, createBlockPageBudget } from './pagedBlocks.js'
+import { createBlockStatePageWriter, createBlockPageBudget } from './pagedBlocks.js'
 import { throwIfAborted } from './loadingTask.js'
 
 // Most schematics fit in this bounded buffer. Parse those once, without a second
@@ -10,7 +10,7 @@ import { throwIfAborted } from './loadingTask.js'
 // remaining data is still being decompressed, regardless of the compressed size.
 const FAST_BUFFER_BYTES = 32 * 1024 * 1024
 
-export async function readSchematicNBT(data, { renderOnly = false, onProgress, onStage, maxBytes = MAX_NBT_BYTES, maxExpandedBytes, streamThreshold = FAST_BUFFER_BYTES, compactBlocks = false, yieldTask, signal } = {}) {
+export async function readSchematicNBT(data, { renderOnly = false, onProgress, onStage, maxBytes = MAX_NBT_BYTES, maxExpandedBytes, streamThreshold = FAST_BUFFER_BYTES, compactBlocks = false, markerBlocks = false, yieldTask, signal } = {}) {
   throwIfAborted(signal)
   validateNbtLimit(maxBytes)
   // Large storage builds legitimately contain millions of small block-entity
@@ -87,7 +87,12 @@ export async function readSchematicNBT(data, { renderOnly = false, onProgress, o
           if (length !== record.length) throw new Error('BlockStates changed between decoding passes')
           const region = root[path[0]][path[1]], size = region.Size
           const dimensions = Array.isArray(size) ? size : [size?.x, size?.y, size?.z]
-          const writer = new BlockStatePageWriter(region.BlockStatePalette || [], Math.abs(dimensions[0] * dimensions[1] * dimensions[2]), length, budget)
+          // The root parser resolves these local pairs in region order once its
+          // global palette and world-space region corners are available.
+          const markerCells = markerBlocks ? [] : null
+          const onMarker = markerCells && ((index, state) => markerCells.push(index, state))
+          const volume = Math.abs(dimensions[0] * dimensions[1] * dimensions[2])
+          const writer = createBlockStatePageWriter(region.BlockStatePalette || [], volume, length, budget, onMarker)
           return {
             push(bytes) {
               writer.push(bytes); decodedBlockBytes += bytes.length
@@ -97,7 +102,11 @@ export async function readSchematicNBT(data, { renderOnly = false, onProgress, o
                 reportAt = now + 16
               }
             },
-            finish() { regions.set(key, writer.finish()) },
+            finish() {
+              const states = writer.finish()
+              if (markerCells?.length) states.markerCells = markerCells
+              regions.set(key, states)
+            },
           }
         },
       })
