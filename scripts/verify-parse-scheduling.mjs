@@ -87,7 +87,12 @@ try {
     const bad = Buffer.from(gzipSync(payload)); bad[bad.length - (field === 'CRC' ? 8 : 4)] ^= 1
     await assert.rejects(consumeDecompressed(bad, collect, { yieldTask }), error => error.name !== 'AbortError')
   }
+  // Browsers reject concatenated gzip/trailing bytes. Node 20's native gunzip
+  // accepts zero padding, so explicitly exercise the browser's exact fallback
+  // here, as verify-decompression does, without depending on the Node version.
+  globalThis.DecompressionStream = class { constructor() { throw new TypeError('Browser rejects concatenated gzip') } }
   for (const input of [joined.subarray(0, -1), Buffer.concat([joined, Buffer.from([0])])]) await assert.rejects(consumeDecompressed(input, collect, { yieldTask }))
+  globalThis.DecompressionStream = Native
   console.log('PASS main-thread timer fallback and unchanged CRC/ISIZE/truncation/trailing-data rejection')
 
   // 8 MiB crosses extraction threshold; a tiny valid region with extra packed
