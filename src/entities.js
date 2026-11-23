@@ -17,9 +17,9 @@ import { minecartRenderPose } from './entityMinecart.js'
 import { createMobPlacement } from './entityPlacement.js'
 import { BlockModelResolver } from './blocks.js'
 import { frameItemKey, getFrameModel } from './frameModelCache.js'
-import { bakeModel } from './modelBaker.js'
-import { isLayeredTranslucentBlock } from './geometry.js'
-import { mergeTranslucentBlocks } from './translucentBlocks.js'
+import { bakeModel, resolveTexture } from './modelBaker.js'
+import { isTranslucentQuad } from './geometry.js'
+import { mergeTranslucentBlocks, TRANSLUCENT_ALPHA_TEST } from './translucentBlocks.js'
 import { parsePotSherds } from './schematicDetails.js'
 import { ENTITY_MODELS } from './entityModelData.js'
 import { EXTRA_MODELS } from './extraEntityModels.js'
@@ -175,11 +175,11 @@ function quadGeometry(w, h) {
 
 // 把一组烘焙好的 quads（verts/uvs/texKey，局部坐标 0..1）转成 Three.js 网格。
 // offset 统一加到顶点上（展示框传 -0.5，使模型居中于方块）；materialFor 按 texKey、shade 取材质。
-const quadMaterialKey = (texKey, shade) => `${texKey}|${shade !== false}`
+const quadMaterialKey = (texKey, shade, forceTranslucent = false) => `${texKey}|${shade !== false}|${!!forceTranslucent}`
 function quadsToMesh(quads, offset, materialFor, vertexColors = false) {
   const byTex = new Map()
   for (const q of quads) {
-    const key = quadMaterialKey(q.texKey, q.shade)
+    const key = quadMaterialKey(q.texKey, q.shade, q.forceTranslucent)
     let a = byTex.get(key)
     if (!a) {
       a = []
@@ -189,7 +189,7 @@ function quadsToMesh(quads, offset, materialFor, vertexColors = false) {
   }
   const group = new THREE.Group()
   for (const qs of byTex.values()) {
-    const mat = materialFor(qs[0].texKey, qs[0].shade !== false)
+    const mat = materialFor(qs[0].texKey, qs[0].shade !== false, qs[0].forceTranslucent)
     if (!mat) continue
     const n = qs.length
     const positions = new Float32Array(n * 12)
@@ -467,24 +467,24 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
   const layer0 = context === 'gui' && itemModel?.elements?.length ? null : itemModel?.textures?.layer0
   if (context === 'gui' && layer0) {
     for (let layer = 0; layer < 5; layer++) {
-      let key = itemModel.textures['layer' + layer]
-      if (!key) continue
-      for (let i = 0; i < 16 && key?.startsWith('#'); i++) key = itemModel.textures[key.slice(1)]
-      if (!key || key.startsWith('#')) continue
-      const map = await assets.getTexture(key.replace(/^minecraft:/, ''))
+      const sprite = resolveTexture(itemModel.textures['layer' + layer], itemModel.textures)
+      if (!sprite) continue
+      const map = await assets.getTexture(sprite.texKey)
       if (!map) continue
-      const material = new THREE.MeshBasicMaterial({ map, color: guiItemTint(modelDefs[0]?.tints?.[layer]), alphaTest: .5, side: THREE.DoubleSide })
-      const sprite = new THREE.Mesh(quadGeometry(1, 1), material)
-      sprite.position.z = layer * .001
-      holder.add(sprite)
+      const translucent = isTranslucentQuad(name, sprite)
+      const material = new THREE.MeshBasicMaterial({ map, color: guiItemTint(modelDefs[0]?.tints?.[layer]), alphaTest: translucent ? TRANSLUCENT_ALPHA_TEST : .5, transparent: translucent, side: THREE.DoubleSide, forceSinglePass: true })
+      const mesh = new THREE.Mesh(quadGeometry(1, 1), material)
+      mesh.position.z = layer * .001
+      holder.add(mesh)
     }
     return holder.children.length ? holder : null
   }
   if (layer0) {
-    const texKey = String(layer0).replace(/^minecraft:/, '')
-    const tex = await assets.getTexture(texKey)
+    const sprite = resolveTexture(layer0, itemModel.textures)
+    const tex = sprite && await assets.getTexture(sprite.texKey)
     if (tex) {
-      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, flatShading: true })
+      const translucent = isTranslucentQuad(name, sprite)
+      const mat = new THREE.MeshLambertMaterial({ map: tex, alphaTest: translucent ? TRANSLUCENT_ALPHA_TEST : .5, transparent: translucent, side: THREE.DoubleSide, forceSinglePass: true, flatShading: true })
       holder.add(new THREE.Mesh(quadGeometry(1, 1), mat))
       // 药水/药水箭等有两层贴图：layer1 是着色层（药水液体），叠一层并用药水颜色染色。
       // 液体画在玻璃（layer0）上层，玻璃透明处透出液体。
@@ -623,7 +623,7 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
     if (context === 'gui' && !usesItemModel) {
       for (const q of baked.quads) if (q.tintIndex >= 0) q.color = 0x7cbd6b
     }
-    const materialQuads = new Map(baked.quads.map(q => [quadMaterialKey(q.texKey, q.shade), q]))
+    const materialQuads = new Map(baked.quads.map(q => [quadMaterialKey(q.texKey, q.shade, q.forceTranslucent), q]))
     const mats = new Map()
     // 旗帜旗面（entity/banner/base 灰度遮罩）按底色上色
     const bannerColor = name.endsWith('_banner') || name.endsWith('_wall_banner')
@@ -637,16 +637,18 @@ async function buildFrameItem(item, resolver, assets, context = 'fixed') {
           // BasicItemModel 的 entityCutout/itemTranslucentCull 都会剔除背面。
           // XK 用 from > to 的反向外壳描边；双面渲染会把黄色描边变成遮住本体的实心壳。
           const Material = q.shade === false ? THREE.MeshBasicMaterial : THREE.MeshLambertMaterial
-          const mat = new Material({ map: tex, alphaTest: 0.5, side: usesItemModel ? THREE.FrontSide : THREE.DoubleSide, vertexColors: context === 'gui', ...(q.shade === false ? {} : { flatShading: true }) })
+          const translucent = isTranslucentQuad(name, q)
+          const mat = new Material({ map: tex, alphaTest: translucent ? TRANSLUCENT_ALPHA_TEST : .5, transparent: translucent, side: translucent || usesItemModel ? THREE.FrontSide : THREE.DoubleSide, vertexColors: context === 'gui', ...(q.shade === false ? {} : { flatShading: true }) })
           if (bannerColor && tk === 'entity/banner/base') mat.color = new THREE.Color(bannerColor)
           mats.set(key, mat)
         }
       }),
     )
     const center = baked.center || [-0.5, -0.5, -0.5]
-    const parts = quadsToMesh(baked.quads, center, (tk, shade) => mats.get(quadMaterialKey(tk, shade)), context === 'gui')
-    if (isLayeredTranslucentBlock(name)) {
-      const meshes = [...parts.children]; parts.clear()
+    const parts = quadsToMesh(baked.quads, center, (tk, shade, force) => mats.get(quadMaterialKey(tk, shade, force)), context === 'gui')
+    const meshes = parts.children.filter(mesh => mesh.material.transparent)
+    if (meshes.length) {
+      parts.remove(...meshes)
       parts.add(...mergeTranslucentBlocks(meshes, { disposeMaterials: true }))
     }
     holder.add(parts)

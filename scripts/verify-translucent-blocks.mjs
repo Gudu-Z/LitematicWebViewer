@@ -118,7 +118,7 @@ try {
       assert.equal(mesh.geometry.index.count / 6, 22)
       assert.equal(mesh.material.opacity, 1); assert.equal(mesh.material.depthWrite, true)
       assert.equal(mesh.material.side, THREE.FrontSide); assert.equal(mesh.material.transparent, true)
-      assert.ok(mesh.material.alphaTest < 1 / 255)
+      assert.equal(mesh.material.alphaTest, .1, '26.3 translucent terrain alpha threshold')
       assert.equal(mesh.material.translucentMaps.length, id === 0 ? 1 : 3)
       assert.equal(collectSceneResources(world).retained.size, id === 0 ? 1 : 3)
       for (const position of [[4, 3, 5], [-4, -3, -5], [1, 10, 1]]) checkSort(mesh, position)

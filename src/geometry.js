@@ -31,7 +31,13 @@ export function isSkipBlock(name) {
 }
 
 export function isLayeredTranslucentBlock(name) {
-  return ['slime_block', 'honey_block'].includes(shortName(name))
+  const n = shortName(name)
+  return n === 'slime_block' || n === 'honey_block' || n === 'glass' || n === 'glass_pane' || n === 'tinted_glass'
+    || n.endsWith('_stained_glass') || n.endsWith('_stained_glass_pane')
+}
+
+export function isTranslucentQuad(name, quad) {
+  return !!quad.forceTranslucent || isLayeredTranslucentBlock(name)
 }
 
 // 不遮挡邻居的方块，包括镂空贴图和半透明材质。
@@ -109,13 +115,22 @@ function faceCulled(blocks, occludes, hideSame, q, lx, lz, ly, gi, grid, visible
   // Coordinate lookup is only supplied for exact cardinal cullfaces. Unknown
   // vectors keep the original flat-key behavior, including fractional offsets.
   const ngi = cardinalGetAt ? cardinalGetAt(nx, ny, nz) : blocks.get(nx + nz * grid.W + ny * grid.strideY)
-  return ngi !== undefined && (occludes[ngi] || (hideSame[gi] && hideSame[ngi] === hideSame[gi]))
+  if (ngi === undefined) return false
+  if (occludes[ngi]) return true
+  if (!hideSame[gi] || hideSame[ngi] !== hideSame[gi]) return false
+  // IronBarsBlock.skipRendering: panes hide horizontal joins only when both
+  // states connect across that edge. Vertical joins compare block identity.
+  const panes = grid.paneConnections
+  if (!panes[gi] || cf[1]) return true
+  const bit = cf[0] > 0 ? 8 : cf[0] < 0 ? 4 : cf[2] > 0 ? 2 : 1
+  const opposite = bit === 8 ? 4 : bit === 4 ? 8 : bit === 2 ? 1 : 2
+  return !!(panes[gi] & bit) && !!(panes[ngi] & opposite)
 }
 
 // 非流体方块的贴图组 key：红石粉按信号强度细分，便于渲染时按强度上色。
 function faceKey(palette, gi, q) {
   // Keep the render layer separate from the sprite: packs can reuse or rename it.
-  if (isLayeredTranslucentBlock(palette[gi].name)) return q.texKey + '|translucent'
+  if (isTranslucentQuad(palette[gi].name, q)) return q.texKey + '|translucent'
   if (isRedstoneDustTex(q.texKey)) {
     return q.texKey + '|p' + (Number(palette[gi].properties?.power) || 0)
   }
@@ -442,6 +457,7 @@ async function buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filt
     D: bounds.depth,
     H: bounds.height,
     strideY: bounds.width * bounds.depth,
+    paneConnections: new Uint8Array(palette.length),
   }
   const minX = bounds.minX
   const minY = bounds.minY
@@ -460,6 +476,13 @@ async function buildFaceGroupsInternal(palette, blocks, bounds, onProgress, filt
     const name = palette[i].name
     const baked = palette[i].baked
     const sn = shortName(name)
+    if (sn === 'glass_pane' || sn.endsWith('_stained_glass_pane')) {
+      grid.paneConnections[i] = 16
+      for (const [direction, bit] of [['north', 1], ['south', 2], ['west', 4], ['east', 8]]) {
+        const value = palette[i].properties?.[direction]
+        if (value === true || value === 'true') grid.paneConnections[i] |= bit
+      }
+    }
     // 玩家头颅单独渲染（用玩家自己的皮肤），不在这里走方块渲染
     if (sn === 'player_head' || sn === 'player_wall_head') {
       quadsByPalette[i] = null

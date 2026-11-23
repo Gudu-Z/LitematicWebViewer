@@ -20,7 +20,7 @@ import { installSignDrawBatches } from './signDrawBatches.js'
 import { throwIfAborted, withAbort } from './loadingTask.js'
 import { GeometryReceiver } from './geometryReceiver.js'
 import { GPUUpload } from './gpuUpload.js'
-import { mergeTranslucentBlocks } from './translucentBlocks.js'
+import { mergeTranslucentBlocks, TRANSLUCENT_ALPHA_TEST } from './translucentBlocks.js'
 import { markBlockObject, setBlockFaceKeys } from './selectionSources.js'
 import { createHeadTextureLoader } from './headTextures.js'
 
@@ -1727,7 +1727,7 @@ export class Renderer {
       const isRail = texKey.includes('rail')
       const texture = textures[index]
       if (texture) {
-        // 流体及粘液/蜂蜜使用半透明材质；其余用 alphaTest 裁剪。
+        // 流体、玻璃、粘液/蜂蜜及模型声明的半透明面保留贴图 alpha。
         // 注意：水的贴图是灰度图（颜色由着色器染色），需用 color 染成蓝色
         // flatShading：方块每个面的 4 个顶点本就同法线，用几何导数算平直法线即可，
         // 省去法线数组（超大投影可省数百 MB 内存），光照效果一致。
@@ -1743,7 +1743,7 @@ export class Renderer {
             ? new THREE.PointsMaterial({ map: texture, transparent: true, opacity: 0.85, depthWrite: false, size: 0.3, sizeAttenuation: true })
             : isRail
               ? new THREE.MeshBasicMaterial({ map: texture, alphaTest: 0.5, side: THREE.DoubleSide })
-              : new THREE.MeshLambertMaterial({ map: texture, alphaTest: translucent ? .001 : .5, transparent: translucent, flatShading: true })
+              : new THREE.MeshLambertMaterial({ map: texture, alphaTest: translucent ? TRANSLUCENT_ALPHA_TEST : .5, transparent: translucent, flatShading: true })
         // 红石粉线/点是灰度贴图，按强度染色（强度数字层 pXX 不染色）
         if (power !== null) {
           const c = redstoneTint(power)

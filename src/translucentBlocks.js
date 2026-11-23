@@ -1,9 +1,12 @@
 import * as THREE from 'three'
 import { blockFaceKeys, setBlockFaceKeys } from './selectionSources.js'
 import { createFaceRadixSort } from './translucentFaceOrder.js'
+import { createTranslucentAtlas } from './translucentAtlas.js'
 
 const sorting = new WeakMap()
 const identity = new THREE.Matrix4()
+// Minecraft 26.3 RenderPipelines.TRANSLUCENT_TERRAIN / ITEM_TRANSLUCENT.
+export const TRANSLUCENT_ALPHA_TEST = .1
 
 function canonicalQuads(indices) {
   for (let i = 0, base = 0; i < indices.length; i += 6, base += 4) {
@@ -59,6 +62,7 @@ class TranslucentBlockMesh extends THREE.Mesh {
   }
 
   onBeforeRender(_renderer, _scene, camera) {
+    this.material.updateTranslucentAtlas?.()
     let state = sorting.get(this)
     const geometry = this.geometry, count = geometry.index.count / 6
     if (!state) {
@@ -98,36 +102,52 @@ class TranslucentBlockMesh extends THREE.Mesh {
   }
 }
 
-function materialFor(maps) {
-  const material = new THREE.MeshLambertMaterial({ map: maps[0], vertexColors: true,
-    transparent: true, opacity: 1, alphaTest: .001, depthWrite: true, side: THREE.FrontSide, flatShading: true })
+function materialFor(maps, atlas) {
+  const material = new THREE.MeshLambertMaterial({ map: atlas?.texture || maps[0], vertexColors: true,
+    transparent: true, opacity: 1, alphaTest: TRANSLUCENT_ALPHA_TEST, depthWrite: true, side: THREE.FrontSide, flatShading: true })
   // Also lets collectSceneResources retain/animate every borrowed pack texture.
   material.translucentMaps = maps
   material.userData.privateBlockMaterial = true
-  material.customProgramCacheKey = () => 'translucent-block-maps-v1-' + maps.length
+  material.customProgramCacheKey = () => 'translucent-block-maps-v2-' + (atlas ? `atlas-${atlas.width}-${atlas.height}` : maps.length)
+  if (atlas) {
+    material.updateTranslucentAtlas = () => atlas.update()
+    material.addEventListener('dispose', () => atlas.dispose())
+  }
   material.onBeforeCompile = shader => {
-    maps.forEach((map, i) => { shader.uniforms['blockMap' + i] = { value: map } })
+    if (!atlas) maps.forEach((map, i) => { shader.uniforms['blockMap' + i] = { value: map } })
     shader.vertexShader = 'attribute float blockTexture; attribute float blockUnlit; varying float vBlockTexture; varying float vBlockUnlit;\n' + shader.vertexShader
     shader.vertexShader = shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\nvBlockTexture = blockTexture; vBlockUnlit = blockUnlit;')
-    shader.fragmentShader = 'varying float vBlockTexture; varying float vBlockUnlit;\n' +
+    if (atlas) {
+      shader.vertexShader = 'attribute vec4 blockAtlas; flat varying vec4 vBlockAtlas;\n' + shader.vertexShader
+      shader.vertexShader = shader.vertexShader.replace('#include <uv_vertex>', '#include <uv_vertex>\nvBlockAtlas = blockAtlas;')
+      shader.fragmentShader = 'flat varying vec4 vBlockAtlas; varying float vBlockUnlit;\n' + shader.fragmentShader
+      shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>',
+        `ivec2 spriteSize = ivec2(round(vBlockAtlas.zw * vec2(${atlas.width}., ${atlas.height}.)));
+        ivec2 spritePixel = clamp(ivec2(floor(vMapUv * vec2(spriteSize))), ivec2(0), spriteSize - ivec2(1));
+        ivec2 atlasPixel = ivec2(round(vBlockAtlas.xy * vec2(${atlas.width}., ${atlas.height}.))) + spritePixel;
+        diffuseColor *= texelFetch(map, atlasPixel, 0);`)
+    } else {
+      shader.fragmentShader = 'varying float vBlockTexture; varying float vBlockUnlit;\n' +
       maps.map((_, i) => `uniform sampler2D blockMap${i};`).join('\n') + '\n' + shader.fragmentShader
-    shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>',
+      shader.fragmentShader = shader.fragmentShader.replace('#include <map_fragment>',
       'vec4 blockSample;\n' + maps.map((_, i) => `${i ? 'else ' : ''}${i < maps.length - 1 ? `if (vBlockTexture < ${i + .5}) ` : ''}{ blockSample = texture2D(blockMap${i}, vMapUv); }`).join('\n') + '\ndiffuseColor *= blockSample;')
+    }
     shader.fragmentShader = shader.fragmentShader.replace('#include <opaque_fragment>',
       'outgoingLight = mix(outgoingLight, diffuseColor.rgb, vBlockUnlit);\n#include <opaque_fragment>')
   }
   return material
 }
 
-// One draw call for the four vanilla slime/honey sprites, with real texture alpha
-// and far-to-near faces. Sorting separate texture meshes loses the honey core.
+// One draw call for glass/slime/honey sprites, with real texture alpha and
+// far-to-near faces. Sorting separate texture meshes loses overlapping colours.
 // Sampling the existing textures also preserves animated/local resource packs.
 export function mergeTranslucentBlocks(meshes, { disposeMaterials = false } = {}) {
   if (!meshes.length) return []
   const maps = [...new Set(meshes.map(mesh => mesh.material.map))]
-  // WebGL2 guarantees 16 fragment samplers. Unusually complex replacement models
-  // fall back to separately sortable quads rather than exceed the hardware limit.
-  if (maps.length > 8) {
+  const atlas = maps.length > 8 ? createTranslucentAtlas(maps) : null
+  // WebGL2 guarantees 16 fragment samplers. Large replacement sprites that do
+  // not fit the bounded atlas retain the separately sorted face fallback.
+  if (maps.length > 8 && !atlas) {
     const result = []
     for (const mesh of meshes) {
       for (let face = 0; face < mesh.geometry.index.count / 6; face++) {
@@ -146,6 +166,7 @@ export function mergeTranslucentBlocks(meshes, { disposeMaterials = false } = {}
   const count = meshes.reduce((n, mesh) => n + mesh.geometry.attributes.position.count, 0)
   const positions = new Float32Array(count * 3), uvs = new Float32Array(count * 2), colors = new Float32Array(count * 3)
   const textures = new Float32Array(count), unlit = new Float32Array(count), indices = new Uint32Array(count / 4 * 6)
+  const rectangles = atlas ? new Float32Array(count * 4) : null
   const sources = meshes.map(mesh => blockFaceKeys(mesh.geometry))
   const keys = sources.every(Boolean) ? new (sources.some(a => a instanceof Float64Array) ? Float64Array : Uint32Array)(count / 4) : null
   let vertex = 0, index = 0
@@ -154,6 +175,11 @@ export function mergeTranslucentBlocks(meshes, { disposeMaterials = false } = {}
     if (keys) keys.set(blockFaceKeys(g), vertex / 4)
     positions.set(g.attributes.position.array, vertex * 3); uvs.set(g.attributes.uv.array, vertex * 2)
     textures.fill(maps.indexOf(m.map), vertex, vertex + size)
+    if (atlas) {
+      const slot = atlas.slots[maps.indexOf(m.map)]
+      const rectangle = [slot.x / atlas.width, slot.y / atlas.height, slot.w / atlas.width, slot.h / atlas.height]
+      for (let i = vertex; i < vertex + size; i++) rectangles.set(rectangle, i * 4)
+    }
     unlit.fill(m.isMeshBasicMaterial ? 1 : 0, vertex, vertex + size)
     const tint = m.color.toArray(), original = g.attributes.color
     for (let i = 0; i < size * 3; i++) colors[vertex * 3 + i] = tint[i % 3] * (original?.array[i] ?? 1)
@@ -165,9 +191,10 @@ export function mergeTranslucentBlocks(meshes, { disposeMaterials = false } = {}
     geometry.setAttribute(key, new THREE.BufferAttribute(array, size))
   }
   geometry.setIndex(new THREE.BufferAttribute(indices, 1))
+  if (rectangles) geometry.setAttribute('blockAtlas', new THREE.BufferAttribute(rectangles, 4))
   setBlockFaceKeys(geometry, keys)
   release(meshes, disposeMaterials)
-  return [new TranslucentBlockMesh(geometry, materialFor(maps))]
+  return [new TranslucentBlockMesh(geometry, materialFor(maps, atlas))]
 }
 
 function release(meshes, materials) {

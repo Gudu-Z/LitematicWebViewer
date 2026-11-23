@@ -2,7 +2,7 @@
 // CHROME_PATH can select a local Chromium executable. No remote requests.
 import assert from 'node:assert/strict'
 import { spawn } from 'node:child_process'
-import { readFile, mkdir } from 'node:fs/promises'
+import { readFile, mkdir, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import { createServer } from 'vite'
@@ -52,7 +52,7 @@ async function verifyInBrowser() {
             geometry.setAttribute('position', new THREE.BufferAttribute(g.positions.slice(i * 12, i * 12 + 12), 3))
             geometry.setAttribute('uv', new THREE.BufferAttribute(g.uvs.slice(i * 8, i * 8 + 8), 2))
             geometry.setIndex([0, 1, 2, 2, 1, 3]); geometry.computeBoundingSphere()
-            reference.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ map, flatShading: true, transparent: true, alphaTest: .001, depthWrite: true, side: THREE.FrontSide })))
+            reference.add(new THREE.Mesh(geometry, new THREE.MeshLambertMaterial({ map, flatShading: true, transparent: true, alphaTest: .1, depthWrite: true, side: THREE.FrontSide })))
           }
         }
         const refScene = sceneFor(reference), camera = new THREE.OrthographicCamera(-1.8, 1.8, 1.8, -1.8, .1, 100)
@@ -87,7 +87,8 @@ async function verifyInBrowser() {
       }
     }
     const { verifySignDrawBatches } = await import('/scripts/sign-draw-batches-browser.js')
-    return { cases, maxError, signBatches: verifySignDrawBatches(renderer) }
+    const { verifyGlassRender } = await import('/scripts/glass-render-browser.js')
+    return { cases, maxError, signBatches: verifySignDrawBatches(renderer), glass: await verifyGlassRender(renderer) }
   } finally { renderer.dispose(); assets.clearCaches() }
 }
 
@@ -140,4 +141,6 @@ try {
   assert.ok(result, 'Browser check completed'); assert.equal(result.error, undefined, result.error)
   assert.deepEqual(errors, [], 'No WebGL shader/JavaScript errors')
   console.log('PASS real WebGL translucent blocks:', result.result)
+  const shots = (await send('Runtime.evaluate', { expression: 'window.__glassShots', returnByValue: true })).result?.value || {}
+  for (const [name, data] of Object.entries(shots)) await writeFile('scripts/_ref/glass-' + name + '.png', Buffer.from(data.split(',')[1], 'base64'))
 } finally { socket?.close(); chrome.kill(); await server.close() }

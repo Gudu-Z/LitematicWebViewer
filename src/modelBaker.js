@@ -47,8 +47,9 @@ export function bakeModel(model, variant, texSize = 16) {
       const face = element.faces[dir]
       const corners = FACE_CORNERS[dir]
       if (!corners) continue
-      const texKey = resolveTexture(face.texture, textures)
-      if (!texKey) continue
+      const material = resolveTexture(face.texture, textures)
+      if (!material) continue
+      const { texKey, forceTranslucent } = material
       // 红石粉的强度点层与主线在同一高度共面，跳过以避免重叠闪烁（强度由资源包的数字层显示）
       if (texKey.endsWith('redstone_dust_overlay')) continue
 
@@ -86,6 +87,7 @@ export function bakeModel(model, variant, texSize = 16) {
 
       quads.push({
         texKey,
+        ...(forceTranslucent ? { forceTranslucent: true } : {}),
         tintIndex: Number.isInteger(face.tintindex) ? face.tintindex : -1,
         cullface,
         shade: element.shade !== false,
@@ -110,9 +112,10 @@ function isFullCube(elements) {
   )
 }
 
-function resolveTexture(ref, textures) {
+export function resolveTexture(ref, textures = {}) {
   let v = ref
   let guard = 0
+  let forceTranslucent = false
   while (guard++ < 16) {
     if (typeof v === 'string' && v.startsWith('#')) {
       v = textures[v.slice(1)]
@@ -121,6 +124,7 @@ function resolveTexture(ref, textures) {
       v = textures[v]
     } else if (v && typeof v === 'object' && typeof v.sprite === 'string') {
       // 26.x 起纹理引用可以是对象 { sprite, force_translucent, ambientocclusion }
+      forceTranslucent ||= v.force_translucent === true
       v = v.sprite
     } else {
       break
@@ -130,7 +134,7 @@ function resolveTexture(ref, textures) {
   let s = v
   if (s.includes(':')) s = s.split(':').slice(-1)[0]
   s = s.replace(/^textures\//, '')
-  return s
+  return { texKey: s, forceTranslucent }
 }
 
 function autoUV(dir, from, to) {

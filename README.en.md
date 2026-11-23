@@ -19,6 +19,7 @@ Preview Minecraft `.litematic` / `.litematica` schematics—building blueprints 
 - Actual block textures, with support for **ZIP resource packs**.
 - Complete block models, including stairs, fences, doors, redstone components and rails; hidden-face culling and geometry batching by texture.
 - Grass, foliage, water and lava tinting; translucent fluid rendering, underwater fog, water flow directions and bubble columns.
+- Glass, all 16 stained colours, tinted glass and panes preserve texture alpha, hide matching joins and blend overlapping faces, including items and frames; model translucency flags and resource packs are supported.
 - Special blocks: bells, enchanting table books, conduits, animated end portals and gateways, waving banners, decorated pots with sherd patterns, chiseled bookshelves, copper golem statues and more.
 - Entities: minecarts, boats, cushions, sign text, player heads with actual skins and item frames.
 - Passengers: reads nested `Passengers` from schematics to display mobs riding minecarts, boats, bamboo rafts and cushions, including two boat passengers, baby passengers, seated poses and equipment.
